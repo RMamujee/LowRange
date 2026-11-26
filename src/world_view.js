@@ -7,7 +7,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from './terrain.js';
 import { buildSetDressing, gridClearance } from './art/dressing.js';
 import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals, visualSurface } from './gfx/terrain_look.js';
-import { FOG } from './gfx/palette.js';
+import { BACKDROP } from './gfx/palette.js';
+import { cullBeyond } from './gfx/pipeline.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -41,15 +42,14 @@ export function buildTerrainMesh() {
 }
 
 // Distant ranges beyond the map edge: three rings of soft mountain silhouettes, flat colours that
-// step from muted hill green towards the haze, nearest to farthest (no lighting, no fog, no
-// outlines), so the horizon reads as painted layers of hills behind hills.
+// step from hill green towards the sky, nearest to farthest (no lighting, no fog, no outlines),
+// so the horizon reads as painted layers of hills behind hills with clean value steps.
 export function buildBackdrop() {
   const g = new THREE.Group(); g.name = 'backdrop';
-  const hill = new THREE.Color(0x8c9a5c), haze = new THREE.Color(FOG);
   const LAYERS = [
-    { r: SIZE * 0.78, top: 38, amp: 34, f: 2.2, seed: 3, haze: 0.5 },
-    { r: SIZE * 1.08, top: 62, amp: 42, f: 1.7, seed: 11, haze: 0.68 },
-    { r: SIZE * 1.45, top: 92, amp: 50, f: 1.3, seed: 23, haze: 0.84 },
+    { r: SIZE * 0.78, top: 38, amp: 34, f: 2.2, seed: 3, col: BACKDROP[0] },
+    { r: SIZE * 1.08, top: 62, amp: 42, f: 1.7, seed: 11, col: BACKDROP[1] },
+    { r: SIZE * 1.45, top: 92, amp: 50, f: 1.3, seed: 23, col: BACKDROP[2] },
   ];
   const SEG = 240;
   for (const L of LAYERS) {
@@ -65,7 +65,7 @@ export function buildBackdrop() {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: hill.clone().lerp(haze, L.haze), fog: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: L.col, fog: false, side: THREE.DoubleSide }));
     m.frustumCulled = false;
     g.add(m);
   }
@@ -92,10 +92,32 @@ export function buildRocks(rocks) {
 // trees (on their physics colliders) plus all the decorative set dressing (src/art/dressing.js);
 // bushes and tufts follow the surface the ground shows, so green slopes get the bushes
 export function buildTrees(trees) {
-  return buildSetDressing({
+  const root = buildSetDressing({
     size: SIZE, heightAt: visualHeightAt, matAt: visualSurface({ GRID, RES, SIZE, MAT }).materialAt, trees,
     clear: gridClearance({ size: SIZE, res: RES, path: GRID.path }, TRAILHEAD),
     paths: [...ROADS, ...TRAILS], trailhead: TRAILHEAD,
+  });
+  calmDistantDetail(root);
+  return root;
+}
+
+// Eye comfort at a distance (see gfx/toon.js fadePatch, gfx/pipeline.js cullBeyond): small
+// scatter (tufts, flowers, stones, bushes) thins out with distance, each kind by its size, so
+// nothing is drawn once it would be only two or three pixels big (sub-pixel things only crawl);
+// chunks past the far end are skipped outright.
+const SCATTER = new Set(['tufts', 'flowers', 'stones', 'bushes']);
+function calmDistantDetail(root) {
+  const clones = new Map();
+  root.traverse((o) => {
+    if (!o.isInstancedMesh || !o.parent || !SCATTER.has(o.parent.name)) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    const S = 2 * o.geometry.boundingSphere.radius; // size in metres (instances are scaled about 0.7 to 1.4)
+    const fade = [90 * S, 150 * S];
+    // (the glTF props share one atlas material: each size gets its own copy)
+    const key = `${o.material.uuid}|${S.toFixed(2)}`;
+    if (!clones.has(key)) { const m = o.material.clone(); m.userData.fade = fade; clones.set(key, m); }
+    o.material = clones.get(key);
+    cullBeyond(o, fade[1]);
   });
 }
 

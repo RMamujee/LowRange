@@ -11,18 +11,20 @@
 // surface, then snap that to 3 bands (warm hue-shifted shade, lit, highlight). Undersides get a
 // slightly deeper shade so forms read as light tops / dark bases. Specular is dropped (flat paint).
 import * as THREE from 'three';
-import { GROUND_GLSL, groundTextureArray, LAYER_BOULDER } from './pixeltex.js';
+import { GROUND_GLSL, groundUniforms, LAYER_BOULDER } from './pixeltex.js';
+import { FOG_MAX } from './palette.js';
 
 const col = (hex) => new THREE.Color(hex); // stored linear (ColorManagement converts from sRGB hex)
 
 // Shared uniform objects: every patched program references these, so one write retunes all.
 export const TOON = {
   uSunRad: { value: new THREE.Color(1, 1, 1) },     // sun colour * intensity (linear), set per render
-  uToonShade: { value: col(0xccb0a8) },             // multiplier in shadow: warm, nudged towards mauve, not too dark
+  uToonShade: { value: col(0xc0a29e) },             // multiplier in shadow: warm, nudged towards mauve; deep enough that forms and cast shadows read
   uToonLit: { value: col(0xfff8ec) },               // multiplier when lit
   uToonHi: { value: col(0xfffbe8) },                // multiplier on the brightest, sun-facing band
   uToonUnder: { value: 0.82 },                      // extra shade factor for down-facing surfaces
   uToonBands: { value: new THREE.Vector2(0.22, 0.86) }, // lit thresholds: shade|lit, lit|highlight
+  uFogMax: { value: FOG_MAX },                      // fog never takes more than this share of a surface
 };
 
 const FRAG = /* glsl */ `
@@ -46,6 +48,11 @@ const FRAG = /* glsl */ `
 #endif
 #include <opaque_fragment>
 if (uOutlineId >= 0.0) gl_FragColor.a = uOutlineId;`;
+// fog as light aerial perspective: capped, so far hills lean towards the haze but keep their colour
+const FOG_FRAG = /* glsl */ `
+#ifdef USE_FOG
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, smoothstep(fogNear, fogFar, vFogDepth) * uFogMax);
+#endif`;
 
 // Outline ids. Opaque surfaces write an integer id into the (otherwise unused) alpha of the
 // pipeline's half-float target; the outline pass draws a line where ids change, so a boulder
@@ -61,9 +68,29 @@ const outlineId = (m) => (m.transparent ? -1 : m.userData.outlineId ?? 3 + (m.id
 export function toonPatch(shader, material) {
   Object.assign(shader.uniforms, TOON);
   shader.uniforms.uOutlineId = { value: outlineId(material) }; // per material
+  if (material.userData.fade) fadePatch(shader, material.userData.fade);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform vec3 uSunRad, uToonShade, uToonLit, uToonHi;\nuniform float uToonUnder, uOutlineId;\nuniform vec2 uToonBands;')
-    .replace('#include <opaque_fragment>', FRAG);
+    .replace('#include <common>', '#include <common>\nuniform vec3 uSunRad, uToonShade, uToonLit, uToonHi;\nuniform float uToonUnder, uOutlineId, uFogMax;\nuniform vec2 uToonBands;')
+    .replace('#include <opaque_fragment>', FRAG)
+    .replace('#include <fog_fragment>', FOG_FRAG);
+}
+
+// Distance thinning for small instanced scatter (grass tufts, flowers, pebbles): material.userData
+// .fade = [near, far]. Each instance disappears at its own distance between near and far (hashed
+// from its position, fixed in the world), so a field of tufts thins out gradually instead of
+// turning into one-pixel speckle that crawls as the camera moves.
+function fadePatch(shader, [near, far]) {
+  shader.uniforms.uFade = { value: new THREE.Vector2(near, far) };
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform vec2 uFade;')
+    .replace('#include <project_vertex>', `#include <project_vertex>
+      #ifdef USE_INSTANCING
+      {
+        vec3 io = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float h = fract(sin(dot(floor(io.xz * 4.0), vec2(12.9898, 78.233))) * 43758.5453);
+        if (distance(io, cameraPosition) > mix(uFade.x, uFade.y, h)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      }
+      #endif`);
 }
 
 // Pixel detail for untextured, vertex-coloured props (the procedural trees, bushes, logs, stones,
@@ -76,7 +103,7 @@ function wantsDetail(m) {
   return !m.map && (m.userData.pixelDetail === true || (m.userData.pixelDetail !== false && m.name === 'dressing_solid'));
 }
 function detailPatch(shader) {
-  shader.uniforms.uGround = { value: groundTextureArray() };
+  Object.assign(shader.uniforms, groundUniforms());
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vDPos;\nvarying vec3 vDNrm;')
     .replace('#include <project_vertex>', `#include <project_vertex>
@@ -98,9 +125,25 @@ ${GROUND_GLSL}`)
         vec2 p = an.y > max(an.x, an.z) ? vDPos.xz : an.x > an.z ? vDPos.zy : vDPos.xy;
         float layer = diffuseColor.g > diffuseColor.r * 1.15 ? 0.0 : ${LAYER_BOULDER.toFixed(1)};
         const vec3 LUM = vec3(0.3, 0.59, 0.11);
-        float k = dot(groundTex(p, layer), LUM) / max(dot(textureLod(uGround, vec3(p / 4.0, layer), 7.0).rgb, LUM), 1e-3);
+        float k = dot(groundTex(p, layer), LUM) / max(dot(groundFlat(layer), LUM), 1e-3);
         diffuseColor.rgb *= clamp(mix(1.0, k, 0.85), 0.5, 1.5);
       }`);
+}
+
+// Crisp texels: textures sampled with a blend between two mip levels (NearestMipmapLinear, the
+// glTF loader's setting) mix neighbouring texel colours into soft in-between tones whenever a
+// texture is a little minified, which at this resolution is most of the time. Pick one mip
+// (NearestMipmapNearest): every screen pixel is then one real texel colour. Runs once per
+// material, the first time it is drawn (three asks every material for its program key then).
+const CRISP = ['map', 'emissiveMap'];
+function crispMaps(m) {
+  for (const k of CRISP) {
+    const t = m[k];
+    if (t && t.minFilter === THREE.NearestMipmapLinearFilter) { t.minFilter = THREE.NearestMipmapNearestFilter; t.needsUpdate = true; }
+    if (t && (t.minFilter === THREE.LinearMipmapLinearFilter || t.minFilter === THREE.LinearFilter) && t.userData.crisp !== false) {
+      t.minFilter = THREE.NearestMipmapNearestFilter; t.magFilter = THREE.NearestFilter; t.anisotropy = 1; t.needsUpdate = true;
+    }
+  }
 }
 
 let installed = false;
@@ -109,7 +152,10 @@ export function installToon() {
   installed = true;
   const proto = THREE.MeshStandardMaterial.prototype;
   proto.onBeforeCompile = function (shader) { toonPatch(shader, this); if (wantsDetail(this)) detailPatch(shader); };
-  proto.customProgramCacheKey = function () { return wantsDetail(this) ? 'toon+detail' : 'toon'; };
+  proto.customProgramCacheKey = function () {
+    crispMaps(this);
+    return (wantsDetail(this) ? 'toon+detail' : 'toon') + (this.userData.fade ? '+fade' : '');
+  };
 }
 
 // Call before rendering a scene lit by `sun` (a DirectionalLight).

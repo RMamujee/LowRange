@@ -1,4 +1,4 @@
-// Settings: graphics preset, master volume, fullscreen, FPS counter.
+// Settings: graphics preset, pixel size, master volume, fullscreen, FPS counter.
 // Self-contained: persists to localStorage, owns a small overlay (F10, or openSettings()),
 // and applies itself through initSettings({ renderer, scene, sun, camera, audio, pipeline }).
 //
@@ -10,15 +10,17 @@ const KEY = 'lowrange.settings.v1';
 
 // fogScale / farScale multiply whatever fog and camera far the scene was built with,
 // so retuning the world's look elsewhere doesn't fight these presets.
-// pixelHeight: internal render height of the pixel-art pipeline (src/gfx/pipeline.js); the canvas
-// is that, scaled up by a whole number. pixelRatio is only used when there is no pipeline.
+// pixelRatio is only used when there is no pipeline.
 export const PRESETS = {
-  low:    { label: 'Low',    pixelRatio: 1.0,  pixelHeight: 225, shadowMap: 1024, fogScale: 0.7,  farScale: 0.6 },
-  medium: { label: 'Medium', pixelRatio: 1.25, pixelHeight: 300, shadowMap: 2048, fogScale: 0.85, farScale: 0.8 },
-  high:   { label: 'High',   pixelRatio: 1.75, pixelHeight: 360, shadowMap: 2048, fogScale: 1.0,  farScale: 1.0 },
+  low:    { label: 'Low',    pixelRatio: 1.0,  shadowMap: 1024, fogScale: 0.7,  farScale: 0.6 },
+  medium: { label: 'Medium', pixelRatio: 1.25, shadowMap: 2048, fogScale: 0.85, farScale: 0.8 },
+  high:   { label: 'High',   pixelRatio: 1.75, shadowMap: 2048, fogScale: 1.0,  farScale: 1.0 },
 };
+// Pixel size of the pixel-art frame (src/gfx/pipeline.js): device pixels per game pixel on a
+// 1080-tall screen, scaled in proportion on others. Separate from the quality preset.
+export const PIXEL_SIZES = { 4: 'CHUNKY 4x', 3: '3x', 2: 'FINE 2x', 1: 'SHARP 1x' };
 
-const DEFAULTS = { quality: 'high', volume: 0.8, showFps: false };
+const DEFAULTS = { quality: 'high', pixelSize: 2, volume: 0.8, showFps: false };
 
 const desktop = () => (typeof window !== 'undefined' && window.lowrange && window.lowrange.isDesktop) ? window.lowrange : null;
 
@@ -27,6 +29,7 @@ function load() {
     const s = JSON.parse(localStorage.getItem(KEY) || '{}');
     return {
       quality: Object.hasOwn(PRESETS, s.quality) ? s.quality : DEFAULTS.quality,
+      pixelSize: Object.hasOwn(PIXEL_SIZES, s.pixelSize) ? +s.pixelSize : DEFAULTS.pixelSize,
       volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : DEFAULTS.volume,
       showFps: typeof s.showFps === 'boolean' ? s.showFps : DEFAULTS.showFps,
     };
@@ -45,6 +48,7 @@ export function getSettings() { return { ...state }; }
 export function setSetting(key, value) {
   if (!(key in DEFAULTS)) return;
   if (key === 'quality' && !Object.hasOwn(PRESETS, value)) return;
+  if (key === 'pixelSize') { if (!Object.hasOwn(PIXEL_SIZES, value)) return; value = +value; }
   if (key === 'volume') value = Math.min(1, Math.max(0, Number(value) || 0));
   if (key === 'showFps') value = !!value;
   state[key] = value;
@@ -59,7 +63,7 @@ export function onSettingsChange(fn) { listeners.add(fn); return () => listeners
 // ---- hooks: each can be called on its own ----
 export function applyGraphics({ renderer, scene, sun, camera, pipeline } = ctx || {}) {
   const p = Object.hasOwn(PRESETS, state.quality) ? PRESETS[state.quality] : PRESETS.high;
-  if (pipeline) pipeline.setPixelHeight(p.pixelHeight); // owns pixel ratio and canvas size
+  if (pipeline) pipeline.setPixelSize(state.pixelSize); // owns pixel ratio and canvas size
   else if (renderer) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelRatio));
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -106,7 +110,7 @@ export function initSettings(c) {
 const CSS = `
 #lrSettings { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(8,7,6,.6); font-family: var(--font, 'Segoe UI', system-ui, sans-serif); color: var(--ink, #e9e4d8); }
 #lrSettings.hidden { display: none; }
-#lrSettings .box { width: min(420px, 92vw); padding: 18px 20px; background: rgba(18,17,15,.94); border: 1px solid rgba(255,220,160,.16); border-radius: 6px; }
+#lrSettings .box { width: min(480px, 94vw); padding: 18px 20px; background: rgba(18,17,15,.94); border: 1px solid rgba(255,220,160,.16); border-radius: 6px; }
 #lrSettings h2 { margin: 0 0 14px; font-size: 13px; letter-spacing: .2em; font-weight: 600; color: var(--amber, #ffb340); }
 #lrSettings .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; font-size: 14px; }
 #lrSettings .seg { display: flex; gap: 4px; }
@@ -133,6 +137,9 @@ function mount() {
       <div class="row"><span>Graphics</span><span class="seg" data-k="quality">
         ${Object.entries(PRESETS).map(([k, p]) => `<button data-v="${k}">${p.label.toUpperCase()}</button>`).join('')}
       </span></div>
+      <div class="row"><span>Pixel size</span><span class="seg" data-k="pixelSize">
+        ${Object.entries(PIXEL_SIZES).map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}
+      </span></div>
       <div class="row"><span>Master volume <b data-vol></b></span><input type="range" min="0" max="100" step="1" data-k="volume"></div>
       <div class="row"><span>Fullscreen</span><button data-fs>TOGGLE</button></div>
       <div class="row"><span>Show FPS</span><input type="checkbox" data-k="showFps"></div>
@@ -143,6 +150,7 @@ function mount() {
   fsBtn = root.querySelector('[data-fs]');
 
   root.querySelectorAll('[data-k=quality] button').forEach((b) => b.addEventListener('click', () => setSetting('quality', b.dataset.v)));
+  root.querySelectorAll('[data-k=pixelSize] button').forEach((b) => b.addEventListener('click', () => setSetting('pixelSize', +b.dataset.v)));
   root.querySelector('[data-k=volume]').addEventListener('input', (e) => setSetting('volume', e.target.value / 100));
   root.querySelector('[data-k=showFps]').addEventListener('change', (e) => setSetting('showFps', e.target.checked));
   fsBtn.addEventListener('click', () => toggleFullscreen());
@@ -176,6 +184,7 @@ function mount() {
 async function syncUi() {
   if (!root) return;
   root.querySelectorAll('[data-k=quality] button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.quality));
+  root.querySelectorAll('[data-k=pixelSize] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === state.pixelSize));
   root.querySelector('[data-k=volume]').value = Math.round(state.volume * 100);
   volLbl.textContent = Math.round(state.volume * 100) + '%';
   root.querySelector('[data-k=showFps]').checked = state.showFps;
