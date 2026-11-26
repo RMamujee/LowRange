@@ -16,7 +16,7 @@ function setup(id, build){
 const box=(world,set,hx,hy,hz,x,y,z)=>{const c=world.createCollider(RAPIER.ColliderDesc.cuboid(hx,hy,hz).setTranslation(x,y,z).setFriction(1).setCollisionGroups(GROUP_WORLD)); set.add(c.handle); return c;};
 function drive({world,car}, secs, input, cb){ let t=0; for(let i=0;i<Math.round(secs/H);i++){car.step(input,H);t+=H; if(cb&&i%100===0)cb(t);} }
 const mode=process.argv[2]||'ledge';
-for (const id of ['goat','ranger','mule']){
+for (const id of ['goat','taco','mule']){
   if (mode==='ledge'){
     const res=[];
     for (const k of [0.6,0.9,1.2,1.5]){

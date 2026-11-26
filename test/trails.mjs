@@ -16,8 +16,8 @@ function pickLine(t,s,spec){ // lateral offset with most clearance from boulders
     c -= Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} }
   return bestO; }
 const terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
-const ids=(process.argv[2]||'goat,ranger,mule').split(',');
-const secs=+(process.argv[3]||120);
+const ids=(process.argv[2]||'goat,taco,mule').split(',');
+const secs=+(process.argv[3]||300); // rigs need ~120-220 s per trail at crawl pace
 for (const id of ids) {
   const spec=VEHICLES.find(v=>v.id===id); const res=[];
   for (const t of TRAILS.filter(t=>!process.argv[4]||t.diff===process.argv[4])) {
