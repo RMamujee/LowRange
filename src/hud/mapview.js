@@ -118,6 +118,39 @@ export function flagPin(g, x, y, n, active) {
   tiny(g, String(n), x + 4, y - 9, active ? P.cream : P.ink, { align: 'center' });
 }
 
+// [spawns] spawn point marker: a little wooden signpost with a "P" board; the post's foot is the spot
+export function spawnPin(g, x, y, hot) {
+  rect(g, x - 1, y, 3, 1, P.ol);                       // foot
+  rect(g, x, y - 5, 1, 5, P.ol);                       // post
+  rect(g, x - 4, y - 13, 9, 8, P.ol);                  // board
+  rect(g, x - 3, y - 12, 7, 6, hot ? P.amber : P.w2);
+  rect(g, x - 3, y - 12, 7, 1, hot ? P.amberHi : P.w4);
+  rect(g, x - 3, y - 7, 7, 1, hot ? P.amberDark : P.w1);
+  tiny(g, 'P', x - 1, y - 12, hot ? P.ink : P.cream);
+}
+// small "P" board for list rows (7 x 7)
+function spawnIcon(g, x, y, hot) {
+  rect(g, x, y, 7, 7, P.ol); rect(g, x + 1, y + 1, 5, 5, hot ? P.amber : P.w2); rect(g, x + 1, y + 1, 5, 1, hot ? P.amberHi : P.w4);
+  rect(g, x + 2, y + 2, 1, 4, P.cream); rect(g, x + 3, y + 2, 2, 1, P.cream); rect(g, x + 4, y + 3, 1, 1, P.cream); rect(g, x + 3, y + 4, 2, 1, P.cream);
+}
+// wooden button with tiny text; returns its width
+function woodButton(g, x, y, label, hot) {
+  const bw = tinyMeasure(label) + 8;
+  rect(g, x, y, bw, 10, P.ol); rect(g, x + 1, y + 1, bw - 2, 8, hot ? P.amber : P.w3); rect(g, x + 1, y + 1, bw - 2, 1, hot ? P.amberHi : P.w5);
+  tiny(g, label, x + 4, y + 3, P.ink);
+  return bw;
+}
+// greedy word wrap for the tiny font
+function tinyWrap(text, maxW) {
+  const out = []; let line = '';
+  for (const w of String(text).toUpperCase().split(/\s+/)) {
+    const t = line ? line + ' ' + w : w;
+    if (tinyMeasure(t) <= maxW || !line) line = t; else { out.push(line); line = w; }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
 // ------------------------------------------------------------------ minimap (player-centred, north up)
 export class MapBases {
   constructor(trees) { this.trees = trees; this.b = {}; }
@@ -150,13 +183,25 @@ export function drawMinimap(g, x, y, S, { bases, p, heading, waypoints, raceCp, 
 
 // ------------------------------------------------------------------ the big map
 export class BigMap {
-  constructor({ bases, waypoints, isRace, mapName }) {
-    Object.assign(this, { bases, waypoints, isRace, mapName });
+  constructor({ bases, waypoints, isRace, mapName, spawns = [] }) {
+    Object.assign(this, { bases, waypoints, isRace, mapName, spawns });
     this.VW = 300; this.VH = 200; this.SB = 116;
     this.W = 6 + this.VW + 4 + this.SB + 6; this.H = 6 + 14 + this.VH + 6;
     this.zooms = [0.5, 1, 2, 4]; this.zi = 0; this.cx = 0; this.cz = 0;
     this.mx = 6; this.my = 20; this.hits = [];
+    // [spawns] sidebar tab ('info' | 'spawn'), list selection / hover / scroll, the confirm prompt
+    this.tab = 'info'; this.sel = -1; this.hover = -1; this.rowHover = -1; this.scroll = 0; this.prompt = -1; this.lastId = null;
+    this.markerHits = []; this.promptHits = []; this.promptBox = null; this.list = null;
   }
+  // [spawns] keep the selected row inside the scrolled list
+  revealSel() {
+    const L = this.list; if (!L || this.sel < 0) return;
+    const row = L.rows.find((r) => r.i === this.sel); if (!row) return;
+    if (row.y - L.top < this.scroll) this.scroll = row.y - L.top - (row.first ? 11 : 0);
+    if (row.y + 9 - L.top > this.scroll + L.h) this.scroll = row.y + 9 - L.top - L.h;
+    this.scroll = clamp(this.scroll, 0, Math.max(0, L.content - L.h));
+  }
+  scrollBy(d) { const L = this.list; if (L) this.scroll = clamp(this.scroll + d, 0, Math.max(0, L.content - L.h)); }
   get z() { return this.zooms[this.zi]; }
   centreOn(x, z) { this.cx = x; this.cz = z; }
   // view <-> world for the current frame (base pixel aligned)
@@ -200,6 +245,17 @@ export class BigMap {
       tiny(g, lab, zx + ox + 5, 8, P.ink, { align: 'center' });
       this.hits.push({ x: zx + ox, y: 5, w: 10, h: 11, act: d > 0 ? 'zin' : 'zout' });
     }
+    // [spawns] sidebar tabs: map info / spawn point list
+    if (this.spawns.length) {
+      let tx = zx - 8;
+      for (const [lab, tab] of [['SPAWN POINTS', 'spawn'], ['INFO', 'info']]) {
+        const bw = tinyMeasure(lab) + 8; tx -= bw;
+        woodButton(g, tx, 5, lab, this.tab === tab);
+        if (this.tab === tab) rect(g, tx + 1, 14, bw - 2, 1, P.amberDark);
+        this.hits.push({ x: tx, y: 5, w: bw, h: 11, act: 'tab', tab });
+        tx -= 3;
+      }
+    }
     // map viewport
     inset(g, mx - 1, my - 1, VW + 2, VH + 2, '#c89a48');
     const f = this.frame();
@@ -212,15 +268,7 @@ export class BigMap {
     const placed = [];
     TRAILS.forEach((t, i) => {
       const s = st.trails[i], act = st.active && st.active.trail === i;
-      if (t.stages) { // [crawl] numbered stage gates, the next one highlighted
-        const cur = st.crawl ? st.crawl.stage : 0;
-        for (const q of t.stages) {
-          const [gx, gy] = V(q.gate.x, q.gate.z), next = q.n === cur + 1, done = q.n <= cur;
-          rect(g, gx - 4, gy - 4, 9, 9, P.ol); rect(g, gx - 3, gy - 3, 7, 7, next ? P.amber : done ? P.green : P.paper);
-          tiny(g, String(q.n), gx + 1, gy - 2, P.ink, { align: 'center' });
-        }
-      } else for (const end of [3, t.length - 3]) { const e = pathPoint(t, end); const [ex, ey] = V(e.x, e.z); diffSym(g, t.diff, ex, ey); }
-      const m = pathPoint(t, t.length / 2), [lx, ly] = V(m.x, m.z);
+      const m =pathPoint(t, t.length / 2), [lx, ly] = V(m.x, m.z);
       let label = t.name.toUpperCase();
       if (act) label += ' ' + fmtT(st.active.t);
       else if (s.done) label += ' ' + fmtT(s.best);
@@ -245,7 +293,32 @@ export class BigMap {
       const c0 = CHECKPOINTS[0], [sx, sy] = V(c0.x, c0.z);
       labelBox(g, 'START', sx, sy + 8, P.ink);
     }
+    // [spawns] spawn point signposts (hover / selection / prompt light them up and name them)
+    this.markerHits = [];
+    const hot = (i) => i === this.hover || i === this.prompt || (this.tab === 'spawn' && i === this.sel);
+    const order = this.spawns.map((_, i) => i).sort((a, b) => (hot(a) ? 1 : 0) - (hot(b) ? 1 : 0)); // lit ones on top
+    for (const i of order) {
+      const sp = this.spawns[i], [sx, sy] = V(sp.x, sp.z);
+      if (sx < mx - 6 || sx > mx + VW + 6 || sy < my - 2 || sy > my + VH + 14) continue;
+      spawnPin(g, sx, sy, hot(i));
+      this.markerHits.push({ x: sx - 5, y: sy - 14, w: 11, h: 16, i });
+    }
+    // trail-end symbols / numbered stage gates go over the signposts' posts (spawns sit just before them)
+    TRAILS.forEach((t) => {
+      if (t.stages) { // [crawl] numbered stage gates, the next one highlighted
+        const cur = st.crawl ? st.crawl.stage : 0;
+        for (const q of t.stages) {
+          const [gx, gy] = V(q.gate.x, q.gate.z), next = q.n === cur + 1, done = q.n <= cur;
+          rect(g, gx - 4, gy - 4, 9, 9, P.ol); rect(g, gx - 3, gy - 3, 7, 7, next ? P.amber : done ? P.green : P.paper);
+          tiny(g, String(q.n), gx + 1, gy - 2, P.ink, { align: 'center' });
+        }
+      } else for (const end of [3, t.length - 3]) { const e = pathPoint(t, end); const [ex, ey] = V(e.x, e.z); diffSym(g, t.diff, ex, ey); }
+    });
     this.waypoints.list.forEach((w, i) => { const [wx, wy] = V(w.x, w.z); flagPin(g, wx, wy, i + 1, i === 0); });
+    {
+      const ni = this.hover >= 0 ? this.hover : this.prompt < 0 && this.tab === 'spawn' ? this.sel : -1;
+      if (ni >= 0 && this.spawns[ni]) { const sp = this.spawns[ni], [sx, sy] = V(sp.x, sp.z); labelBox(g, sp.name.toUpperCase(), clamp(sx, mx + tinyMeasure(sp.name) / 2 + 4, mx + VW - tinyMeasure(sp.name) / 2 - 4), sy - 24 < my + 1 ? sy + 3 : sy - 24, P.ink); }
+    }
     // player
     const [ppx, ppy] = V(st.p.x, st.p.z);
     rotSprite(g, ARROW_L, ppx, ppy, -st.heading);
@@ -259,6 +332,8 @@ export class BigMap {
     paper(g, sx0, sy0, sw, sh, 7);
     let y = sy0 + 4;
     const head = (txt) => { tiny(g, txt, sx0 + 5, y, P.redDark); for (let i = sx0 + 5; i < sx0 + sw - 5; i += 2) px(g, i, y + 7, P.inkSoft); y += 10; };
+    if (this.tab === 'spawn' && this.spawns.length) { this.drawSpawnList(g, sx0, sy0, sw, sh); this.drawPrompt(g, f); return; } // [spawns]
+    this.list = null;
     if (!this.isRace && TRAILS.length === 1 && TRAILS[0].stages) {
       // [crawl] stage list: symbol, number + name, this run's split (or the rig's best split)
       const c = st.crawl || { stage: 0, splits: [], bestSplits: [] };
@@ -324,6 +399,89 @@ export class BigMap {
     const hints = ['CLICK  SET WAYPOINT', 'RIGHT-CLICK  REMOVE', 'DRAG  PAN', 'WHEEL  ZOOM', 'M / ESC  CLOSE'];
     let hy = sy0 + sh - 5 - hints.length * 8;
     for (const h of hints) { const [k, v] = h.split('  '); tiny(g, k, sx0 + 5, hy, P.redDark); tiny(g, v, sx0 + sw - 5, hy, P.inkSoft, { align: 'right' }); hy += 8; }
+    this.drawPrompt(g, f); // [spawns]
+  }
+
+  // [spawns] the spawn point list: grouped (trailhead, trails by difficulty, stages, checkpoints),
+  // scrollable, one row per point; rows are hit targets (act 'spawnrow')
+  drawSpawnList(g, sx0, sy0, sw, sh) {
+    const hints = ['CLICK / ENTER  SPAWN', 'UP / DOWN  SELECT', 'J / ESC  CLOSE'];
+    let y = sy0 + 4;
+    tiny(g, `SPAWN POINTS ${this.spawns.length}`, sx0 + 5, y, P.redDark); for (let i = sx0 + 5; i < sx0 + sw - 5; i += 2) px(g, i, y + 7, P.inkSoft);
+    y += 11;
+    const top = y, bottom = sy0 + sh - 7 - hints.length * 8, h = bottom - top;
+    // layout (content coordinates)
+    const rows = [];
+    let cy = top, group = null;
+    this.spawns.forEach((sp, i) => {
+      const first = sp.group !== group;
+      if (first) { group = sp.group; rows.push({ head: true, y: cy, group: sp.group, diff: sp.kind === 'trail' ? sp.diff : null, label: sp.groupLabel || sp.group.toUpperCase() }); cy += 10; }
+      rows.push({ i, y: cy, first }); cy += 9;
+    });
+    const content = cy - top;
+    this.list = { top, h, content, rows };
+    this.scroll = clamp(this.scroll, 0, Math.max(0, content - h));
+    g.save(); g.beginPath(); g.rect(sx0 + 1, top - 1, sw - 2, h + 1); g.clip();
+    for (const r of rows) {
+      const ry = r.y - this.scroll;
+      if (ry + 10 < top || ry > bottom) continue;
+      if (r.head) {
+        tiny(g, r.label, sx0 + 5, ry, P.inkSoft);
+        for (let i = sx0 + 7 + tinyMeasure(r.label); i < sx0 + sw - 6; i += 2) px(g, i, ry + 3, P.paperEdge);
+        continue;
+      }
+      const sp = this.spawns[r.i], sel = r.i === this.sel, hov = r.i === this.rowHover;
+      if (sel || hov) rect(g, sx0 + 2, ry - 2, sw - 6, 9, sel ? P.paperShade : '#f0dcaa');
+      if (sel) rect(g, sx0 + 2, ry - 2, 1, 9, P.red);
+      if (sp.kind === 'stage' || sp.kind === 'summit' || sp.kind === 'trail') diffSym(g, sp.diff, sx0 + (sp.diff === 'dblack' ? 10 : 9), ry + 2);
+      else if (sp.kind === 'checkpoint') { rect(g, sx0 + 5, ry - 2, 9, 9, P.ol); rect(g, sx0 + 6, ry - 1, 7, 7, P.paper); tiny(g, String(sp.cp), sx0 + 10, ry, P.ink, { align: 'center' }); }
+      else spawnIcon(g, sx0 + 6, ry - 1, sel);
+      const last = sp.id === this.lastId && !sp.default, tag = sp.tag || (last ? 'LAST' : '');
+      const maxW = sw - 24 - (tag ? tinyMeasure(tag) + 5 : 0);
+      let label = sp.short || sp.name.toUpperCase();
+      if (tinyMeasure(label) > maxW) { while (label.length > 2 && tinyMeasure(label + '.') > maxW) label = label.slice(0, -1); label += '.'; }
+      tiny(g, label, sx0 + 18, ry, sel ? P.redDark : P.ink);
+      if (tag) tiny(g, tag, sx0 + sw - 6, ry, last ? P.redDark : P.inkSoft, { align: 'right' });
+      if (last && sp.tag) rect(g, sx0 + 3, ry + 1, 2, 3, P.red); // last used, on a row whose tag is taken
+      if (ry >= top - 2 && ry + 7 <= bottom + 1) this.hits.push({ x: sx0 + 2, y: ry - 2, w: sw - 6, h: 9, act: 'spawnrow', i: r.i });
+    }
+    g.restore();
+    // scrollbar
+    if (content > h) {
+      const th = Math.max(8, Math.round((h * h) / content)), ty = top + Math.round((this.scroll / (content - h)) * (h - th));
+      rect(g, sx0 + sw - 4, top, 2, h, P.paperShade); rect(g, sx0 + sw - 4, ty, 2, th, P.inkSoft);
+    }
+    let hy = sy0 + sh - 5 - hints.length * 8;
+    for (const hn of hints) { const [k, v] = hn.split('  '); tiny(g, k, sx0 + 5, hy, P.redDark); tiny(g, v, sx0 + sw - 5, hy, P.inkSoft, { align: 'right' }); hy += 8; }
+  }
+
+  // [spawns] parchment prompt over the map: "Spawn here?", the point's name and note, SPAWN / CANCEL
+  drawPrompt(g, f) {
+    this.promptHits = []; this.promptBox = null;
+    const sp = this.spawns[this.prompt];
+    if (!sp) return;
+    const { mx, my, VW, VH } = this;
+    const name = sp.name.toUpperCase(), note = sp.note ? tinyWrap(sp.note, 150) : [];
+    const w = Math.max(tinyMeasure(name), tinyMeasure('ENTER / CLICK TO CONFIRM'), ...note.map(tinyMeasure), 96) + 14;
+    const h = 46 + note.length * 7;
+    const [vx, vy] = this.toView(f, sp.x, sp.z);
+    let x = Math.round(vx - w / 2), y = Math.round(vy - 18 - h);
+    if (y < my + 2) y = Math.round(vy + 6);
+    x = clamp(x, mx + 2, mx + VW - w - 2); y = clamp(y, my + 2, my + VH - h - 2);
+    rect(g, x + 2, y + 2, w, h, 'rgba(42,26,20,0.45)');   // drop shadow
+    rect(g, x - 1, y - 1, w + 2, h + 2, P.ol);
+    paper(g, x, y, w, h, 17);
+    let ty = y + 5;
+    tiny(g, 'SPAWN HERE?', x + w / 2, ty, P.redDark, { align: 'center' }); ty += 9;
+    tiny(g, name, x + w / 2, ty, P.ink, { align: 'center' }); ty += 8;
+    for (const l of note) { tiny(g, l, x + w / 2, ty, P.inkSoft, { align: 'center' }); ty += 7; }
+    ty += 2;
+    const bw1 = tinyMeasure('SPAWN') + 8, bw2 = tinyMeasure('CANCEL') + 8, bx = Math.round(x + w / 2 - (bw1 + bw2 + 6) / 2);
+    woodButton(g, bx, ty, 'SPAWN', true); this.promptHits.push({ x: bx, y: ty, w: bw1, h: 10, act: 'confirm' });
+    woodButton(g, bx + bw1 + 6, ty, 'CANCEL', false); this.promptHits.push({ x: bx + bw1 + 6, y: ty, w: bw2, h: 10, act: 'cancel' });
+    ty += 13;
+    tiny(g, 'ENTER / CLICK TO CONFIRM', x + w / 2, ty, P.paperEdge, { align: 'center' });
+    this.promptBox = { x: x - 1, y: y - 1, w: w + 2, h: h + 2 };
   }
 }
 
