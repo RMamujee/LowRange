@@ -97,8 +97,9 @@ export function buildOptions(base) {
 }
 
 // Fill gaps / drop stale values (e.g. old localStorage) so every key holds a legal choice.
-export function sanitizeBuild(base, build = {}) {
+export function sanitizeBuild(base, build) {
   const out = defaultBuild(base);
+  if (!build || typeof build !== 'object') return out; // null / string / number from corrupted storage
   for (const g of buildOptions(base)) for (const it of g.items) {
     if (it.choices.some((c) => c.value === build[it.key])) out[it.key] = build[it.key];
   }
@@ -204,7 +205,11 @@ const store = () => { try { return typeof localStorage !== 'undefined' ? localSt
 function readAll() {
   const ls = store();
   if (!ls) return {};
-  try { return JSON.parse(ls.getItem(KEY) || '{}') || {}; } catch { return {}; }
+  try {
+    const all = JSON.parse(ls.getItem(KEY) || '{}');
+    // anything but a plain object (e.g. "5", "[]", a bare string) would make saveBuild throw or drop builds
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch { return {}; }
 }
 export function loadBuild(base) { return sanitizeBuild(base, readAll()[base.id]); }
 export function saveBuild(base, build) {
