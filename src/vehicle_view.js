@@ -455,14 +455,78 @@ function useVehicleAsset(view, spec) {
   });
   view.body.add(body);
   const wheel = vehicleNode(spec.id, 'Wheel');
-  if (wheel) view.wheels.forEach((w, i) => {
-    w.children.forEach((c) => { c.visible = false; });
-    const m = i ? wheel.clone(true) : wheel;
-    if (i % 2 === 0) m.scale.x *= -1; // left side: mirror
-    w.add(m);
-  });
+  if (wheel) {
+    // garage tyre sizes: stretch the modelled tyre to the physics tyre
+    const { tyre_radius: r0, tyre_width: w0 } = wheel.userData;
+    const sr = r0 ? spec.tire.radius / r0 : 1, sw = w0 ? spec.tire.width / w0 : 1;
+    if (spec.rimColor != null) tintWheelRim(wheel, spec.rimColor, r0 || spec.tire.radius);
+    view.assetWheel = true;
+    view.wheels.forEach((w, i) => {
+      w.children.forEach((c) => { c.visible = false; });
+      // clone from the pristine node: cloning after mirroring wheel 0 copied its flipped scale,
+      // so FR/RR came out mirrored (bare inner face outwards) and RL un-mirrored
+      const m = wheel.clone(true);
+      m.scale.set(i % 2 === 0 ? -sw : sw, sr, sr); // modelled as the right wheel: mirror for the left side
+      m.userData.wheelAsset = true;
+      w.add(m);
+    });
+  }
   view.assetAxles = ['AxleFront', 'AxleRear'].map((n) => vehicleNode(spec.id, n));
   view.assetHub = vehicleNode(spec.id, 'Hub');
+}
+
+// Garage rim colour on a glTF wheel (one textured mesh). Its rim faces move into a child mesh
+// whose texture is the wheel texture recoloured to `color`, keeping the light/dark detail; the
+// tyre keeps the original material. Rim faces: everything inside 0.55 R, plus faces further out
+// whose texel colour never appears on the tread/outer sidewall (bright rim lips).
+function tintWheelRim(wheel, color, R) {
+  if (typeof document === 'undefined') return;
+  const meshes = [];
+  wheel.traverse((o) => { if (o.isMesh && o.geometry.index && o.geometry.attributes.uv && o.material.map?.image) meshes.push(o); });
+  for (const mesh of meshes) {
+    const g = mesh.geometry, mat = mesh.material, img = mat.map.image;
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const cx = cv.getContext('2d');
+    cx.drawImage(img, 0, 0);
+    const data = cx.getImageData(0, 0, cv.width, cv.height);
+    const px = data.data;
+    const pos = g.attributes.position, uv = g.attributes.uv, idx = g.index;
+    const faces = [];
+    for (let f = 0; f < idx.count; f += 3) {
+      let r = 0, u = 0, v = 0;
+      for (let k = 0; k < 3; k++) { const i = idx.getX(f + k); r += Math.hypot(pos.getY(i), pos.getZ(i)); u += uv.getX(i); v += uv.getY(i); }
+      const tx = THREE.MathUtils.clamp(Math.floor((u / 3) * cv.width), 0, cv.width - 1);
+      const ty = THREE.MathUtils.clamp(Math.floor((mat.map.flipY ? 1 - v / 3 : v / 3) * cv.height), 0, cv.height - 1);
+      const o = (ty * cv.width + tx) * 4;
+      faces.push({ f, r: r / 3 / R, key: (px[o] >> 4) << 8 | (px[o + 1] >> 4) << 4 | (px[o + 2] >> 4), lum: (0.3 * px[o] + 0.59 * px[o + 1] + 0.11 * px[o + 2]) / 255 });
+    }
+    const tyreKeys = new Set(faces.filter((t) => t.r >= 0.85).map((t) => t.key));
+    const rim = [], tyre = [];
+    let lref = 0;
+    for (const t of faces) {
+      const isRim = t.r < 0.55 || (t.r < 0.85 && !tyreKeys.has(t.key));
+      for (let k = 0; k < 3; k++) (isRim ? rim : tyre).push(idx.getX(t.f + k));
+      if (isRim) lref += t.lum;
+    }
+    if (!rim.length) continue;
+    lref = Math.max(0.04, lref / (rim.length / 3));
+    const c = new THREE.Color(color); // sRGB components, like the texture bytes
+    for (let o = 0; o < px.length; o += 4) {
+      const k = THREE.MathUtils.clamp((0.3 * px[o] + 0.59 * px[o + 1] + 0.11 * px[o + 2]) / 255 / lref, 0.45, 1.4);
+      px[o] = Math.min(255, c.r * 255 * k); px[o + 1] = Math.min(255, c.g * 255 * k); px[o + 2] = Math.min(255, c.b * 255 * k);
+    }
+    cx.putImageData(data, 0, 0);
+    const map = new THREE.CanvasTexture(cv);
+    for (const k of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'magFilter', 'minFilter']) map[k] = mat.map[k];
+    const rimMat = mat.clone();
+    rimMat.name = mat.name + '_rim'; rimMat.map = map;
+    const sub = (list) => { const s = new THREE.BufferGeometry(); for (const [n, a] of Object.entries(g.attributes)) s.setAttribute(n, a); s.setIndex(list); return s; };
+    mesh.geometry = sub(tyre);
+    const rm = new THREE.Mesh(sub(rim), rimMat);
+    rm.name = 'WheelRim'; rm.castShadow = rm.receiveShadow = true;
+    mesh.add(rm);
+  }
 }
 
 const RIM = { taco: 0x8f7550, lc70: 0x6a6e74, wrx: 0xc9a43a, buggy: 0x3c3e42, truck: 0x6d6d4a };
@@ -669,6 +733,7 @@ export class VehicleView {
       const cast = box(0.1, R * 0.95, 0.12, axleMat, -side * G.bj, 0, 0);
       const arm = box(0.06, 0.05, R * 0.4, axleMat, -side * (G.bj + 0.02), -R * 0.15, R * 0.2); // steering arm
       g.add(disc, cal, cast, arm);
+      if (this.assetWheel) disc.visible = cal.visible = false; // the modelled wheel has its own rim centre
       this.root.add(g);
       return g;
     });
@@ -766,8 +831,8 @@ export class VehicleView {
     });
     if (this.assetHub) this.hubs.forEach((h, i) => {
       h.children.forEach((c) => { c.visible = false; });
-      const m = i ? this.assetHub.clone(true) : this.assetHub;
-      if (i % 2 === 0) m.scale.x *= -1;
+      const m = this.assetHub.clone(true);
+      if (i % 2 === 0) m.scale.x = -1;
       h.add(m);
     });
     const zf = -wb / 2;
