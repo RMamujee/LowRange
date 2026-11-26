@@ -1,6 +1,6 @@
 // Rough render cost: times the pixel pipeline (src/gfx/pipeline.js) against a plain full-res
 // render of the same scene, each followed by a 1 px readback so the GPU work is included.
-//   CHROME=... PORT=5199 [GPU=1] [QS='?map=race'] node test/perf.mjs
+//   CHROME=... PORT=5199 [GPU=1] [QS='?map=race'] [W=1920 H=969] [PIXEL=2] node test/perf.mjs
 // GPU=1 asks headless Chromium for the real GPU (D3D11); SW=1 forces SwiftShader (a CPU
 // rasteriser: fill-rate bound like a weak iGPU, so only the ratio between the two numbers means
 // anything); neither = the shots.mjs default flags.
@@ -13,6 +13,8 @@ const page = await browser.newPage({ viewport: { width: +(process.env.W || 1600)
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+// PIXEL=n: start with that pixel size setting (src/settings.js)
+if (process.env.PIXEL) await page.addInitScript((v) => localStorage.setItem('lowrange.settings.v1', JSON.stringify({ pixelSize: v })), +process.env.PIXEL);
 await page.goto(`http://localhost:${process.env.PORT || 5199}/${process.env.QS || ''}`);
 await page.waitForFunction(() => window.__game && window.__game.car, null, { timeout: 90000 });
 const r = await page.evaluate(async () => {

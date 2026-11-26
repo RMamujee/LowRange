@@ -25,7 +25,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { fbm } from '../maps/common.js';
-import { groundTextureArray, GROUND_GLSL as SAMPLE, LAYER_BOULDER } from './pixeltex.js';
+import { groundUniforms, GROUND_GLSL as SAMPLE, LAYER_BOULDER } from './pixeltex.js';
 import { toonPatch, OUTLINE_ID } from './toon.js';
 
 // Box blur of a (RES+1)^2 field, `passes` times with the given radius (separable).
@@ -89,7 +89,7 @@ export function visualSurface({ GRID, RES, SIZE, MAT }) {
     // the ring of steep hills at the map edge reads as far green slopes, not a wall of rock
     const edge = Math.min(1, Math.max(0, (Math.max(Math.abs(x), Math.abs(z)) - SIZE * 0.38) / (SIZE * 0.08)));
     if (s + mid * 0.14 > 0.72 + edge * 0.6) c = MAT.ROCK;                       // cliff bands, outcrops
-    else if (big * 0.9 + (s - 0.28) * 1.1 + mid * 0.12 > 0.2) c = MAT.DIRT;      // bare, steeper earth
+    else if (big * 0.9 + (s - 0.28) * 1.1 + mid * 0.12 - edge * 0.6 > 0.2) c = MAT.DIRT; // bare, steeper earth
     else c = MAT.GRASS;
     if (m === MAT.GRAVEL && s < 0.25) c = MAT.GRAVEL; // laid gravel (pits, pads) is flat: keep it
     cls[i] = c;
@@ -139,7 +139,7 @@ export function terrainMaterial({ GRID, RES, SIZE, NROADS, MAT }) {
   mat.userData.outlineId = OUTLINE_ID.GROUND;
   mat.onBeforeCompile = (shader) => {
     toonPatch(shader, mat);
-    shader.uniforms.uGround = { value: groundTextureArray() };
+    Object.assign(shader.uniforms, groundUniforms());
     shader.uniforms.uGrid = { value: grid };
     shader.uniforms.uGridInfo = { value: new THREE.Vector3(SIZE / 2, SIZE / RES, RES) };
     shader.vertexShader = shader.vertexShader
@@ -214,7 +214,7 @@ export function rockMaterial() {
   rockMat.userData.outlineId = OUTLINE_ID.ROCK;
   rockMat.onBeforeCompile = (shader) => {
     toonPatch(shader, rockMat);
-    shader.uniforms.uGround = { value: groundTextureArray() };
+    Object.assign(shader.uniforms, groundUniforms());
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');

@@ -42,13 +42,14 @@ await window.__loadStage?.('Fuelling up');
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
-const pixels = new PixelPipeline(renderer, { sky: SKY_BANDS }); // dithered golden sky where nothing is drawn
+const pixels = new PixelPipeline(renderer, { sky: SKY_BANDS }); // stepped, dithered sky where nothing is drawn
 pixels.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(SKY_COL); // warm golden haze (gfx/palette.js)
-scene.fog = new THREE.Fog(FOG_COL, 90, 330);
+scene.background = new THREE.Color(SKY_COL); // clear sky (gfx/palette.js)
+// [gfx clarity] light aerial perspective: starts well past the play area, capped (toon.js uFogMax)
+scene.fog = new THREE.Fog(FOG_COL, 140, 520);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 900);
 
 scene.add(new THREE.HemisphereLight(0xfff1dc, 0x5a4a38, 1.25));
