@@ -7,7 +7,7 @@ State of the project for the next working session, which will have the Blender M
 | Area | State |
 |---|---|
 | Physics | Custom tyre and drivetrain solver on Rapier. Solid axles and independent suspension, manual gearbox, high/low range, lockers, LSD and traction control, damage. Verified by the `test/*.mjs` suite. |
-| Maps | **Trail Park** (graded roads plus 5 rated trails) and **Race Track** ("Dust Bowl Circuit": laps, checkpoints, countdown, best laps). Select in the menu; the `?map=race` URL parameter loads the track directly. |
+| Maps | **Trail Park** (graded roads plus 5 rated trails) and **Race Track** ("Dust Bowl Circuit": laps, checkpoints, countdown, best laps). Select in the menu; the `?map=race` URL parameter loads the track directly. **The Gauntlet** (`?map=crawl`, `src/maps/crawl.js`): one 783 m, 12-stage test trail that keeps getting harder, with stage gates, splits, per-rig bests, a bypass track with spurs, and Y back to the current stage's gate (`src/crawl_course.js`, `src/crawl_view.js`). |
 | Garage | Tyres, tread, lift, springs, damping, travel, engine, gearing, diffs, armour and paint, saved per rig (`src/garage.js`, `src/garage_ui.js`). |
 | Loading screen | Pixel-art "LowRange" title scene with staged boot (`src/boot.js`, `src/ui/`). |
 | Desktop | Electron offline game. `npm run desktop` runs it; `npm run dist:win` builds the installer and portable exe into `release/`. The builds are unsigned. F10 opens settings. |
@@ -40,6 +40,7 @@ To-do, roughly in order:
 - Trails were made tougher (taller/longer ledges, denser boulders, more camber, a longer, uneven bog). Autopilot, 400 s budget: green done by all three; blue done by Cruiser and Pickup, the Rally Sedan crawls through Granite Steps (164 s) and sinks in Bog Run; black done by Cruiser (165 s) and Pickup (237 s); double black done only by the Cruiser (309 s, so it times out under the usual 240 s), Pickup stops at 129/144 m. `node test/trailaudit.mjs` prints real rock and ledge heights per trail.
 - The Rally Sedan's physics box is still taller than its 0.25 m sills; green rocks are capped at 0.20 m so the model never visibly scrapes.
 - Desktop builds are unsigned (SmartScreen warning).
+- The Gauntlet, crawl autopilot (`node test/crawl.mjs`): Cruiser finishes (722 s), Pickup stops in stage 10 (Boulder Garden II; from its gate it also fails the Waterfall), Rally Sedan clears stages 1-4 and stops at stage 5's 0.55 m gatekeeper ledges. The sim's sedan is stronger than the brief expected: it walks 0.45-0.5 m chamfered ledges on 0.33 m tyres and climbs a 35° slab, so it can't be stopped by stage 3 without putting taller obstacles out of order. This is worth a look in the tyre/step physics. Rigs walk staircases better than single ledges at speed; the Waterfall is tuned against `test/stairgrade.mjs` (Cruiser: 0.6 m OK up to a 28% tread, nothing at 33%).
 
 ## Checks after any change
 
@@ -48,6 +49,8 @@ node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/c
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
 node test/race.mjs                              # race autopilot
+node test/crawlcheck.mjs && node test/crawlcourse.mjs   # The Gauntlet: numbers + run logic
+node test/crawl.mjs lc70,taco,wrx               # The Gauntlet autopilot, per stage (slow)
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
 ```
 

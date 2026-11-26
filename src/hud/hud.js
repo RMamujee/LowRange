@@ -196,6 +196,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     if (wp) return { target: wp, label: `WAYPOINT 1${waypoints.list.length > 1 ? ` OF ${waypoints.list.length}` : ''}`, wp: true };
     if (isRace) { const r = S.race; if (!r) return null; const c = CHECKPOINTS[r.next]; return { target: c, label: r.next ? `CHECKPOINT ${r.next}/${CHECKPOINTS.length - 1}` : 'START / FINISH' }; }
     const G = S.game;
+    if (G.guide) return G.guide; // [crawl] The Gauntlet: next stage gate, with progress
     if (G.active) { const t = TRAILS[G.active.trail]; return { target: trailEnds[G.active.trail][1 - G.active.from], label: 'FINISH ' + t.name.toUpperCase() }; }
     let best = null, bd = Infinity;
     TRAILS.forEach((t, i) => { if (G.trails[i].done) return; trailEnds[i].forEach((e) => { const dd = Math.hypot(e.x - p.x, e.z - p.z); if (dd < bd) { bd = dd; best = { target: e, label: t.name.toUpperCase() }; } }); });
@@ -209,7 +210,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     mini.hits = [{ x: 0, y: 0, w: 108, h: 106, act: 'map' }];
     board(g, 0, 0, mini.w, mini.h, { seed: 8, nails: false });
     inset(g, 3, 3, 102, 102, P.m1);
-    drawMinimap(g, 4, 4, 100, { bases, p, heading, waypoints: waypoints.list, raceCp: isRace && S.race && S.race.racing ? CHECKPOINTS[S.race.next] : null, t: clock });
+    drawMinimap(g, 4, 4, 100, { bases, p, heading, waypoints: waypoints.list, raceCp: isRace && S.race && S.race.racing ? CHECKPOINTS[S.race.next] : S.game.guide?.target ?? null, t: clock }); // [crawl] ring the next gate
     // compass N
     rect(g, 6, 6, 7, 9, P.ol); rect(g, 7, 7, 5, 7, P.paper); tiny(g, 'N', 10, 8, P.redDark, { align: 'center' });
     // plaque
@@ -234,6 +235,13 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
       row(r.lap ? `LAP ${r.lap}` : r.holding ? 'WAIT' : 'GO TO LINE', r.started ? fmtLap(r.lapTime) : '-:--.-', P.ink);
       row('LAST', fmtLap(r.last));
       row('BEST', fmtLap(r.best), r.best != null ? P.redDark : P.inkSoft);
+    } else if (gd && gd.of) {
+      // [crawl] stage progress: STAGE 7/12 + distance to the next gate, stage name, run clock
+      tiny(g, gd.stage ? `STAGE ${gd.stage}/${gd.of}` : `${gd.of} STAGES`, x0, y, P.redDark);
+      tiny(g, `${Math.round(Math.hypot(gd.target.x - p.x, gd.target.z - p.z))} M`, 102, y, P.inkSoft, { align: 'right' }); y += 8;
+      line(gd.name, P.ink);
+      line(gd.run != null ? `RUN ${fmtT(gd.run)}` : gd.next, gd.run != null ? P.redDark : P.inkSoft);
+      tiny(g, 'M MAP  Y RETRY', x0, 135, P.paperEdge);
     } else {
       if (gd) {
         line(gd.label, gd.wp ? P.redDark : P.ink);
@@ -433,7 +441,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     drawMini(S);
     if (mapOpen) {
       const p = S.car.chassis.translation();
-      big.draw(mapC.g, { p, heading: S.car.attitude().heading, trails: S.game.trails, active: S.game.active, time: S.game.time, dist: S.game.dist, race: S.race });
+      big.draw(mapC.g, { p, heading: S.car.attitude().heading, trails: S.game.trails, active: S.game.active, time: S.game.time, dist: S.game.dist, race: S.race, crawl: S.game.crawl });
     }
   }
 
