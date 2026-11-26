@@ -1,7 +1,10 @@
-// Screenshots of the loading screen at a few moments: node test/loading.mjs [outDir] [port]
+// Screenshots of the loading screen at a few moments: node test/loading.mjs [outDir] [port] [shot: lc70|taco|wrx]
+import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 const out = process.argv[2] || 'test/shots/loading';
 const port = process.argv[3] || '5599';
+const shot = process.argv[4] ? `&shot=${process.argv[4]}` : '';
+mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME, args: ['--use-gl=angle', '--enable-unsafe-swiftshader'] });
 const errors = [];
 for (const [w, h] of [[1600, 900], [1280, 720]]) {
@@ -9,7 +12,7 @@ for (const [w, h] of [[1600, 900], [1280, 720]]) {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const t0 = Date.now();
-  await page.goto(`http://localhost:${port}/?loader`, { waitUntil: 'commit' });
+  await page.goto(`http://localhost:${port}/?loader${shot}`, { waitUntil: 'commit' });
   for (const ms of [400, 1200, 2500]) {
     await page.waitForTimeout(Math.max(0, ms - (Date.now() - t0)));
     await page.screenshot({ path: `${out}/${w}-${ms}ms.png` });
