@@ -79,6 +79,15 @@
 
   #toast { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); font-size: 20px; padding: 10px 18px; opacity: 0; transition: opacity .25s; text-align: center; }
   #toast.show { opacity: 1; }
+  /* race: countdown, lap flash, wrong way */
+  #bigmsg { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 600; letter-spacing: .06em; color: var(--ink); text-shadow: 0 3px 14px rgba(0,0,0,.6); opacity: 0; transition: opacity .15s; font-variant-numeric: tabular-nums; }
+  #bigmsg.show { opacity: 1; }
+  #bigmsg.count { color: #ff4a2e; } #bigmsg.go { color: var(--good); } #bigmsg.best { color: var(--amber); } #bigmsg.warn { color: #ff4a2e; font-size: 64px; }
+  /* menu: map selector */
+  .maps { display: flex; gap: 8px; margin: 0 0 14px; }
+  .mapbtn { font-family: var(--font); font-size: 15px; letter-spacing: .08em; padding: 8px 20px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+  .mapbtn:hover { border-color: rgba(255, 179, 64, .5); color: var(--ink); }
+  .mapbtn.sel { color: #1a1206; background: var(--amber); border-color: var(--amber); }
 
 
   kbd { font-family: var(--font); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; background: rgba(255,255,255,.04); }
@@ -159,7 +168,7 @@
 
 <div id="hud" class="hidden">
   <div id="obj" class="panel">
-    <div class="t">Trails</div>
+    <div class="t" id="objTitle">Trails</div>
     <div id="trailList"></div>
     <div class="next"><svg class="arrow" id="arrow" viewBox="0 0 20 20"><path d="M10 1 L17 18 L10 13 L3 18 Z" fill="currentColor"/></svg><span id="nextFlag">—</span></div>
     <div class="sub" id="timer">00:00 · 0.0 km</div>
@@ -167,6 +176,7 @@
   <div id="mapbox" class="panel"><canvas id="minimap" width="220" height="220"></canvas>
     <div class="maphint"><kbd>H</kbd> controls · <kbd>Esc</kbd> garage</div></div>
   <div id="toast" class="panel"></div>
+  <div id="bigmsg"></div>
 
   <div id="cluster" class="panel">
     <svg id="tach" viewBox="0 0 170 120">
@@ -228,7 +238,8 @@
 <div id="menu" class="hidden">
   <div class="menu-inner">
     <div class="title">LOW <span>RANGE</span></div>
-    <div class="tag">Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.</div>
+    <div class="maps" id="maps"></div>
+    <div class="tag" id="tagline">Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.</div>
     <div class="cards" id="cards"></div>
     <div class="opts">
       <label><input type="checkbox" id="optAuto" checked /> Auto-clutch (anti-stall)</label>

@@ -25,7 +25,8 @@ for (const id of ids) {
     const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));
     car.airedDown=true; const d=car.dt; d.range=spec.ranges.low?'low':'high'; d.gear=1; d.lockF=spec.lockers.front; d.lockR=true;
     const inp={throttle:0,brake:0,steer:0}; let s=4, stuckT=0, best=4, flips=0;
-    for (let i=0;i<secs/H;i++){
+    let el=0;
+    for (let i=0;i<secs/H;i++){ el=i*H;
       if (i%20===0){
         const p=car.chassis.translation();
         // nearest s
@@ -44,7 +45,7 @@ for (const id of ids) {
       car.step(inp,H);
     }
     { const p=car.chassis.translation(), a=car.attitude(); console.log(`  stuck@${t.name} s=${best.toFixed(1)} pitch=${(a.pitch*57.3).toFixed(0)} roll=${(a.roll*57.3).toFixed(0)} rpm=${car.dt.rpm.toFixed(0)} v=${car.speed().toFixed(2)} thr=${inp.throttle.toFixed(2)} steer=${inp.steer.toFixed(2)} wheels=${car.wheelState.map(w=>(w.grounded?"g":"-")+w.mat+" slip"+w.slip.toFixed(1)+" N"+(w.load/1000).toFixed(1)).join(", ")} `); for(const pt of car.patches) console.log("    patch w"+pt.wheel, "mat",pt.mat,"n",[pt.n.x,pt.n.y,pt.n.z].map(x=>x.toFixed(2)).join(","),"N",(pt.N/1000).toFixed(1),"k",pt.k.toFixed(2),"cap/h",(pt.cap/H/1000).toFixed(1),"impL/h",(pt.imp/H/1000).toFixed(1),"d",[pt.d.x,pt.d.y,pt.d.z].map(x=>x.toFixed(2)).join(",")); const parts=[["chassis",car.chassis],["frontAxle",car.axles[0].body],["rearAxle",car.axles[1].body]]; for(const [nm,b] of parts.filter(p=>p[1])){ for(let k=0;k<b.numColliders();k++){ const col=b.collider(k); world.contactPairsWith(col,o=>world.contactPair(col,o,(m)=>{ let n=0; for(let q=0;q<m.numContacts();q++) if(m.contactDist(q)<0.02) n++; if(n) console.log("    contact:",nm,"collider",k,"with",terrain.rockHandles.has(o.handle)?"ROCK":o.handle===terrain.ground.handle?"GROUND":"other", n,"pts"); })); } } }
-    res.push(`${t.name.split(' ')[0]}(${t.diff}) ${best.toFixed(0)}/${t.length.toFixed(0)}m${flips?' flips:'+flips:''}`);
+    res.push(`${t.name.split(' ')[0]}(${t.diff}) ${best.toFixed(0)}/${t.length.toFixed(0)}m ${best>=t.length-6?'done '+el.toFixed(0)+'s':'STUCK'}${flips?' flips:'+flips:''}`);
     car.destroy();
   }
   console.log(id.padEnd(7), res.join(' | '));

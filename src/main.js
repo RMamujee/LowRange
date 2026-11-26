@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt, visualHeightAt, MAT, MAT_INFO, SIZE, RES, GRID, ROADS, TRAILS, DIFF, pathPoint } from './terrain.js';
+import { MAPS, MAP_ID, MAP_KIND, MAP_NAME, SPAWN, TRACK, CHECKPOINTS } from './terrain.js';
+import { RaceLaps, fmtLap } from './race.js';
+import { buildRaceDressing } from './race_view.js';
 import { VEHICLES } from './specs.js';
 import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
@@ -55,7 +58,9 @@ const SUN_DIR = new THREE.Vector3(-0.45, 0.8, 0.35).normalize();
 scene.add(buildTerrainMesh());
 scene.add(buildRocks(rocks));
 scene.add(buildTrees(trees));
-const gates = buildMarkers(scene); // [start0, end0, start1, end1, ...]
+const isRace = MAP_KIND === 'race';
+const gates = isRace ? [] : buildMarkers(scene); // [start0, end0, start1, end1, ...]
+const raceView = isRace ? buildRaceDressing(scene) : null;
 const minimap = buildMinimapBase(220);
 // distant ground beyond the map edge
 const outer = new THREE.Mesh(new THREE.RingGeometry(SIZE * 0.68, 900, 32), new THREE.MeshStandardMaterial({ color: 0x6f6250, flatShading: true }));
@@ -139,14 +144,15 @@ const buildKey = (s) => s.id + JSON.stringify(s.build);
 function spawn(i, opts) {
   if (car) { car.destroy(); view.dispose(); }
   spec = builtSpec(i);
-  const y = heightAt(0, 0) + spec.tire.radius - spec.axleY + 0.15;
-  car = new Vehicle(RAPIER, world, spec, terrain, { x: 0, y, z: 0 }, -Math.PI * 0.31);
+  const y = heightAt(SPAWN.x, SPAWN.z) + spec.tire.radius - spec.axleY + 0.15;
+  car = new Vehicle(RAPIER, world, spec, terrain, { x: SPAWN.x, y, z: SPAWN.z }, SPAWN.yaw);
   view = new VehicleView(scene, car);
   car.dt.autoClutch = opts.auto;
   car.airedDown = opts.air;
   if (opts.low && spec.ranges.low) { car.dt.range = 'low'; car.dt.fourWD = true; }
   car.dt.gear = 0;
   camState.heading = 0;
+  if (isRace) raceOnSpawn();
   buildWheelHud();
 }
 
@@ -175,6 +181,7 @@ function trailUnderTruck() {
 // Backspace: right the truck and repair it on the spot (trail run keeps going).
 function recover() {
   if (!car) return;
+  if (isRace) { raceRecover(); return; }
   const p = car.chassis.translation();
   const { heading } = car.attitude();
   const keep = game.active;
@@ -186,6 +193,7 @@ function recover() {
 // Y: restart the trail you're on from its start.
 function restartTrail() {
   if (!car) return;
+  if (isRace) { raceRestart(); return; }
   const on = trailUnderTruck();
   if (!on) { toast('You are not on a trail'); return; }
   {
@@ -197,6 +205,70 @@ function restartTrail() {
     game.active = { trail: on.trail, from: on.from, t: 0 };
     toast(`Back to the start of ${t.name}, fully repaired`, 2.5);
   }
+}
+
+// ---------------- race mode ----------------
+// Lap timing lives in race.js; this glues it to the truck, the HUD and the gantry lights.
+let race = null, bigTimer = 0, goLights = 0, shownCp = null;
+const raceHold = { throttle: 0, brake: 1, steer: 0, handbrake: true }; // held on the line during the countdown
+function bigMsg(text, secs = 1.2, cls = '') { const el = $('bigmsg'); el.textContent = text; el.className = 'show ' + cls; bigTimer = secs; }
+function raceGearing() { const d = car.dt; d.range = 'high'; d.fourWD = true; d.gear = d.autoClutch ? 1 : 0; }
+
+function raceOnSpawn() {
+  raceGearing();
+  camState.heading = SPAWN.yaw;
+  race = new RaceLaps(TRACK, CHECKPOINTS, spec.id);
+  raceView.setLights(0);
+}
+function raceStart() { race.startCountdown(3); bigMsg('3', 1, 'count'); goLights = 0; }
+
+// Backspace: repaired, back just past the last checkpoint you passed; the clock keeps running
+function raceRecover() {
+  const r = race.poseForReset();
+  respawnFresh(r.x, r.z, r.yaw, 0.6);
+  raceGearing();
+  race.teleported();
+  toast(race.lastCp ? `Back at checkpoint ${race.lastCp}, repaired` : 'Back at the start line, repaired', 2);
+}
+// Y: back to the grid for a fresh countdown
+function raceRestart() {
+  respawnFresh(SPAWN.x, SPAWN.z, SPAWN.yaw, 0.15);
+  raceGearing();
+  race.teleported();
+  raceStart();
+  toast('Race restarted. Wait for the lights.', 2);
+}
+
+function raceUpdate(dt) {
+  for (const e of race.update(dt, car.chassis.translation(), car.chassis.linvel())) {
+    if (e.type === 'count') bigMsg(String(e.n), 1, 'count');
+    else if (e.type === 'go') { bigMsg('GO!', 1.2, 'go'); raceView.setLights('go'); goLights = 2.5; }
+    else if (e.type === 'lapstart') toast('Lap 1: the clock is running', 1.6);
+    else if (e.type === 'cp') toast(`Checkpoint ${e.cp}/${e.of} · ${fmtLap(e.split)}`, 1.4);
+    else if (e.type === 'lap') { bigMsg(fmtLap(e.time), 2.5, e.best ? 'best' : ''); toast(`Lap ${e.lap}: ${fmtLap(e.time)}${e.best ? ' · NEW BEST' : ` (best ${fmtLap(race.best)})`}`, 3.5); }
+    else if (e.type === 'missed') toast(`Missed checkpoint ${e.cp}! Go back through it`, 3);
+  }
+  if (race.holding) raceView.setLights(Math.min(5, Math.floor((3 - race.count) / 0.6) + 1));
+  else if (goLights > 0) { goLights -= dt; if (goLights <= 0) raceView.setLights(0); }
+  const cp = race.racing ? race.next : -1;
+  if (cp !== shownCp) { raceView.setNextCp(cp); shownCp = cp; }
+  if (race.wrong) bigMsg('WRONG WAY', 0.3, 'warn');
+  if (bigTimer > 0) { bigTimer -= dt; if (bigTimer <= 0) $('bigmsg').className = ''; }
+}
+
+function raceHud(p) {
+  const row = (nm, val, cls = '') => `<div class="tr ${cls}"><span class="nm">${nm}</span><em>${val}</em></div>`;
+  $('trailList').innerHTML = [
+    row(race.lap ? `Lap ${race.lap}` : race.holding ? 'Wait for the lights' : 'Cross the start line', race.started ? fmtLap(race.lapTime) : '—', 'act'),
+    row('Last lap', fmtLap(race.last)),
+    row(`Best · ${spec.name}`, fmtLap(race.best), race.best != null ? 'done' : ''),
+  ].join('');
+  $('timer').textContent = `Race ${fmtLap(race.total)} · ${(game.dist / 1000).toFixed(2)} km`;
+  const c = CHECKPOINTS[race.next];
+  const dist = Math.hypot(c.x - p.x, c.z - p.z);
+  $('nextFlag').textContent = race.wrong ? 'Wrong way! Turn around' : `${race.next ? 'Checkpoint ' + race.next + '/' + (CHECKPOINTS.length - 1) : 'Start / finish'} · ${dist.toFixed(0)} m`;
+  const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
+  $('arrow').style.transform = `rotate(${Math.atan2(c.x - p.x, -(c.z - p.z)) - Math.atan2(camDir.x, -camDir.z)}rad)`;
 }
 
 // ---------------- HUD ----------------
@@ -272,6 +344,7 @@ function updateHud(dt) {
     tyre.style.outline = car.broken[i] ? '2px solid #c0392b' : car.health.susp[i] < 0.75 ? '2px solid #ff7a3d' : 'none';
   }
   // objectives
+  if (isRace) { const p = car.chassis.translation(); raceHud(p); drawMinimap(p); return; }
   $('trailList').innerHTML = TRAILS.map((t, i) => {
     const st = game.trails[i], act = game.active && game.active.trail === i;
     return `<div class="tr${st.done ? ' done' : ''}${act ? ' act' : ''}">${symHtml(t.diff)}<span class="nm">${t.name}</span><em>${act ? fmtT(game.active.t) : st.done ? '✓ ' + fmtT(st.best) : ''}</em></div>`;
@@ -298,6 +371,10 @@ function updateHud(dt) {
 const mmCtx = $('minimap').getContext('2d');
 function drawMinimap(p) {
   mmCtx.drawImage(minimap.canvas, 0, 0);
+  if (isRace && race) { // ring the checkpoint you need next
+    const c = CHECKPOINTS[race.next];
+    mmCtx.strokeStyle = '#ffb340'; mmCtx.lineWidth = 2.5; mmCtx.beginPath(); mmCtx.arc(minimap.toPx(c.x), minimap.toPx(c.z), 9, 0, Math.PI * 2); mmCtx.stroke();
+  }
   const { heading } = car.attitude();
   const x = minimap.toPx(p.x), y = minimap.toPx(p.z);
   mmCtx.save(); mmCtx.translate(x, y); mmCtx.rotate(-heading);
@@ -379,7 +456,7 @@ const CONTROLS = [
   ['W / S', 'throttle / brake'], ['A / D', 'steer'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
   ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['B', 'handbrake'], ['I', 'start engine'],
-  ['C', 'auto-clutch on/off'], ['Backspace', 'repair + right the truck, on the spot'], ['Y', 'restart current trail'],, ['V', 'camera'], ['Z / X', 'zoom in / out'],
+  ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch'], ['H / Esc', 'help / garage'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('');
@@ -527,21 +604,48 @@ $('goBtn').addEventListener('click', () => startDrive());
 const garage = new Garage(RAPIER, VEHICLES, { onChange: renderCards, onDrive: () => startDrive() });
 $('garageBtn').addEventListener('click', () => garage.open(selected));
 
+// Map selector. Each map bakes its own terrain at load, so switching reloads the page on
+// the chosen map (?map=), carrying the rig and options over and driving straight off.
+const MAP_TAGS = {
+  park: 'Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.',
+  race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
+};
+let selectedMap = MAP_ID;
+$('maps').innerHTML = MAPS.map((m) => `<button class="mapbtn" data-id="${m.id}">${m.name}</button>`).join('');
+const mapBtns = [...document.querySelectorAll('.mapbtn')];
+function selectMap(id) {
+  selectedMap = id;
+  mapBtns.forEach((b) => b.classList.toggle('sel', b.dataset.id === id));
+  $('tagline').textContent = MAP_TAGS[id];
+}
+mapBtns.forEach((b) => b.addEventListener('click', () => selectMap(b.dataset.id)));
+selectMap(MAP_ID);
+function switchMap() {
+  const o = ['optAuto', 'optLow', 'optAir'].map((id) => ($(id).checked ? 1 : 0)).join('');
+  const q = new URLSearchParams({ map: selectedMap, car: String(selected), o, go: '1' });
+  const cover = document.createElement('div');
+  cover.id = 'loading'; cover.textContent = `LOADING ${MAPS.find((m) => m.id === selectedMap).name.toUpperCase()}…`;
+  document.body.appendChild(cover);
+  location.search = q.toString();
+}
+
 function openMenu() {
   playing = false;
   $('menu').classList.remove('hidden');
   $('hud').classList.add('hidden');
 }
 function startDrive() {
+  if (selectedMap !== MAP_ID) { switchMap(); return; }
   const opts = { auto: $('optAuto').checked, low: $('optLow').checked, air: $('optAir').checked };
   const damaged = car && (car.broken.some(Boolean) || car.health.engine < 1 || car.health.body < 1 || car.health.susp.some((x) => x < 1) || car.health.tire.some((x) => x < 1));
   garage.close();
   const sameRig = car && buildKey(car.spec) === buildKey(builtSpec(selected));
   if (!started || !sameRig || damaged) {
-    if (started && damaged && sameRig) setTimeout(() => toast('Repaired and back at the trailhead', 2.5), 3600);
+    if (started && damaged && sameRig) setTimeout(() => toast(isRace ? 'Repaired and back on the grid' : 'Repaired and back at the trailhead', 2.5), 3600);
     started = true;
     spawn(selected, opts);
     game.time = 0; game.dist = 0; game.done = false; game.active = null;
+    if (isRace) raceStart();
   } else {
     car.dt.autoClutch = opts.auto;
   }
@@ -550,7 +654,8 @@ function startDrive() {
   $('menu').classList.add('hidden');
   $('hud').classList.remove('hidden');
   playing = true;
-  toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Scroll the mouse wheel up for first gear.`, 3.5);
+  if (isRace) toast(`${spec.name} on the grid: 4-HI, ${car.dt.gearLabel === 'N' ? 'neutral' : '1st gear'}. Go on green; scroll the wheel to shift.`, 3.5);
+  else toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Scroll the mouse wheel up for first gear.`, 3.5);
 }
 
 // ---------------- loop ----------------
@@ -561,7 +666,7 @@ function frame(now) {
   last = now; clock += dt;
   if (car) {
     if (playing) readInput(dt);
-    const inp = playing ? input : idleInput;
+    const inp = playing ? (race && race.holding ? raceHold : input) : idleInput;
     acc += dt;
     let n = 0;
     while (acc >= H && n < MAX_STEPS) {
@@ -576,7 +681,7 @@ function frame(now) {
       if (!game.done) game.time += dt;
       const p = car.chassis.translation();
       if (game.active) game.active.t += dt;
-      updateTrails(p);
+      if (isRace) raceUpdate(dt); else updateTrails(p);
       // stopped, holding the brake, in a forward gear: hint how to reverse
       if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: scroll the wheel down through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
       if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press R to recover', 1.5); }
@@ -592,7 +697,7 @@ function frame(now) {
       car.wheelState.forEach((ws, i) => {
         if (!ws.grounded) return;
         const mat = ws.mat;
-        const loose = mat === MAT.MUD || mat === MAT.SAND || mat === MAT.DIRT || mat === MAT.GRAVEL;
+        const loose = mat === MAT.MUD || mat === MAT.SAND || mat === MAT.DIRT || mat === MAT.GRAVEL || mat === MAT.WATER;
         let rate = 0; // particles per second for this wheel
         if (ws.slip > 1.0) rate = Math.min(14, 3 + ws.slip * 2.5);
         else if (loose && sp > 5) rate = Math.min(8, (sp - 5) * 0.6);
@@ -624,9 +729,15 @@ addEventListener('resize', () => {
 
 // show the world behind the garage menu
 spawn(0, { auto: true, low: true, air: false });
-camera.position.set(10, heightAt(10, 14) + 4, 14);
+camera.position.set(SPAWN.x + 10, heightAt(SPAWN.x + 10, SPAWN.z + 14) + 4, SPAWN.z + 14);
 $('loading').remove();
+if (isRace) { $('objTitle').textContent = `${MAP_NAME} · ${TRACK.name}`; }
+// garage picks carried over a map switch
+const qp = new URLSearchParams(location.search);
+if (qp.has('car')) selectCard(clamp(parseInt(qp.get('car'), 10) || 0, 0, VEHICLES.length - 1));
+if (qp.has('o')) ['optAuto', 'optLow', 'optAir'].forEach((id, i) => { const c = qp.get('o')[i]; if (c) $(id).checked = c === '1'; });
 openMenu();
+if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, world, input, cam: camState, garage };
+window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage };
