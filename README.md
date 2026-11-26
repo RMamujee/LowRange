@@ -1,6 +1,6 @@
 # LowRange: a 4x4 rock-crawling sim
 
-A browser off-road game with simple low-poly graphics and serious physics. Pick a rig, drop it into 4-Low,
+An off-road game for Windows (offline desktop app) and the browser, with simple low-poly graphics and serious physics. Pick a rig, drop it into 4-Low,
 lock the diffs and pick your line up rated rock trails.
 
 Built with [Three.js](https://threejs.org/) for rendering and [Rapier](https://rapier.rs/) for rigid bodies,
@@ -14,6 +14,42 @@ npm run dev      # http://localhost:5199
 ```
 
 `npm run build` produces a static site in `dist/`.
+
+## Download & play (Windows)
+
+LowRange runs fully offline as a desktop game. There are two builds (see *Build from source* below to make them):
+
+| File | What it is |
+|---|---|
+| `LowRange-Setup-0.1.0.exe` | Installer. Installs for your user only (no admin needed), lets you choose the folder, adds Desktop and Start Menu shortcuts, and uninstalls from *Settings > Apps*. |
+| `LowRange-0.1.0-portable.exe` | Portable. One file, nothing installed: run it from anywhere, a USB stick included. It starts a little slower because it unpacks itself on each launch. |
+
+**Windows SmartScreen:** the builds aren't code-signed yet, so the first launch shows *Windows protected your PC* with an *Unknown publisher*. Click **More info**, then **Run anyway**.
+
+**Desktop keys:** F11 or Alt+Enter toggles fullscreen. F10 opens Settings (graphics preset, master volume, fullscreen, FPS counter). Esc opens the garage menu, the same as in the browser, and never drops you out of fullscreen. The garage menu has Settings and Quit buttons. The window's size, position and fullscreen state are remembered between launches.
+
+**Where saves live:** settings, best times and garage builds are stored in the app's local storage under `%APPDATA%\LowRange\` (the `Local Storage` folder). The window position is in `%APPDATA%\LowRange\window-state.json`. The installer and the portable exe share that folder. Uninstalling keeps it, so delete the folder to reset everything. The browser version keeps its own separate saves in the browser.
+
+The desktop app makes no network requests (everything, including the physics WASM, ships inside it), and it has no telemetry or auto-update.
+
+## Build from source
+
+You need Node.js 20+; the Windows packages must be built on Windows.
+
+```bash
+npm install
+npm run dev            # browser version with hot reload, http://localhost:5199
+npm run build          # static site in dist/
+npm run desktop        # build, then run the desktop app from source (Electron)
+npm run dist:win       # build the installer and portable exe into release/
+npm run smoke:desktop  # launch the desktop app, wait for the game, screenshot to test/shots/
+node test/desktop-smoke.mjs --packaged   # same, against release/win-unpacked/LowRange.exe
+npm run icon           # regenerate build/icon.ico and build/icon.png (scripts/make-icon.mjs)
+```
+
+The first `dist:win` downloads the Electron runtime and the NSIS installer tools into electron-builder's cache.
+
+The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `app://lowrange` scheme with a strict Content-Security-Policy, and `preload.cjs` exposes a small `window.lowrange` API (version, platform, fullscreen, quit). The page is sandboxed and context-isolated with no Node access, and it can't navigate away or open windows. Allow-listed links (GitHub, three.js, Rapier) open in your browser.
 
 ## What's simulated
 
