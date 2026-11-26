@@ -58,10 +58,15 @@ function slab(z1, y1, z2, y2, w, t, mat, x = 0, off = 0) {
 // A body panel drawn as a side silhouette [[z, y], ...] (chassis frame, -Z forward) and
 // extruded across the width. Tessellated so dents have vertices to push around.
 const TESS = new TessellateModifier(0.32, 5);
-function profile(pts, w, mat, x = 0, dentable = true) {
+// `round` > 0 bevels the extrusion so the panel's outer edges are rounded (toy-like) while
+// the silhouette stays inside the given outline (bevelOffset pulls the bevel back in).
+function profile(pts, w, mat, x = 0, dentable = true, round = 0) {
   const shape = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(-z, y)));
-  let geo = new THREE.ExtrudeGeometry(shape, { depth: w, bevelEnabled: false, curveSegments: 1 });
-  geo.translate(0, 0, -w / 2); geo.rotateY(Math.PI / 2);
+  const r = Math.min(round, w * 0.3);
+  let geo = r > 0
+    ? new THREE.ExtrudeGeometry(shape, { depth: w - 2 * r, bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelOffset: -r, bevelSegments: 3, curveSegments: 1 })
+    : new THREE.ExtrudeGeometry(shape, { depth: w, bevelEnabled: false, curveSegments: 1 });
+  geo.translate(0, 0, r > 0 ? -(w - 2 * r) / 2 : -w / 2); geo.rotateY(Math.PI / 2);
   if (dentable) geo = TESS.modify(geo);
   const m = new THREE.Mesh(geo, mat);
   m.position.x = x; m.castShadow = true; m.receiveShadow = true;
@@ -82,9 +87,9 @@ function bottom(zA, zB, y, arches) {
   return pts;
 }
 // an arch flare: a band following the wheel opening
-function flare(a, t, yCut, w, x, mat) {
+function flare(a, t, yCut, w, x, mat, round = 0) {
   const r = a.r - 0.015;
-  return profile([...arcPts(a, r + t, yCut), ...arcPts(a, r, yCut).reverse()], w, mat, x, false);
+  return profile([...arcPts(a, r + t, yCut), ...arcPts(a, r, yCut).reverse()], w, mat, x, false, round);
 }
 // wheel arch openings for a body: centred a little above the axle so full bump still clears
 const arches = (spec, gap, lift) => [-1, 1].map((s) => ({ z: (s * spec.wheelbase) / 2, yc: spec.axleY + lift, r: spec.tire.radius + gap }));
@@ -122,165 +127,220 @@ function steeringWheel(x, y, z, tilt) {
 }
 
 // ---------- road-going rigs ----------
-// Lifted double-cab pickup (Tacoma mould): sloped hood with scoop, wide black grille,
-// swept headlamps, raked windscreen, short bed, black fender flares over 37s.
-function buildTaco(g, S, spec, M) {
-  const { paint, dark, black, glass, steel, chrome, trim, rimMat, L } = M;
-  const [cw] = spec.chassis.size, wb = spec.wheelbase, ay = spec.axleY, R = spec.tire.radius;
-  const yB = ay + 0.15; // rocker line
-  const A = arches(spec, 0.07, 0.07);
-  const F = -2.62, gw = cw * 0.9;
-  // front clip + cab, below the beltline
-  S.add(profile([...bottom(F + 0.14, 0.93, yB, [A[0]]), [0.93, 0.64], [-1.1, 0.64], [-2.46, 0.56], [-2.58, 0.5], [F - 0.03, 0.02], [F + 0.03, -0.1]], cw, paint));
-  // greenhouse (narrower: tumblehome) + glass
-  S.add(profile([[-1.1, 0.64], [-0.45, 1.17], [0.84, 1.19], [0.93, 1.11], [0.93, 0.64]], gw, paint));
-  S.add(profile([[-0.98, 0.7], [-0.49, 1.1], [-0.02, 1.11], [-0.02, 0.7]], gw + 0.02, glass, 0, false));
-  S.add(profile([[0.07, 0.7], [0.07, 1.11], [0.66, 1.12], [0.84, 0.98], [0.84, 0.7]], gw + 0.02, glass, 0, false));
-  g.add(slab(-1.07, 0.67, -0.47, 1.15, gw - 0.08, 0.02, glass, 0, 0.012)); // raked windscreen
-  g.add(box(gw - 0.12, 0.36, 0.02, glass, 0, 0.92, 0.935));
-  g.add(box(gw * 0.98, 0.04, 1.15, trim, 0, 1.2, 0.2)); // low roof rack
-  for (let i = -3; i <= 3; i++) g.add(box(0.11, 0.06, 0.05, L.head, i * 0.16, 1.22, -0.38));
-  g.add(box(cw * 0.48, 0.06, 0.5, black, 0, 0.6, -1.95)); // hood scoop
-  g.add(box(cw * 0.46, 0.05, 0.03, black, 0, 0.6, -2.2));
-  // bed: separate side walls so it is open, wheel tubs, tailgate
-  const b0 = 1.0, b1 = 2.64, bt = 0.62;
-  for (const sx of [-1, 1]) {
-    S.add(profile([...bottom(b0, b1, yB, [A[1]]), [b1, bt], [b0, bt]], 0.07, paint, sx * (cw / 2 - 0.035)));
-    g.add(box(0.1, 0.03, b1 - b0, trim, sx * (cw / 2 - 0.045), bt + 0.015, (b0 + b1) / 2)); // bed rail caps
-    g.add(box(0.24, 0.2, 1.0, dark, sx * (cw / 2 - 0.19), 0.2, wb / 2)); // wheel tubs
-    g.add(box(0.05, 0.3, 0.1, L.tail, sx * (cw / 2 + 0.005), 0.38, b1 - 0.07)); // tail lamps
-  }
-  g.add(box(cw, bt - yB, 0.06, paint, 0, (bt + yB) / 2, b0 + 0.03));
-  g.add(box(cw, bt - yB - 0.1, 0.06, paint, 0, (bt + yB + 0.1) / 2, b1 - 0.03)); // tailgate
-  g.add(box(cw - 0.14, 0.04, b1 - b0 - 0.1, dark, 0, 0.1, (b0 + b1) / 2)); // bed floor
-  g.add(spareTire(spec, rimMat, 0, 0.12 + R * 0.97, b0 + 0.3, 'z'));
-  g.add(box(0.3, 0.3, 0.4, std(0x4d5a3a), cw * 0.3, 0.27, b1 - 0.5)); // gear box
-  // flares, sliders, mirrors, door seams + handles
-  for (const sx of [-1, 1]) {
-    for (const a of A) S.add(flare(a, 0.1, yB - 0.03, 0.15, sx * (cw / 2 + 0.03), black));
-    g.add(box(0.1, 0.07, 2.05, black, sx * (cw / 2 + 0.03), yB - 0.02, 0)); // rock sliders
-    g.add(box(0.05, 0.14, 0.22, black, sx * (gw / 2 + 0.14), 0.78, -0.92)); // mirrors
-    g.add(box(0.12, 0.03, 0.06, black, sx * (gw / 2 + 0.06), 0.72, -0.92));
-    for (const z of [-1.05, 0.03, 0.9]) g.add(box(0.012, 0.8, 0.015, black, sx * (cw / 2 + 0.003), (0.64 + yB) / 2 + 0.04, z));
-    for (const z of [-0.18, 0.72]) g.add(box(0.02, 0.03, 0.12, trim, sx * (cw / 2 + 0.008), 0.5, z));
-    g.add(box(0.02, 0.025, 1.9, trim, sx * (cw / 2 + 0.005), 0.36, -0.15)); // body crease
-  }
-  // nose: big dark grille with bars, swept headlamps, steel bumper + winch
-  g.add(box(cw * 0.6, 0.34, 0.05, black, 0, 0.24, F - 0.02));
-  for (const y of [0.13, 0.24, 0.35]) g.add(box(cw * 0.58, 0.025, 0.03, y === 0.24 ? paint : trim, 0, y, F - 0.05));
-  for (const sx of [-1, 1]) {
-    const h = box(0.4, 0.11, 0.06, L.head, sx * (cw / 2 - 0.27), 0.42, F + 0.02); h.rotation.y = -sx * 0.3; h.rotation.z = sx * 0.12; g.add(h);
-    g.add(box(0.1, 0.06, 0.05, L.amber, sx * (cw / 2 - 0.06), 0.34, F + 0.1));
-  }
-  g.add(box(cw * 1.02, 0.26, 0.26, trim, 0, -0.08, F - 0.04)); // steel bumper
-  for (const sx of [-1, 1]) g.add(at(cyl(0.06, 0.04, L.head, 'z'), sx * 0.62, -0.08, F - 0.18));
-  g.add(box(0.55, 0.18, 0.2, std(0x404040), 0, -0.07, F - 0.16)); // winch
-  g.add(at(cyl(0.055, 0.32, std(0xc02020), 'x'), 0, -0.07, F - 0.2));
-  g.add(box(cw * 1.0, 0.22, 0.2, trim, 0, -0.08, b1 + 0.08)); // rear bumper
-  g.add(box(0.1, 0.1, 0.25, steel, 0, -0.12, b1 + 0.22)); // hitch
-  g.add(at(cyl(0.04, 0.5, chrome, 'z'), cw * 0.32, -0.2, b1 - 0.1)); // exhaust
+// Chunky, toy-like versions of the concept art: rounded (bevelled) shell panels, oversized
+// lamps, bumpers and cargo. All panels stay inside each rig's physics envelope.
+const RND = 0.09; // shell edge rounding radius
+
+// round lamp: bezel ring with an emissive lens, facing -Z (or +Z with dir = 1)
+function roundLamp(r, lens, bezel, x, y, z, dir = -1) {
+  const g = new THREE.Group();
+  g.add(at(cyl(r * 1.22, 0.07, bezel, 'z', 14), 0, 0, 0));
+  g.add(at(cyl(r, 0.04, lens, 'z', 14), 0, 0, dir * 0.035));
+  g.position.set(x, y, z);
+  return g;
+}
+// red jerry can standing upright, long side along Z
+function jerryCan(mat, cap, x, y, z) {
+  const g = new THREE.Group();
+  g.add(box(0.16, 0.4, 0.3, mat, 0, 0.2, 0));
+  g.add(box(0.17, 0.03, 0.2, mat, 0, 0.13, 0), box(0.17, 0.03, 0.2, mat, 0, 0.27, 0)); // pressed ribs
+  g.add(box(0.05, 0.05, 0.16, cap, 0, 0.42, 0.02)); // handle
+  g.add(at(cyl(0.03, 0.06, cap, 'y', 6), 0, 0.42, -0.11));
+  g.position.set(x, y, z);
+  return g;
 }
 
-// 70-series wagon (76 mould): dead-flat sides, near-vertical windscreen, flat hood between
-// square-topped fenders, round lamps in square bezels, wide flares, snorkel, barn doors.
-function buildLC70(g, S, spec, M) {
+// Lifted mid-size double-cab pickup: rounded cab, hood bulge, black flares over chunky
+// all-terrains, steel bumper with round yellow driving lamps, bed roll bar carrying a light
+// bar, an upright spare, red jerry cans and gear bags.
+function buildTaco(g, S, spec, M) {
   const { paint, dark, black, glass, steel, chrome, trim, rimMat, L } = M;
-  const [cw] = spec.chassis.size, ay = spec.axleY;
-  const yB = ay + 0.12;
+  const [cw] = spec.chassis.size, R = spec.tire.radius;
+  const yB = spec.axleY + 0.15; // rocker line
+  const A = arches(spec, 0.07, 0.07);
+  const F = -2.62, gw = cw * 0.9;
+  const fog = std(0xffd040, { emissive: 0xffb020, emissiveIntensity: 0.7, roughness: 0.2 });
+  // front clip + cab, below the beltline
+  S.add(profile([...bottom(F + 0.14, 0.93, yB, [A[0]]), [0.93, 0.64], [-1.1, 0.66], [-2.4, 0.6], [-2.6, 0.5], [F - 0.03, 0.1], [F + 0.03, -0.1]], cw, paint, 0, true, RND));
+  // greenhouse (narrower: tumblehome) + glass
+  S.add(profile([[-1.1, 0.64], [-0.45, 1.17], [0.84, 1.19], [0.93, 1.11], [0.93, 0.64]], gw, paint, 0, true, RND));
+  S.add(profile([[-0.98, 0.72], [-0.49, 1.1], [-0.02, 1.11], [-0.02, 0.72]], gw + 0.02, glass, 0, false));
+  S.add(profile([[0.07, 0.72], [0.07, 1.11], [0.66, 1.12], [0.84, 0.98], [0.84, 0.72]], gw + 0.02, glass, 0, false));
+  g.add(slab(-1.07, 0.67, -0.47, 1.15, gw - 0.12, 0.02, glass, 0, 0.012)); // raked windscreen
+  g.add(box(gw - 0.16, 0.34, 0.02, glass, 0, 0.92, 0.935));
+  // hood bulge + scoop
+  g.add(slab(-2.35, 0.6, -1.25, 0.66, cw * 0.5, 0.05, paint, 0, 0.02));
+  g.add(box(cw * 0.32, 0.07, 0.36, paint, 0, 0.68, -1.75), box(cw * 0.28, 0.05, 0.03, black, 0, 0.68, -1.94));
+  // bed: separate side walls so it is open, wheel tubs, tailgate
+  const b0 = 1.0, b1 = 2.64, bt = 0.66;
+  for (const sx of [-1, 1]) {
+    S.add(profile([...bottom(b0, b1, yB, [A[1]]), [b1, bt], [b0, bt]], 0.1, paint, sx * (cw / 2 - 0.05), true, 0.03));
+    g.add(box(0.12, 0.04, b1 - b0, black, sx * (cw / 2 - 0.05), bt + 0.02, (b0 + b1) / 2)); // bed rail caps
+    g.add(box(0.24, 0.2, 1.0, dark, sx * (cw / 2 - 0.19), 0.2, spec.wheelbase / 2)); // wheel tubs
+    g.add(box(0.07, 0.34, 0.12, L.tail, sx * (cw / 2 - 0.01), 0.42, b1 - 0.07)); // tail lamps
+  }
+  g.add(box(cw, bt - yB, 0.08, paint, 0, (bt + yB) / 2, b0 + 0.04));
+  g.add(box(cw - 0.02, bt - yB - 0.1, 0.08, paint, 0, (bt + yB + 0.1) / 2, b1 - 0.04)); // tailgate
+  g.add(box(0.36, 0.05, 0.03, black, 0, 0.52, b1 + 0.0)); // tailgate handle
+  g.add(box(cw - 0.14, 0.04, b1 - b0 - 0.1, dark, 0, 0.1, (b0 + b1) / 2)); // bed floor
+  // roll bar behind the cab with a light bar on top
+  const rbY = 1.2, rbZ = b0 + 0.22, rbX = cw / 2 - 0.12;
+  for (const sx of [-1, 1]) {
+    g.add(tube(V(sx * rbX, bt, rbZ), V(sx * rbX, rbY, rbZ), 0.045, black));
+    g.add(tube(V(sx * rbX, bt, rbZ + 0.6), V(sx * rbX, rbY - 0.02, rbZ), 0.035, black)); // braces
+  }
+  g.add(tube(V(-rbX, rbY, rbZ), V(rbX, rbY, rbZ), 0.045, black));
+  g.add(box(1.1, 0.1, 0.1, black, 0, rbY + 0.04, rbZ - 0.02));
+  for (let i = -4; i <= 4; i++) g.add(box(0.1, 0.06, 0.03, L.head, i * 0.12, rbY + 0.04, rbZ - 0.08));
+  // cargo: upright spare tyre, two red jerry cans, gear bags
+  g.add(spareTire(spec, rimMat, cw * 0.18, 0.12 + R * 0.97, rbZ + 0.35, 'z'));
+  const can = std(0xc8321e, { roughness: 0.5 }), cap = std(0x2a2b2e, { roughness: 0.8 });
+  g.add(jerryCan(can, cap, -cw * 0.3, 0.12, rbZ + 0.3), jerryCan(can, cap, -cw * 0.3 + 0.2, 0.12, rbZ + 0.3));
+  const bag = std(0x3c3f38, { roughness: 0.9 }), bag2 = std(0x5a4a36, { roughness: 0.9 });
+  g.add(box(0.55, 0.3, 0.4, bag, -cw * 0.18, 0.27, b1 - 0.55), box(0.4, 0.24, 0.3, bag2, cw * 0.22, 0.24, b1 - 0.35));
+  // flares, sliders, mirrors, door seams + handles
+  for (const sx of [-1, 1]) {
+    for (const a of A) S.add(flare(a, 0.13, yB - 0.03, 0.18, sx * (cw / 2 + 0.04), black, 0.04));
+    g.add(box(0.14, 0.08, 2.05, black, sx * (cw / 2 + 0.05), yB - 0.02, 0)); // rock sliders
+    g.add(box(0.08, 0.17, 0.24, black, sx * (gw / 2 + 0.16), 0.8, -0.92)); // mirrors
+    g.add(box(0.14, 0.04, 0.06, black, sx * (gw / 2 + 0.07), 0.74, -0.92));
+    for (const z of [-1.05, 0.03, 0.9]) g.add(box(0.012, 0.8, 0.015, black, sx * (cw / 2 + 0.003), (0.64 + yB) / 2 + 0.04, z));
+    for (const z of [-0.18, 0.72]) g.add(box(0.03, 0.04, 0.14, black, sx * (cw / 2 + 0.01), 0.5, z));
+  }
+  // nose: dark grille, wide lamps with amber corners, steel bumper with round yellow lamps
+  g.add(box(cw * 0.56, 0.32, 0.06, black, 0, 0.3, F + 0.0));
+  for (const y of [0.22, 0.34]) g.add(box(cw * 0.52, 0.03, 0.03, trim, 0, y, F - 0.04));
+  for (const sx of [-1, 1]) {
+    g.add(box(0.36, 0.16, 0.06, trim, sx * (cw / 2 - 0.24), 0.36, F + 0.06));
+    g.add(box(0.24, 0.12, 0.04, L.head, sx * (cw / 2 - 0.27), 0.36, F + 0.02));
+    g.add(box(0.1, 0.12, 0.05, L.amber, sx * (cw / 2 - 0.08), 0.36, F + 0.08));
+  }
+  g.add(box(cw * 1.04, 0.3, 0.3, trim, 0, -0.06, F - 0.06)); // steel bumper
+  g.add(box(cw * 0.6, 0.08, 0.06, black, 0, 0.12, F - 0.15)); // bumper top hoop
+  for (const sx of [-1, 1]) {
+    g.add(tube(V(sx * cw * 0.3, 0.1, F - 0.15), V(sx * cw * 0.28, 0.42, F - 0.12), 0.035, black)); // grille guard uprights
+    g.add(roundLamp(0.1, fog, black, sx * 0.34, 0.02, F - 0.24));
+    g.add(box(0.1, 0.06, 0.04, L.amber, sx * (cw / 2 - 0.02), -0.08, F - 0.22));
+  }
+  g.add(tube(V(-cw * 0.28, 0.42, F - 0.12), V(cw * 0.28, 0.42, F - 0.12), 0.035, black));
+  g.add(box(cw * 1.0, 0.24, 0.22, trim, 0, -0.06, b1 + 0.1)); // rear bumper
+  g.add(box(0.1, 0.1, 0.25, steel, 0, -0.12, b1 + 0.24)); // hitch
+  g.add(at(cyl(0.045, 0.5, chrome, 'z'), cw * 0.32, -0.2, b1 - 0.1)); // exhaust
+}
+
+// 70-series-style wagon: boxy, upright, rounded edges; flat slatted grille between round lamps,
+// amber corners, black flares, steel bumper, black roof-rack basket, barn doors with spare.
+function buildLC70(g, S, spec, M) {
+  const { paint, black, glass, steel, chrome, trim, rimMat, L } = M;
+  const [cw] = spec.chassis.size;
+  const yB = spec.axleY + 0.12;
   const A = arches(spec, 0.07, 0.08);
-  const F = -2.45, Bk = 2.45, gw = cw * 0.95, cowl = -0.95;
-  S.add(profile([...bottom(F + 0.06, Bk, yB, A), [Bk, 0.63], [F + 0.02, 0.63], [F, 0.6], [F, -0.12]], cw, paint));
-  S.add(profile([[cowl, 0.63], [cowl + 0.1, 1.2], [Bk - 0.06, 1.22], [Bk - 0.02, 0.63]], gw, paint));
-  for (const [z0, z1] of [[-0.8, -0.06], [0.04, 0.8], [0.92, 1.6], [1.68, 2.32]]) {
-    S.add(profile([[z0 + (z0 < -0.5 ? 0.04 : 0), 0.71], [z0 + (z0 < -0.5 ? 0.1 : 0), 1.13], [z1, 1.13], [z1, 0.71]], gw + 0.02, glass, 0, false));
+  const F = -2.45, Bk = 2.42, gw = cw * 0.94, cowl = -0.95;
+  S.add(profile([...bottom(F + 0.06, Bk, yB, A), [Bk, 0.66], [-1.0, 0.68], [F + 0.06, 0.64], [F, 0.58], [F, -0.12]], cw, paint, 0, true, RND));
+  S.add(profile([[cowl, 0.66], [cowl + 0.14, 1.22], [Bk - 0.06, 1.24], [Bk - 0.02, 0.66]], gw, paint, 0, true, RND));
+  for (const [z0, z1] of [[-0.8, -0.06], [0.04, 0.8], [0.92, 1.6], [1.68, 2.26]]) {
+    S.add(profile([[z0 + (z0 < -0.5 ? 0.04 : 0), 0.74], [z0 + (z0 < -0.5 ? 0.12 : 0), 1.14], [z1, 1.14], [z1, 0.74]], gw + 0.02, glass, 0, false));
   }
-  g.add(slab(cowl + 0.02, 0.67, cowl + 0.11, 1.16, gw - 0.1, 0.02, glass, 0, 0.012)); // upright windscreen
-  for (const sx of [-1, 1]) g.add(box(gw * 0.4, 0.4, 0.02, glass, sx * gw * 0.24, 0.94, Bk + 0.005)); // barn door glass
+  g.add(slab(cowl + 0.03, 0.7, cowl + 0.15, 1.17, gw - 0.14, 0.02, glass, 0, 0.012)); // upright windscreen
+  for (const sx of [-1, 1]) g.add(box(gw * 0.4, 0.38, 0.02, glass, sx * gw * 0.24, 0.95, Bk + 0.005)); // barn door glass
   g.add(box(0.02, 1.0, 0.03, black, -0.12, 0.6, Bk + 0.01)); // 60/40 split
-  g.add(box(gw + 0.04, 0.03, 3.3, trim, 0, 1.23, 0.75)); // drip rails
-  // hood + fenders: raised centre panel and seams
-  g.add(box(cw * 0.52, 0.04, 1.4, paint, 0, 0.65, -1.7));
-  for (const sx of [-1, 1]) g.add(box(0.015, 0.012, 1.45, black, sx * cw * 0.29, 0.635, -1.7));
-  // flares, steps, crease, mirrors, handles
+  for (const sx of [-1, 1]) g.add(box(0.03, 0.04, 3.3, black, sx * (gw / 2 - 0.01), 1.24, 0.75)); // drip rails
+  // hood: raised centre panel and seams
+  g.add(box(cw * 0.5, 0.04, 1.4, paint, 0, 0.69, -1.7));
+  for (const sx of [-1, 1]) g.add(box(0.015, 0.012, 1.45, black, sx * cw * 0.28, 0.675, -1.7));
+  // flares, steps, mirrors, handles, tail lamps
   for (const sx of [-1, 1]) {
-    for (const a of A) S.add(flare(a, 0.11, yB - 0.03, 0.14, sx * (cw / 2 + 0.035), black));
-    g.add(box(0.12, 0.05, 1.5, steel, sx * (cw / 2 + 0.04), yB - 0.02, 0)); // side steps
-    g.add(box(0.02, 0.03, 4.7, trim, sx * (cw / 2 + 0.005), 0.3, 0)); // body crease
-    g.add(box(0.03, 0.2, 0.2, black, sx * (gw / 2 + 0.2), 0.88, -0.72)); // square mirrors
-    g.add(box(0.2, 0.025, 0.025, black, sx * (gw / 2 + 0.1), 0.8, -0.72));
-    for (const z of [-0.85, -0.03, 0.85]) g.add(box(0.012, 0.85, 0.015, black, sx * (cw / 2 + 0.003), (0.63 + yB) / 2 + 0.05, z));
-    for (const z of [-0.2, 0.62]) g.add(box(0.02, 0.03, 0.12, chrome, sx * (cw / 2 + 0.008), 0.55, z));
-    g.add(box(0.05, 0.24, 0.12, L.tail, sx * (cw / 2 - 0.07), 0.1, Bk + 0.02)); // tail lamps
+    for (const a of A) S.add(flare(a, 0.13, yB - 0.03, 0.17, sx * (cw / 2 + 0.04), black, 0.04));
+    g.add(box(0.16, 0.06, 1.5, black, sx * (cw / 2 + 0.05), yB - 0.02, 0)); // side steps
+    g.add(box(0.03, 0.17, 0.22, black, sx * (gw / 2 + 0.2), 0.9, -0.72)); // square mirrors
+    g.add(box(0.2, 0.03, 0.03, black, sx * (gw / 2 + 0.1), 0.82, -0.72));
+    for (const z of [-0.85, -0.03, 0.85]) g.add(box(0.012, 0.85, 0.015, black, sx * (cw / 2 + 0.003), (0.66 + yB) / 2 + 0.06, z));
+    for (const z of [-0.2, 0.62]) g.add(box(0.03, 0.04, 0.14, black, sx * (cw / 2 + 0.01), 0.58, z));
+    g.add(box(0.03, 0.18, 0.24, paint, sx * (cw / 2 + 0.005), 0.5, 1.9)); // fuel flap
+    g.add(box(0.06, 0.3, 0.14, L.tail, sx * (cw / 2 - 0.08), 0.3, Bk + 0.02)); // tail lamps
+    g.add(box(0.06, 0.08, 0.14, L.amber, sx * (cw / 2 - 0.08), 0.1, Bk + 0.02));
   }
-  // face: slatted grille between round lamps in square bezels, indicators below
-  g.add(box(cw * 0.46, 0.34, 0.04, black, 0, 0.38, F - 0.02));
-  for (let i = -4; i <= 4; i++) g.add(box(0.025, 0.3, 0.03, trim, i * 0.085, 0.38, F - 0.04));
+  // face: flat black grille with horizontal slats between round lamps in square bezels
+  g.add(box(cw * 0.48, 0.34, 0.05, black, 0, 0.36, F - 0.02));
+  for (const y of [0.25, 0.32, 0.39, 0.46]) g.add(box(cw * 0.44, 0.025, 0.03, trim, 0, y, F - 0.05));
+  g.add(box(cw * 0.5, 0.035, 0.04, steel, 0, 0.545, F - 0.03)); // grille top strip
   for (const sx of [-1, 1]) {
-    g.add(box(0.3, 0.3, 0.03, trim, sx * (cw / 2 - 0.22), 0.38, F - 0.02));
-    g.add(at(cyl(0.1, 0.05, L.head, 'z', 12), sx * (cw / 2 - 0.22), 0.38, F - 0.04));
-    g.add(at(cyl(0.05, 0.04, L.amber, 'z', 8), sx * (cw / 2 - 0.22), 0.13, F - 0.03));
+    g.add(box(0.28, 0.28, 0.04, black, sx * (cw / 2 - 0.3), 0.38, F - 0.02));
+    g.add(roundLamp(0.095, L.head, steel, sx * (cw / 2 - 0.3), 0.38, F - 0.03));
+    g.add(box(0.1, 0.22, 0.06, L.amber, sx * (cw / 2 - 0.08), 0.38, F - 0.01)); // amber corners
   }
-  // snorkel up the right A-pillar
-  const sx0 = cw / 2 + 0.07;
-  g.add(tube(V(sx0, 0.35, -1.3), V(sx0, 0.62, -1.05), 0.07, black));
-  g.add(tube(V(sx0, 0.62, -1.05), V(sx0, 1.25, cowl + 0.12), 0.07, black));
-  g.add(at(cyl(0.09, 0.2, black, 'z'), sx0, 1.3, cowl + 0.04));
-  // roof rack + cargo, spare on the barn door, bull bar + winch, rear bumper
-  g.add(box(gw * 0.98, 0.05, 2.6, black, 0, 1.3, 0.9));
-  g.add(box(0.5, 0.25, 0.6, std(0x7a6a4a), 0.3, 1.45, 1.4));
-  g.add(at(cyl(0.12, 0.6, std(0x4a7a4a), 'x'), -0.35, 1.45, 0.6));
-  g.add(spareTire(spec, rimMat, -0.4, 0.62, Bk + 0.18, 'z'));
-  g.add(box(cw * 0.98, 0.22, 0.2, steel, 0, -0.08, F - 0.08));
-  for (const sx of [-0.45, 0.45]) g.add(tube(V(sx, -0.02, F - 0.14), V(sx * 0.9, 0.5, F - 0.08), 0.035, steel));
-  g.add(tube(V(-0.42, 0.5, F - 0.08), V(0.42, 0.5, F - 0.08), 0.035, steel));
-  g.add(at(cyl(0.065, 0.32, std(0x3a3a3a), 'x'), 0, -0.06, F - 0.19));
-  g.add(box(cw, 0.2, 0.15, trim, 0, -0.12, Bk + 0.08));
+  // roof-rack basket: perimeter rails on legs, crossbars, wind deflector
+  const rx = gw / 2 - 0.04, rz0 = -0.6, rz1 = 2.1, ry = 1.4;
+  for (const sx of [-1, 1]) {
+    g.add(tube(V(sx * rx, ry, rz0), V(sx * rx, ry, rz1), 0.03, black));
+    g.add(tube(V(sx * rx, ry - 0.1, rz0 + 0.05), V(sx * rx, ry - 0.1, rz1 - 0.05), 0.022, black));
+    for (const z of [rz0 + 0.1, 0.75, rz1 - 0.1]) g.add(box(0.06, 0.18, 0.08, black, sx * rx, 1.3, z)); // legs
+  }
+  for (const z of [rz0, rz1]) g.add(tube(V(-rx, ry, z), V(rx, ry, z), 0.03, black));
+  for (let i = 1; i < 7; i++) g.add(box(gw - 0.1, 0.025, 0.04, black, 0, ry - 0.1, rz0 + (i * (rz1 - rz0)) / 7));
+  g.add(box(gw - 0.06, 0.1, 0.04, black, 0, ry + 0.05, rz0 - 0.02)); // wind deflector
+  // spare on the barn door, steel bumpers
+  g.add(spareTire(spec, rimMat, 0.3, 0.62, Bk + 0.18, 'z'));
+  g.add(box(cw * 1.02, 0.26, 0.24, trim, 0, -0.06, F - 0.08));
+  for (const sx of [-1, 1]) g.add(box(0.12, 0.05, 0.04, L.amber, sx * (cw / 2 - 0.15), -0.06, F - 0.21));
+  g.add(box(cw * 1.0, 0.22, 0.18, trim, 0, -0.1, Bk + 0.08));
   g.add(at(cyl(0.04, 0.5, chrome, 'z'), -cw * 0.3, -0.25, Bk - 0.15));
 }
 
-// Rally sedan (Impreza WRX STI mould): low wedge nose, bonnet scoop, wide blistered arches,
-// sloping rear glass, tall wing, rally lamp pod, mud flaps, gold wheels.
+// Rounded early-2000s rally sedan: low nose, big bonnet scoop, blistered arches, tall rear
+// wing, two big round driving lamps, gold wheels and an original gold swoosh livery.
 function buildWRX(g, S, spec, M) {
-  const { paint, dark, black, glass, steel, trim, L } = M;
+  const { paint, black, glass, steel, L } = M;
   const [cw] = spec.chassis.size, ay = spec.axleY, wb = spec.wheelbase, R = spec.tire.radius;
   const yB = ay + 0.04;
   const A = arches(spec, 0.065, 0.045);
   const F = -2.2, Bk = 2.2, gw = cw * 0.84;
-  const white = std(0xf2f2f2, { roughness: 0.4 });
-  S.add(profile([...bottom(F + 0.08, Bk - 0.06, yB, A), [Bk, -0.1], [Bk + 0.02, 0.22], [Bk - 0.05, 0.36], [1.55, 0.39], [-1.05, 0.36], [-2.06, 0.18], [F, 0.1], [F - 0.02, -0.1]], cw, paint));
-  S.add(profile([[-1.05, 0.36], [-0.3, 0.84], [0.7, 0.86], [1.55, 0.39]], gw, paint));
-  S.add(profile([[-0.9, 0.42], [-0.32, 0.79], [0.12, 0.8], [0.12, 0.42]], gw + 0.02, glass, 0, false));
-  S.add(profile([[0.2, 0.42], [0.2, 0.8], [0.66, 0.81], [1.12, 0.48], [1.12, 0.42]], gw + 0.02, glass, 0, false));
-  g.add(slab(-1.02, 0.39, -0.32, 0.83, gw - 0.08, 0.02, glass, 0, 0.012));
-  g.add(slab(0.74, 0.84, 1.5, 0.42, gw - 0.1, 0.02, glass, 0, 0.012));
-  g.add(box(0.45, 0.05, 0.45, steel, 0, 0.88, 0.15)); // roof vent
+  const gold = std(0xd8b040, { roughness: 0.5 });
+  const lamp = std(0xfff6dc, { emissive: 0xfff0c0, emissiveIntensity: 0.7, roughness: 0.2 });
+  S.add(profile([...bottom(F + 0.08, Bk - 0.06, yB, A), [Bk, -0.1], [Bk + 0.02, 0.22], [Bk - 0.05, 0.38], [1.55, 0.41], [-1.05, 0.38], [-1.9, 0.26], [F, 0.12], [F - 0.02, -0.1]], cw, paint, 0, true, RND));
+  S.add(profile([[-1.05, 0.36], [-0.3, 0.84], [0.7, 0.86], [1.55, 0.39]], gw, paint, 0, true, 0.12));
+  S.add(profile([[-0.9, 0.44], [-0.32, 0.79], [0.12, 0.8], [0.12, 0.44]], gw + 0.02, glass, 0, false));
+  S.add(profile([[0.2, 0.44], [0.2, 0.8], [0.66, 0.81], [1.12, 0.5], [1.12, 0.44]], gw + 0.02, glass, 0, false));
+  g.add(slab(-1.02, 0.41, -0.32, 0.83, gw - 0.14, 0.02, glass, 0, 0.012));
+  g.add(slab(0.74, 0.84, 1.5, 0.44, gw - 0.16, 0.02, glass, 0, 0.012));
   // blistered arches in body colour
   for (const sx of [-1, 1]) {
-    for (const a of A) S.add(flare(a, 0.07, yB - 0.04, 0.16, sx * (cw / 2 + 0.02), paint));
-    g.add(box(0.05, 0.08, 1.7, black, sx * (cw / 2 + 0.02), yB + 0.01, 0)); // side skirts
-    g.add(box(0.04, 0.09, 0.16, black, sx * (gw / 2 + 0.13), 0.45, -0.82)); // mirrors
-    g.add(box(0.1, 0.025, 0.05, black, sx * (gw / 2 + 0.07), 0.42, -0.84));
-    g.add(box(0.012, 0.6, 0.015, black, sx * (cw / 2 + 0.003), 0.08, 0.16));
-    g.add(box(0.02, 0.05, 2.2, white, sx * (cw / 2 + 0.006), 0.2, 0.1)); // livery stripe
-    g.add(box(0.01, 0.22, 0.38, white, sx * (cw / 2 + 0.008), 0.0, -0.32)); // door number board
-    g.add(box(0.3, 0.09, 0.04, L.tail, sx * (cw / 2 - 0.2), 0.27, Bk + 0.0)); // tail lamps
+    for (const a of A) S.add(flare(a, 0.08, yB - 0.04, 0.18, sx * (cw / 2 + 0.02), paint, 0.05));
+    g.add(box(0.06, 0.08, 1.7, black, sx * (cw / 2 + 0.01), yB + 0.01, 0)); // side skirts
+    g.add(box(0.06, 0.11, 0.18, paint, sx * (gw / 2 + 0.14), 0.47, -0.82)); // mirrors
+    g.add(box(0.1, 0.03, 0.05, black, sx * (gw / 2 + 0.07), 0.44, -0.84));
+    g.add(box(0.012, 0.6, 0.015, black, sx * (cw / 2 + 0.003), 0.08, 0.16)); // door seam
+    for (const z of [-0.3, 0.55]) g.add(box(0.025, 0.035, 0.12, black, sx * (cw / 2 + 0.008), 0.3, z)); // handles
+    g.add(box(0.3, 0.12, 0.05, L.tail, sx * (cw / 2 - 0.2), 0.27, Bk + 0.0)); // tail lamps
+    // livery: a gold crescent swoosh sweeping back along the doors, three trailing dots
+    const sw = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.3, 18, 1, Math.PI * 0.55, Math.PI * 0.95), gold);
+    sw.rotation.y = sx * Math.PI / 2;
+    sw.position.set(sx * (cw / 2 + 0.012), 0.08, -0.05); g.add(sw);
+    const tail = box(0.012, 0.045, 1.1, gold, sx * (cw / 2 + 0.012), 0.3, 0.52); tail.rotation.x = -0.12; g.add(tail);
+    for (const [z, y, s] of [[0.2, 0.08, 0.07], [0.38, 0.13, 0.055], [0.53, 0.17, 0.045]]) {
+      const d = box(0.012, s, s, gold, sx * (cw / 2 + 0.012), y, z); d.rotation.x = Math.PI / 4; g.add(d);
+    }
     // mud flaps behind each wheel
-    for (const z of [-wb / 2, wb / 2]) g.add(box(0.2, 0.3, 0.02, std(0xe6e6e6), sx * (spec.track / 2), ay - 0.12, z + R + 0.09));
+    for (const z of [-wb / 2, wb / 2]) g.add(box(0.2, 0.3, 0.02, black, sx * (spec.track / 2), ay - 0.12, z + R + 0.09));
   }
-  // bonnet scoop, nose: hawk-eye lamps, small grille, big intake, rally lamp pod
-  g.add(wedge(0.52, 0.08, 0.44, paint, 0, 0.31, -1.6, 0.17)); // bonnet scoop
-  g.add(box(0.44, 0.05, 0.02, black, 0, 0.32, -1.82));
-  for (const sx of [-1, 1]) { const h = box(0.42, 0.1, 0.06, L.head, sx * (cw / 2 - 0.26), 0.15, F + 0.05); h.rotation.y = -sx * 0.35; h.rotation.z = sx * 0.1; g.add(h); }
-  g.add(box(cw * 0.3, 0.09, 0.04, black, 0, 0.06, F - 0.02));
-  g.add(box(cw * 0.62, 0.14, 0.04, black, 0, -0.1, F - 0.01));
-  g.add(box(1.0, 0.16, 0.08, black, 0, 0.03, F - 0.07));
-  for (const sx of [-0.36, -0.12, 0.12, 0.36]) g.add(at(cyl(0.08, 0.05, L.head, 'z', 10), sx, 0.03, F - 0.12));
-  // tall rear wing on pylons
-  for (const sx of [-0.55, 0.55]) g.add(box(0.05, 0.2, 0.16, black, sx, 0.47, Bk - 0.22));
-  g.add(wedge(cw * 0.92, 0.035, 0.3, black, 0, 0.58, Bk - 0.2, -0.1));
-  for (const sx of [-1, 1]) g.add(box(0.03, 0.1, 0.32, black, sx * cw * 0.46, 0.6, Bk - 0.2));
+  // big bonnet scoop
+  g.add(wedge(0.56, 0.1, 0.5, paint, 0, 0.36, -1.55, 0.14));
+  g.add(box(0.46, 0.06, 0.02, black, 0, 0.37, -1.8));
+  // nose: swept lamps, small grille, wide intake, two big round driving lamps
+  for (const sx of [-1, 1]) { const h = box(0.4, 0.11, 0.08, L.head, sx * (cw / 2 - 0.26), 0.17, F + 0.06); h.rotation.y = -sx * 0.3; h.rotation.z = sx * 0.08; g.add(h); }
+  g.add(box(cw * 0.32, 0.1, 0.05, black, 0, 0.1, F - 0.02));
+  g.add(box(cw * 0.62, 0.13, 0.05, black, 0, -0.1, F - 0.01));
+  for (const sx of [-1, 1]) {
+    g.add(roundLamp(0.11, lamp, black, sx * 0.48, -0.06, F - 0.06));
+    g.add(box(0.14, 0.06, 0.05, black, sx * (cw / 2 - 0.12), -0.14, F + 0.01)); // fog vents
+  }
+  g.add(box(cw * 0.9, 0.04, 0.12, black, 0, -0.2, F + 0.02)); // front lip
+  // tall rear wing on pylons with endplates
+  for (const sx of [-0.55, 0.55]) { const p = box(0.06, 0.3, 0.18, paint, sx, 0.52, Bk - 0.24); p.rotation.x = -0.25; g.add(p); }
+  g.add(wedge(cw * 0.9, 0.05, 0.34, paint, 0, 0.68, Bk - 0.16, -0.12));
+  for (const sx of [-1, 1]) g.add(box(0.04, 0.16, 0.38, paint, sx * cw * 0.45, 0.7, Bk - 0.16));
   g.add(box(cw * 0.7, 0.04, 1.1, steel, 0, -0.2, F + 0.8)); // sump guard
-  g.add(at(cyl(0.05, 0.3, steel, 'z'), cw * 0.3, -0.17, Bk));
+  for (const sx of [-1, 1]) g.add(at(cyl(0.05, 0.3, steel, 'z'), sx * cw * 0.28, -0.17, Bk));
 }
 
 function buildBody(spec) {
@@ -390,7 +450,8 @@ function buildWheel(spec) {
   // tread lugs, wrapping slightly onto the shoulders
   const lugs = [];
   // garage tread: mud-terrains get fewer, chunkier lugs; rock compound sits in between
-  const lug = { mt: [0.72, 1.35], rock: [0.85, 1.15] }[t.tread] || [1, 1];
+  const lug = ({ mt: [0.72, 1.35], rock: [0.85, 1.15] }[t.tread] || [1, 1]).slice();
+  if (spec.body === 'taco' || spec.body === 'lc70') lug[1] *= 1.3; // chunky all-terrain lugs
   const n = Math.round((spec.body === 'wrx' ? 22 : 18) * lug[0]);
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
@@ -413,11 +474,13 @@ function buildWheel(spec) {
     for (const s of [-1, 1]) { const bl = new THREE.Mesh(new THREE.TorusGeometry(rimR, 0.028, 5, 14), ring); bl.rotation.y = Math.PI / 2; bl.position.x = s * t.width * 0.52; g.add(bl); }
   }
   // spokes (dark, so rotation is visible) + hub cap
-  const spokeMat = std(0x2e3034, { roughness: 0.6 });
-  const ns = spec.body === 'wrx' ? 5 : 6;
+  // rally wheel: dark barrel with six thick spokes in the rim colour
+  if (spec.body === 'wrx') rim.material = std(0x2e3034, { roughness: 0.6 });
+  const spokeMat = spec.body === 'wrx' ? rimMat : std(0x2e3034, { roughness: 0.6 });
+  const ns = spec.body === 'wrx' ? 3 : 6;
   for (const side of [-1, 1]) {
     for (let i = 0; i < ns; i++) {
-      const s = box(0.025, rimR * 1.85, rimR * 0.2, spokeMat, side * t.width * 0.515, 0, 0);
+      const s = box(0.025, rimR * 1.85, rimR * (spec.body === 'wrx' ? 0.28 : 0.2), spokeMat, side * t.width * 0.515, 0, 0);
       s.rotation.x = (i / ns) * Math.PI; g.add(s);
     }
     g.add(at(cyl(rimR * 0.25, 0.04, rimMat, 'x', 8), side * t.width * 0.53, 0, 0));
