@@ -8,6 +8,7 @@
 const { app, BrowserWindow, Menu, protocol, session, shell, ipcMain, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { resolveAppPath, isAllowedExternal } = require('./policy.cjs');
 
 const APP_ID = 'com.rmamujee.lowrange';
 const SCHEME = 'app';
@@ -15,9 +16,6 @@ const HOST = 'lowrange';
 const ORIGIN = `${SCHEME}://${HOST}`;
 const DIST = path.join(__dirname, '..', 'dist');
 const IS_DEV = !app.isPackaged;
-
-// Only these sites may be opened, and only in the user's own browser.
-const EXTERNAL_ALLOW = new Set(['github.com', 'threejs.org', 'rapier.rs']);
 
 const CSP = [
   "default-src 'none'",
@@ -42,6 +40,15 @@ const MIME = {
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream',
 };
+
+// Shipped builds can't be driven over the DevTools protocol by whoever launches them with
+// --remote-debugging-port (the Node --inspect flags are already off via fuses). The packaged
+// smoke test opts back in with LOWRANGE_ALLOW_CDP=1.
+if (!IS_DEV && process.env.LOWRANGE_ALLOW_CDP !== '1') {
+  for (const sw of ['remote-debugging-port', 'remote-debugging-pipe', 'remote-debugging-address', 'remote-allow-origins']) {
+    app.commandLine.removeSwitch(sw);
+  }
+}
 
 app.setAppUserModelId(APP_ID);
 app.enableSandbox();
@@ -100,10 +107,7 @@ function isAppUrl(url) {
 }
 
 function openExternalIfAllowed(url) {
-  try {
-    const u = new URL(url);
-    if (u.protocol === 'https:' && EXTERNAL_ALLOW.has(u.hostname.replace(/^www\./, ''))) shell.openExternal(u.toString());
-  } catch { /* malformed: ignore */ }
+  if (isAllowedExternal(url)) shell.openExternal(new URL(url).toString());
 }
 
 function fromApp(event) {
@@ -122,10 +126,8 @@ function start() {
   ses.protocol.handle(SCHEME, async (req) => {
     const u = new URL(req.url);
     if (u.host !== HOST) return new Response('Not found', { status: 404 });
-    let rel = decodeURIComponent(u.pathname);
-    if (rel === '/' || rel === '') rel = '/index.html';
-    const file = path.normalize(path.join(DIST, rel));
-    if (file !== DIST && !file.startsWith(DIST + path.sep)) return new Response('Forbidden', { status: 403 });
+    const file = resolveAppPath(DIST, u.pathname);
+    if (!file) return new Response('Forbidden', { status: 403 });
     try {
       const body = await fs.promises.readFile(file);
       return new Response(body, {

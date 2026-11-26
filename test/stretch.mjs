@@ -1,12 +1,12 @@
 // Measure joint separation: axle/wheel positions in the chassis frame vs where the joints say they should be.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, pathPoint } from '../src/terrain.js';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle, qrot } from '../src/vehicle.js';
 await RAPIER.init();
 const H=1/200, world=new RAPIER.World({x:0,y:-9.81,z:0}); world.timestep=H; world.numSolverIterations=+(process.argv[3]||8);
 const rocks=generateRocks(), terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
-const spec=VEHICLES.find(v=>v.id===(process.argv[2]||'ranger'));
+const spec=ALL_VEHICLES.find(v=>v.id===(process.argv[2]||'lc70'));
 const t=TRAILS[1]; const p0=pathPoint(t,4);
 const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));
 const d=car.dt; d.range='low'; d.gear=1; d.lockR=true;

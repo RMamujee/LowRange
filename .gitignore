@@ -10,3 +10,9 @@ release/
 tools/blender/out/
 __pycache__/
 tools/blender/__pycache__/
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.blend1

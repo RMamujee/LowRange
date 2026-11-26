@@ -28,7 +28,7 @@ const ROAD_DEFS = [
 const TRAIL_DEFS = [
   { name: 'Pinyon Two-Track', diff: 'green', pts: [[-20, 13], [-36, 17], [-60, 25], [-80, 50], [-90, 80], [-70, 105], [-62, 122]] },
   { name: 'Granite Steps', diff: 'blue', pts: [[40, 131], [55, 100], [70, 80], [100, 70], [125, 60], [146, 50]] },
-  { name: 'Bog Run', diff: 'blue', pts: [[-148, 20], [-120, 15], [-95, 0], [-80, -20], [-95, -45], [-120, -65]], mud: [0.2, 0.8], width: 7.5, maxGrade: 0.1 },
+  { name: 'Bog Run', diff: 'blue', pts: [[-148, 20], [-120, 15], [-95, 0], [-80, -20], [-95, -45], [-120, -65]], mud: [0.12, 0.88], mudSink: 0.5, width: 7.5, maxGrade: 0.1 },
   { name: 'Boulder Alley', diff: 'black', pts: [[96, -96], [80, -70], [72, -50], [56, -45], [40, -60], [30, -85], [10, -110], [-8, -133]] },
   { name: 'Widowmaker Falls', diff: 'dblack', pts: [[-68, -121], [-55, -95], [-40, -75], [-30, -55], [-25, -35], [-5, -32], [20, -24]] },
 ];
@@ -144,11 +144,12 @@ function bake() {
           else {
             // rough tread, eased in away from the trail ends
             const ends = smooth(0, 12, Math.min(c.s, q.length - c.s));
-            const rough = { green: 0.12, blue: 0.22, black: 0.24, dblack: 0.28 }[q.diff];
+            const rough = { green: 0.15, blue: 0.26, black: 0.28, dblack: 0.32 }[q.diff];
             // steep pitches get smoother rock: small steps on a 35% grade act like ledges
             const steep = q.diff === 'black' || q.diff === 'dblack' ? 1 - 0.6 * smooth(0.15, 0.35, Math.abs(c.g)) : 1;
             surf += fbm(x * 0.45, z * 0.45, 2) * rough * steep * ends;
-            if (q.diff === 'black' || q.diff === 'dblack') surf += clamp(c.lat, -qhw - 0.5, qhw + 0.5) * 0.13 * Math.sin(c.s * 0.045) * ends; // off-camber
+            const camber = { green: 0, blue: q.mud ? 0 : 0.07, black: 0.16, dblack: 0.17 }[q.diff];
+            if (camber) surf += clamp(c.lat, -qhw - 0.5, qhw + 0.5) * camber * Math.sin(c.s * 0.045) * ends; // off-camber
           }
           const ww = w * w * (q.kind === 'road' ? 2 : 1);
           num += surf * ww; den += ww; W = Math.max(W, w);
@@ -160,7 +161,11 @@ function bake() {
           if (p.kind === 'road') mat = MAT.ROAD;
           else {
             const f = best.s / p.length;
-            if (p.mud && f > p.mud[0] && f < p.mud[1]) { mat = MAT.MUD; sink = MUD_SINK * smooth(hw + 0.5, hw - 1, best.d); h -= sink; }
+            if (p.mud && f > p.mud[0] && f < p.mud[1]) {
+              // the bog's floor is uneven: soft holes and firmer humps under a flat-looking surface
+              const depth = (p.mudSink ?? MUD_SINK) * (1 + 0.4 * fbm(x * 0.16 + 3, z * 0.16 - 7, 2));
+              mat = MAT.MUD; sink = depth * smooth(hw + 0.5, hw - 1, best.d); h -= sink;
+            }
             else mat = p.diff === 'green' ? (n > 0.3 ? MAT.GRAVEL : MAT.DIRT) : (n > (p.diff === 'blue' ? 0.15 : 0.35) ? MAT.DIRT : MAT.ROCK); // hard trails are mostly bare rock
           }
         } else if (w > 0.3 && mat === MAT.GRASS) mat = MAT.DIRT;
@@ -188,9 +193,12 @@ export function generateRocks() {
   // through the corridor so there is always a line; boulders crowd its edges, low crawl rocks
   // sit where the tyres go, V-notches straddle it and ledges span it. Step heights shrink on
   // steep pitches: a rigid tyre that walks up a 0.6 m step on the flat can't on a 40% grade.
+  const grade = (t, s) => { let g = 0; for (let q = -3; q < 3; q += 0.5) g = Math.max(g, Math.abs(pathPoint(t, s + q + 0.5).h - pathPoint(t, s + q).h) / 0.5); return g; };
+  // tallest step a skilled driver can still walk a 0.45-0.5 m tyre up at this grade
+  // (test/ledgegrade.mjs: the Cruiser walks 0.7 m on the flat, 0.6 at 20%, 0.5 at 30%, 0.3 at 38%)
+  const stepCap = (g) => (g < 0.2 ? 0.65 : g < 0.3 ? lerp(0.65, 0.48, (g - 0.2) / 0.1) : g < 0.38 ? lerp(0.48, 0.26, (g - 0.3) / 0.08) : 0.22);
   const hardTrail = (t, spec) => {
-    const hw = t.width / 2, laneHalf = 1.4, amp = hw - laneHalf - 0.1, ph = R() * Math.PI * 2;
-    const dbl = t.diff === 'dblack';
+    const hw = t.width / 2, laneHalf = spec.lane, amp = hw - laneHalf - 0.1, ph = R() * Math.PI * 2;
     // on bends the lane swings to the inside and widens (long rigs cut the corner), and the
     // meander fades out so the lane doesn't wander and turn at the same time
     const curv = (s) => { const a = pathPoint(t, s - 5), b = pathPoint(t, s + 5); const d = Math.atan2(b.tx, b.tz) - Math.atan2(a.tx, a.tz); return Math.atan2(Math.sin(d), Math.cos(d)) / 10; };
@@ -199,25 +207,26 @@ export function generateRocks() {
       const lc = amp * Math.sin(s * (Math.PI * 2 / 60) + ph) * (1 - bend) + clamp(-k * 18, -0.9, 0.9);
       return { lc: lc * smooth(6, 20, Math.min(s, t.length - s)), lh: laneHalf + 0.5 * bend };
     };
-    const grade = (s) => { let g = 0; for (let q = -3; q < 3; q += 0.5) g = Math.max(g, Math.abs(pathPoint(t, s + q + 0.5).h - pathPoint(t, s + q).h) / 0.5); return g; };
-    // tallest step a skilled driver can still walk a 0.45-0.5 m tyre up at this grade
-    const stepCap = (g) => (g < 0.2 ? 0.65 : g < 0.3 ? lerp(0.65, 0.48, (g - 0.2) / 0.1) : g < 0.38 ? lerp(0.48, 0.26, (g - 0.3) / 0.08) : 0.22);
     let side = 1, nextLedge = 14;
     for (let s = 10; s < t.length - 8; s += spec.every * (0.7 + R() * 0.6)) {
       const p = pathPoint(t, s);
       const nx = -p.tz, nz = p.tx; // lateral
-      const { lc, lh } = lane(s), cap = stepCap(grade(s));
+      const g = grade(t, s), { lc, lh } = lane(s);
+      const cap = stepCap(g) + lerp(spec.cap[0], spec.cap[1], smooth(0.1, 0.25, g)); // per-trail nudge: [flat, steep]
       if (s > nextLedge) {
         const top = Math.min(lerp(spec.ledgeH[0], spec.ledgeH[1], R()), cap);
         const depth = 3.2 + R() * 1.2; // deeper than a wheelbase, so a step can't high-centre the frame
-        if (top >= 0.2) { ledge(p.x, p.z, Math.atan2(p.tx, p.tz), t.width + 1.2, depth, top); s += depth / 2 + 1.5; }
-        nextLedge = s + spec.ledgeEvery * (0.75 + R() * 0.5);
+        // wider than the corridor and its shoulders, so the step can't be driven around
+        if (top >= 0.2) { ledge(p.x, p.z, Math.atan2(p.tx, p.tz), t.width + 2.4, depth, top); s += depth / 2 + 1.5; }
+        // the flat between two ledges must be longer than a rig, or tall steps form a pit the
+        // bumper noses into coming off one ledge and can't climb out of onto the next
+        nextLedge = s + Math.max(7.5, spec.ledgeEvery * (0.75 + R() * 0.5));
         continue;
       }
       if (R() < 0.18) {
         // V-notch: two low, sloping rocks either side of the lane centre whose flanks sit
         // under the tyres, so you ride up them while the diff and frame thread the gap
-        const sz = 1.1 + R() * 0.35, top = Math.min(dbl ? 0.55 : 0.45, cap);
+        const sz = 1.1 + R() * 0.35, top = Math.min(spec.notchTop, cap);
         for (const sd of [1, -1]) {
           const r = shape(sz, 0.55, 0.3, top);
           const c = lc + sd * (0.5 + reach(r, -nx * sd, -nz * sd));
@@ -234,8 +243,8 @@ export function generateRocks() {
         side = -side;
       }
       // crawl rocks in the tyre tracks: small and low enough to climb, not to high-centre on
-      if (R() < (dbl ? 0.65 : 0.55)) {
-        const r = shape(0.35 + R() * 0.25, 0.8, 0.35, Math.min(dbl ? 0.38 : 0.32, cap));
+      if (R() < spec.crawl) {
+        const r = shape(0.35 + R() * 0.3, 0.8, 0.35, Math.min(spec.crawlTop, cap));
         const c = lc + (R() < 0.5 ? -1 : 1) * (0.75 + R() * 0.25);
         put(r, p.x + nx * c, p.z + nz * c, true);
       }
@@ -251,10 +260,11 @@ export function generateRocks() {
 
   for (const t of TRAILS) {
     const spec = {
-      green:  { every: 9,   min: 0.25, max: 0.6, ledgeEvery: 0,  ledgeH: [0, 0], notch: false, top: 0.22 },
-      blue:   { every: 4.5, min: 0.4,  max: 1.0, ledgeEvery: 22, ledgeH: [0.18, 0.32], notch: false, top: 0.42 },
-      black:  { every: 3,   min: 0.6,  max: 1.5, ledgeEvery: 11, ledgeH: [0.3, 0.48], notch: true, top: 0.6 },
-      dblack: { every: 2.6, min: 0.8,  max: 1.9, ledgeEvery: 5.5, ledgeH: [0.42, 0.62], notch: true, top: 0.75 },
+      // green rocks stay under the Rally Sedan's 0.25 m sills; its ledges are curb-sized
+      green:  { every: 7,   min: 0.25, max: 0.7, ledgeEvery: 28, ledgeH: [0.1, 0.17], ledgeD: [3, 1], notch: false, top: 0.2 },
+      blue:   { every: 3.6, min: 0.45, max: 1.15, ledgeEvery: 11, ledgeH: [0.48, 0.62], ledgeD: [3.4, 1], notch: false, top: 0.55 },
+      black:  { every: 2.6, min: 0.7,  max: 1.7, ledgeEvery: 8,  ledgeH: [0.5, 0.68], notch: true, top: 0.7, lane: 1.4, cap: [0, 0], notchTop: 0.5, crawl: 0.65, crawlTop: 0.38 },
+      dblack: { every: 2.3, min: 0.85, max: 2.0, ledgeEvery: 4, ledgeH: [0.55, 0.74], notch: true, top: 0.8, lane: 1.3, cap: [0.05, 0.05], notchTop: 0.6, crawl: 0.8, crawlTop: 0.45 },
     }[t.diff];
     const hw = t.width / 2;
     if (t.diff === 'black' || t.diff === 'dblack') { hardTrail(t, spec); continue; }
@@ -264,9 +274,12 @@ export function generateRocks() {
       const nx = -p.tz, nz = p.tx; // lateral
       if (t.mud) { const f = s / t.length; if (f > t.mud[0] - 0.03 && f < t.mud[1] + 0.03) continue; }
       if (s > nextLedge) {
-        ledge(p.x, p.z, Math.atan2(p.tx, p.tz), t.width + 1.2, 1.4 + R() * 1.2, lerp(spec.ledgeH[0], spec.ledgeH[1], R()));
+        // deeper than a wheelbase, so a step can't hang the frame; lower on steep pitches
+        const depth = spec.ledgeD[0] + R() * spec.ledgeD[1];
+        const top = Math.min(lerp(spec.ledgeH[0], spec.ledgeH[1], R()), stepCap(grade(t, s)));
+        ledge(p.x, p.z, Math.atan2(p.tx, p.tz), t.width + 1.2, depth, top);
         nextLedge = s + spec.ledgeEvery * (0.75 + R() * 0.5);
-        s += 2.5;
+        s += depth / 2 + 1.5;
         continue;
       }
       if (spec.notch && R() < 0.18) {

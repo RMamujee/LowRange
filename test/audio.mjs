@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 const oldSrc = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : null;
 const newSrc = fs.readFileSync(new URL('../src/audio.js', import.meta.url), 'utf8');
-const browser = await chromium.launch({ executablePath: '<home>/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe' });
+const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {}); // CHROME=path/to/chrome.exe to use a specific browser
 const page = await browser.newPage();
 const out = new URL('./audio-samples/', import.meta.url);
 fs.mkdirSync(out, { recursive: true });

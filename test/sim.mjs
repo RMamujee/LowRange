@@ -1,10 +1,10 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt } from '../src/terrain.js';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 await RAPIER.init();
 const H = 1/200;
-const id = process.argv[2] || 'goat';
+const id = process.argv[2] || 'lc70';
 const scen = process.argv[3] || 'flat';
 const world = new RAPIER.World({x:0,y:-9.81,z:0});
 world.timestep = H; world.numSolverIterations = 8;
@@ -12,7 +12,7 @@ let t0=Date.now();
 const rocks = generateRocks(), trees = generateTrees(rocks);
 const terrain = buildTerrainPhysics(RAPIER, world, rocks, trees);
 console.log('terrain built', Date.now()-t0,'ms rocks',rocks.length,'trees',trees.length);
-const spec = VEHICLES.find(v=>v.id===id);
+const spec = ALL_VEHICLES.find(v=>v.id===id);
 let sx=0, sz=0, yaw=0;
 if (scen==='garden'){ sx=40; sz=-34; yaw=-Math.PI/2; } // drive +x into garden: forward is -Z rotated
 const y0 = heightAt(sx,sz) + spec.tire.radius - spec.axleY + 0.3;

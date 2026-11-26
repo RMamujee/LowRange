@@ -1,7 +1,7 @@
 // Autopilot: follow each trail centreline in 4-Low with lockers; report progress.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, pathPoint } from '../src/terrain.js';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 await RAPIER.init();
 const H=1/200;
@@ -13,13 +13,13 @@ function pickLine(t,s,spec){ // lateral offset with most clearance from boulders
   for(let o=-hw+0.6;o<=hw-0.6;o+=0.25){ let c=1e9;
     for(let q=s;q<s+8;q+=1){ const p=pathPoint(t,q); const x=p.x-p.tz*o, z=p.z+p.tx*o;
       for(const r of rocks){ if(r.ledge) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
-    c -= Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} }
+    c = Math.min(c, 2.5) - Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} } // past 2.5 m of room, stay central
   return bestO; }
 const terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
-const ids=(process.argv[2]||'goat,ranger,mule').split(',');
+const ids=(process.argv[2]||'lc70,taco,wrx').split(',');
 const secs=+(process.argv[3]||120);
 for (const id of ids) {
-  const spec=VEHICLES.find(v=>v.id===id); const res=[];
+  const spec=ALL_VEHICLES.find(v=>v.id===id); const res=[];
   for (const t of TRAILS.filter(t=>!process.argv[4]||t.diff===process.argv[4])) {
     const p0=pathPoint(t,4);
     const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));

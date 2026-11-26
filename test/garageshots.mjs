@@ -22,8 +22,6 @@ for (const [i, name, picks] of [
   [0, 'taco', [['tyreSize', '41'], ['tread', 'Mud'], ['lift', '+4'], ['travel', 'Long'], ['engine', 'Built'], ['final', '5.38'], ['low', '5.1'], ['front', 'Locker'], ['skid', 'Fitted'], ['sliders', 'Fitted'], ['bumpers', 'Steel'], ['paint', '#3f7f8f'], ['rim', '#232427']]],
   [1, 'lc70', [['tyreSize', '40'], ['lift', '+2'], ['turbo', 'Bigger'], ['paint', '#e46a1e']]],
   [2, 'wrx', [['tyreSize', '28'], ['lift', '+4'], ['low', '2.00'], ['paint', '#d9c84a']]],
-  [3, 'goat', [['tyreSize', '44'], ['lift', '+4'], ['travel', 'Long'], ['tread', 'Rock'], ['rim', '#c9a43a']]],
-  [4, 'mule', [['tyreSize', '51'], ['tread', 'Mud'], ['lift', '+2'], ['paint', '#e9e4d4']]],
 ]) {
   await page.evaluate((i) => document.querySelectorAll('.card')[i].click(), i);
   await page.click('#garageBtn');

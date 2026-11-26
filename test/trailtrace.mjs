@@ -1,7 +1,7 @@
 // Trace one vehicle on one trail: node test/trailtrace.mjs <id> <secs> _ <trailIndex> [s0] [s1]
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, pathPoint } from '../src/terrain.js';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 await RAPIER.init();
 const H=1/200;
@@ -13,13 +13,13 @@ function pickLine(t,s,spec){ // lateral offset with most clearance from boulders
   for(let o=-hw+0.6;o<=hw-0.6;o+=0.25){ let c=1e9;
     for(let q=s;q<s+8;q+=1){ const p=pathPoint(t,q); const x=p.x-p.tz*o, z=p.z+p.tx*o;
       for(const r of rocks){ if(r.ledge) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
-    c -= Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} }
+    c = Math.min(c, 2.5) - Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} } // past 2.5 m of room, stay central
   return bestO; }
 const terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
 const ids=[process.argv[2]]; const TI=+process.argv[5]; const T0=+(process.argv[6]||0), T1=+(process.argv[7]||1e9);
 const secs=+(process.argv[3]||120);
 for (const id of ids) {
-  const spec=VEHICLES.find(v=>v.id===id); const res=[];
+  const spec=ALL_VEHICLES.find(v=>v.id===id); const res=[];
   for (const t of [TRAILS[TI]]) {
     const p0=pathPoint(t,4);
     const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));
@@ -37,7 +37,7 @@ for (const id of ids) {
         let err=want-heading; err=Math.atan2(Math.sin(err),Math.cos(err));
         inp.steer=Math.max(-1,Math.min(1,err*2.2));
         const v=car.speed();
-        inp.throttle = v<0.6 ? Math.min(0.6, inp.throttle+0.02) : v>1.6 ? Math.max(0.05, inp.throttle-0.05) : inp.throttle;
+        inp.throttle = v<0.3 ? Math.min(1.0, inp.throttle+0.02) : v<0.6 ? Math.min(0.6, inp.throttle+0.02) : v>1.6 ? Math.max(0.05, inp.throttle-0.05) : inp.throttle;
         if (car.upsideDown()) { flips++; const pp=pathPoint(t,s); car.reset({x:pp.x,y:heightAt(pp.x,pp.z)+2,z:pp.z},Math.atan2(-pp.tx,-pp.tz)); }
         if (s>=t.length-6) break; if (i%100===0 && s>=T0 && s<=T1){ const pp=pathPoint(t,s); const lat=(p.x-pp.x)*-pp.tz+(p.z-pp.z)*pp.tx; const at=car.attitude(); console.log(`t=${(i*H).toFixed(1)} s=${s.toFixed(1)} lat=${lat.toFixed(2)} line=${(car._line||0).toFixed(2)} pitch=${(at.pitch*57.3).toFixed(0)} roll=${(at.roll*57.3).toFixed(0)} v=${v.toFixed(2)} rpm=${car.dt.rpm.toFixed(0)} w=${car.wheelState.map(w=>(w.grounded?"g":"-")+(w.load/1000).toFixed(1)).join(",")}`); }
       }

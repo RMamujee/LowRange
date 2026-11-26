@@ -2,7 +2,8 @@
 //   node test/desktop-smoke.mjs            -> dev shell (electron .), needs `npm run build` first
 //   node test/desktop-smoke.mjs --packaged -> release/win-unpacked/LowRange.exe (after `npm run dist:win`)
 // The packaged exe has the Node inspect fuse disabled, so Playwright's _electron launcher can't attach to it;
-// it is driven over Chromium's DevTools protocol instead (--remote-debugging-port).
+// it is driven over Chromium's DevTools protocol instead (--remote-debugging-port). Shipped builds drop that
+// switch unless LOWRANGE_ALLOW_CDP=1 is set (electron/main.cjs), which this test does.
 import { _electron as electron, chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync, existsSync } from 'node:fs';
@@ -17,7 +18,7 @@ if (packaged && !existsSync(exe)) { console.error('missing ' + exe + ' (run npm 
 let win, close, winTitle;
 if (packaged) {
   const port = 9300 + Math.floor(Math.random() * 500);
-  const child = spawn(exe, [`--remote-debugging-port=${port}`], { stdio: 'ignore' });
+  const child = spawn(exe, [`--remote-debugging-port=${port}`], { stdio: 'ignore', env: { ...process.env, LOWRANGE_ALLOW_CDP: '1' } });
   let browser = null;
   for (let i = 0; i < 60 && !browser; i++) {
     await new Promise((r) => setTimeout(r, 500));

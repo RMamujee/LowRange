@@ -1,14 +1,14 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 import { GROUP_WORLD } from '../src/terrain.js';
 await RAPIER.init();
-const H=1/200, id=process.argv[2]||'mule', deg=+(process.argv[3]||25);
+const H=1/200, id=process.argv[2]||'lc70', deg=+(process.argv[3]||25);
 const world=new RAPIER.World({x:0,y:-9.81,z:0}); world.timestep=H; world.numSolverIterations=8;
 const ground=world.createCollider(RAPIER.ColliderDesc.cuboid(200,1,200).setTranslation(0,-1,0).setFriction(1).setCollisionGroups(GROUP_WORLD));
 const rockHandles=new Set(); const a=deg/57.3;
 if (deg>0){ const c=world.createCollider(RAPIER.ColliderDesc.cuboid(6,0.5,30).setTranslation(0,Math.sin(a)*30-0.5*Math.cos(a)-0.02,-8-Math.cos(a)*30).setRotation({x:Math.sin(a/2),y:0,z:0,w:Math.cos(a/2)}).setFriction(1).setCollisionGroups(GROUP_WORLD)); rockHandles.add(c.handle);}
-const spec=VEHICLES.find(v=>v.id===id);
+const spec=ALL_VEHICLES.find(v=>v.id===id);
 const car=new Vehicle(RAPIER, world, spec, {ground, rockHandles}, {x:0,y:spec.tire.radius-spec.axleY+0.05,z:0}, 0);
 const d=car.dt; let t=0;
 const inp={throttle:0,brake:0,steer:0}; const step=()=>{car.step(inp,H);t+=H;};

@@ -1,0 +1,19 @@
+/* Pixel HUD: every canvas is drawn at low resolution and scaled by a whole number (hud.js sizes them). */
+canvas.px { image-rendering: pixelated; image-rendering: crisp-edges; display: block; position: absolute; }
+#hud canvas.px { pointer-events: auto; }
+#hud .hud-cluster { left: 10px; bottom: 10px; cursor: pointer; }
+#hud .hud-chassis { right: 10px; bottom: 10px; pointer-events: none; }
+#hud .hud-mini { right: 10px; top: 10px; cursor: pointer; }
+#hud .hud-toast { left: 50%; top: 15%; transform: translateX(-50%); opacity: 0; transition: opacity .18s steps(3); pointer-events: none; }
+#hud .hud-toast.show { opacity: 1; }
+#hud .hud-big { left: 50%; top: 38%; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
+#hud .hud-big.show { opacity: 1; }
+.hud-mapwrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
+.hud-mapwrap.hidden { display: none; }
+.hud-mapwrap canvas.px { position: static; cursor: crosshair; }
+#help canvas.px { position: static; pointer-events: auto; cursor: pointer; }
+#pauseBar { display: flex; align-items: center; gap: 14px; margin: 0 0 16px; }
+#pauseBar.hidden { display: none; }
+#pauseBar canvas.px { position: static; }
+#pauseBar .pause-btn { cursor: pointer; }
+#pauseBar .pause-btn:hover { filter: brightness(1.12); }

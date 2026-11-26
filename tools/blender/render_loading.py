@@ -63,6 +63,7 @@ def write_png(a, path):
 
 def render_frame(sc, frame, path):
     sc.frame_set(frame)
+    sc.render.use_stamp = False  # no file paths or dates in PNG metadata
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True, scene=sc.name)
 

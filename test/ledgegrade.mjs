@@ -1,16 +1,16 @@
 // Synthetic: chamfered ledge (like terrain.js ledge()) on a grade, simulated by tilting gravity.
 // usage: node test/ledgegrade.mjs <ids> <grades comma> <heights comma (m)>
 import RAPIER from '@dimforge/rapier3d-compat';
-import { VEHICLES } from '../src/specs.js';
+import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 import { GROUP_WORLD } from '../src/terrain.js';
 await RAPIER.init();
 const H = 1 / 200;
-const ids = (process.argv[2] || 'goat,lc70,taco').split(',');
+const ids = (process.argv[2] || 'lc70,taco,wrx').split(',');
 const grades = (process.argv[3] || '0,0.2,0.35,0.5').split(',').map(Number);
 const heights = (process.argv[4] || '0.3,0.4,0.5,0.6').split(',').map(Number);
 for (const id of ids) {
-  const spec = VEHICLES.find((v) => v.id === id);
+  const spec = ALL_VEHICLES.find((v) => v.id === id);
   for (const g of grades) {
     const res = [];
     for (const top of heights) {

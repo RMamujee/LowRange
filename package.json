@@ -27,7 +27,7 @@
     "playwright": "^1.65.1",
     "vite": "^8.3.8"
   },
-  "private": "true",
+  "private": true,
   "main": "electron/main.cjs",
   "build": {
     "appId": "com.rmamujee.lowrange",
@@ -41,7 +41,13 @@
       "dist/**/*",
       "electron/**/*",
       "package.json",
-      "!node_modules/**/*"
+      "!node_modules/**/*",
+      "!**/*.map",
+      "!**/.env*"
+    ],
+    "extraResources": [
+      { "from": "node_modules/three/LICENSE", "to": "licenses/three.LICENSE.txt" },
+      { "from": "node_modules/@dimforge/rapier3d-compat/LICENSE", "to": "licenses/rapier3d-compat.LICENSE.txt" }
     ],
     "asar": true,
     "compression": "maximum",

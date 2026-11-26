@@ -2,11 +2,13 @@
 // `independent: [front, rear]` selects independent (double-wishbone style) suspension
 // per axle; otherwise the axle is a solid beam on links.
 // The road-going rigs are styled after well-known 4x4s and a rally car, without badges.
-export const VEHICLES = [
+// `enabled: false` parks a rig: its data and view code stay, but it is left out of
+// VEHICLES (the menu, garage and saves). Flip the flag to bring it back.
+export const ALL_VEHICLES = [
   {
     id: 'taco',
     name: 'Trail Pickup',
-    blurb: 'Mid-size double-cab pickup in the Tacoma mould. Independent front, solid rear with an e-locker, 6-speed manual.',
+    blurb: 'Lifted mid-size double-cab pickup. Independent front, solid rear with an e-locker, 6-speed manual.',
     body: 'taco',
     color: 0x7d7a4a, // olive, as in the reference art
     chassis: { mass: 1750, size: [1.85, 0.6, 5.35], comY: -0.08 },
@@ -28,7 +30,7 @@ export const VEHICLES = [
   {
     id: 'lc70',
     name: 'Cruiser 76',
-    blurb: 'Boxy 70-series style wagon. Solid axles both ends, diff locks front and rear, torquey V8 diesel. Built to outlast you.',
+    blurb: 'Boxy old-school 4x4 wagon. Solid axles both ends, diff locks front and rear, torquey V8 diesel. Built to outlast you.',
     body: 'lc70',
     color: 0xe9e4d4,
     chassis: { mass: 2050, size: [1.8, 0.65, 4.9], comY: -0.02 },
@@ -48,7 +50,7 @@ export const VEHICLES = [
   {
     id: 'wrx',
     name: 'Rally Sedan',
-    blurb: 'Gravel-spec turbo AWD sedan, WRX style. Independent all round, permanent AWD, no low range. Flies on roads, suffers on rock.',
+    blurb: 'Gravel-spec turbo AWD rally sedan. Independent all round, permanent AWD, no low range. Flies on roads, suffers on rock.',
     body: 'wrx',
     color: 0x1f4fa8,
     chassis: { mass: 1180, size: [1.7, 0.4, 4.4], comY: -0.12 },
@@ -70,6 +72,7 @@ export const VEHICLES = [
   },
   {
     id: 'goat',
+    enabled: false, // parked until it has a Blender model
     name: 'Billy Goat',
     blurb: 'Purpose-built rock buggy. 40" tyres, huge flex, rear steer, both lockers. Light and twitchy.',
     body: 'buggy',
@@ -90,6 +93,7 @@ export const VEHICLES = [
   },
   {
     id: 'mule',
+    enabled: false, // parked until it has a Blender model
     name: 'Mule',
     blurb: 'Heavy expedition truck. Big diesel, 46" tyres, six gears. Slow, heavy, nearly unstoppable in mud.',
     body: 'truck',
@@ -109,3 +113,6 @@ export const VEHICLES = [
     rearSteer: false,
   },
 ];
+
+// The playable roster.
+export const VEHICLES = ALL_VEHICLES.filter((v) => v.enabled !== false);

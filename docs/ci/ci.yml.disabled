@@ -1,0 +1,49 @@
+# Install from the lockfile, run the headless Node tests and audit the shipped dependencies.
+# Read-only token, actions pinned to full commit SHAs (Dependabot keeps them current).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # the Node tests need neither the Electron binary nor Playwright's browsers
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Verify registry signatures
+        run: npm audit signatures
+      - name: No local paths in PNG metadata
+        run: node scripts/png-metadata.mjs
+      - name: Desktop shell URL policy
+        run: node test/electron-policy.mjs
+      - name: Physics / garage / race tests
+        run: |
+          node test/brake.mjs
+          node test/garage.mjs
+          node test/damage.mjs
+          node test/race.mjs
+      - name: Web build
+        run: npm run build

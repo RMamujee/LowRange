@@ -16,7 +16,7 @@ State of the project for the next working session, which will have the Blender M
 ## Next: Blender pipeline (start here)
 
 Goal (user): vehicles and terrain/rocks that look like the reference concept image
-(`<home>\Downloads\Version 1 Stardew valley offroad art.png`) but **in 3D**: warm palette, pixel-textured
+(kept outside the repo) but **in 3D**: warm palette, pixel-textured
 surfaces, stepped toon lighting with warm shadows, dark outlines. No brand names or logos.
 
 Work so far, in `tools/blender/`:
@@ -37,14 +37,16 @@ To-do, roughly in order:
 ## Known gaps
 
 - The Rally Sedan breaks a wheel at full race pace in the race autopilot (`node test/race.mjs`); tune its damage or suspension.
-- Trail difficulty wasn't raised this round: all three road rigs finish every trail. The user asked for slightly tougher courses.
+- Trails were made tougher (taller/longer ledges, denser boulders, more camber, a longer, uneven bog). Autopilot, 400 s budget: green done by all three; blue done by Cruiser and Pickup, the Rally Sedan crawls through Granite Steps (164 s) and sinks in Bog Run; black done by Cruiser (165 s) and Pickup (237 s); double black done only by the Cruiser (309 s, so it times out under the usual 240 s), Pickup stops at 129/144 m. `node test/trailaudit.mjs` prints real rock and ledge heights per trail.
+- The Rally Sedan's physics box is still taller than its 0.25 m sills; green rocks are capped at 0.20 m so the model never visibly scrapes.
 - Desktop builds are unsigned (SmartScreen warning).
 
 ## Checks after any change
 
 ```bash
 node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs
-node test/trails.mjs goat,lc70,taco 240        # trail autopilot (slow)
+node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
+node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
 node test/race.mjs                              # race autopilot
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
 ```

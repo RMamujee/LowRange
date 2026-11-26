@@ -66,8 +66,9 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 | Trail Pickup | lifted mid-size double cab | independent front, solid rear with locker, 6-speed |
 | Cruiser 76 | 70-series style wagon | solid axles, front and rear lockers, V8 diesel |
 | Rally Sedan | turbo AWD rally car | independent all round, permanent AWD, no low range |
-| Billy Goat | rock buggy | 40" tyres, huge flex, rear steer |
-| Mule | expedition truck | heavy, big diesel, 46" tyres |
+
+Two more rigs, the Billy Goat rock buggy and the Mule expedition truck, are parked until they get
+Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete that flag to bring one back.
 
 ## Controls
 
@@ -81,9 +82,10 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 | R | high / low range |
 | Q / E | front / rear locker |
 | F | 2WD / 4WD |
-| G | rear steer (buggy) |
+| G | rear steer (parked buggy only) |
 | T | air down / up |
-| B | handbrake |
+| P | parking brake on / off (latching; every fresh truck starts with it on) |
+| B | handbrake (hold) |
 | I | start engine |
 | C | auto-clutch on/off |
 | Backspace | repair and right the truck where it is |
@@ -91,10 +93,12 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 | V | camera |
 | Z / X | zoom |
 | Mouse drag | orbit the camera |
+| M | map: click to set waypoints, right-click to remove, drag / wheel to pan / zoom |
+| N | mute |
 | H | help |
-| Esc | garage (repairs your rig) |
+| Esc | pause (RESUME returns to the same truck; "Restart at trailhead" repairs) |
 
-A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch.
+A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch, A for the parking brake, R3 for the map.
 
 ## Tests
 
@@ -102,5 +106,10 @@ Headless physics checks run in Node, for example:
 
 - `node test/brake.mjs`: braking distances
 - `node test/obstacle.mjs ledge`: ledge climbing
-- `node test/trails.mjs goat 200`: an autopilot drives each trail
+- `node test/trails.mjs lc70,taco,wrx 240`: an autopilot drives each trail
 - `node test/damage.mjs`: drop and wall-impact damage
+
+With the dev server running (`npx vite --port 5841`), browser checks use Playwright with a Chromium path in `CHROME`:
+
+- `PORT=5841 node test/hud.mjs`: the pixel HUD (stick shifter through every gear, parking brake on a slope, pause / resume, map waypoints + persistence, trail toasts, race laps)
+- `PORT=5841 node scripts/hud-mockup.mjs`: regenerates the HUD review sheets in `docs/previews/hud_*.png`

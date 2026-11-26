@@ -1,6 +1,6 @@
 # LowRange art style contract
 
-Target: the reference concept image (`<home>\Downloads\Version 1 Stardew valley offroad art.png`)
+Target: the reference concept image (kept outside the repo)
 translated into real 3D. Cozy farm-sim pixel art: warm, saturated, chunky, friendly. Every asset and the
 in-game renderer follow this file so separately built pieces match.
 

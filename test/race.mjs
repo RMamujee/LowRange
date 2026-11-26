@@ -4,7 +4,7 @@
 process.env.MAP = 'race';
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 const T = await import('../src/terrain.js');
-const { VEHICLES } = await import('../src/specs.js');
+const { ALL_VEHICLES } = await import('../src/specs.js');
 const { Vehicle } = await import('../src/vehicle.js');
 const { RaceLaps, fmtLap } = await import('../src/race.js');
 const { trackFrame } = await import('../src/maps/racetrack.js');
@@ -18,7 +18,7 @@ const terrain = T.buildTerrainPhysics(RAPIER, world, T.generateRocks(), T.genera
 const L = T.TRACK.length;
 const health = (c) => `tyre ${c.health.tire.map((x) => x.toFixed(2)).join('/')} susp ${c.health.susp.map((x) => x.toFixed(2)).join('/')} eng ${c.health.engine.toFixed(2)} body ${c.health.body.toFixed(2)} broken ${c.broken.filter(Boolean).length}`;
 for (const id of ids) {
-  const spec = VEHICLES.find((v) => v.id === id);
+  const spec = ALL_VEHICLES.find((v) => v.id === id);
   const S = T.SPAWN;
   const car = new Vehicle(RAPIER, world, spec, terrain, { x: S.x, y: T.heightAt(S.x, S.z) + spec.tire.radius - spec.axleY + 0.2, z: S.z }, S.yaw);
   const d = car.dt; d.range = 'high'; d.fourWD = true; d.autoClutch = true; d.gear = 1;

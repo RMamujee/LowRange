@@ -26,7 +26,7 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || '{}');
     return {
-      quality: PRESETS[s.quality] ? s.quality : DEFAULTS.quality,
+      quality: Object.hasOwn(PRESETS, s.quality) ? s.quality : DEFAULTS.quality,
       volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : DEFAULTS.volume,
       showFps: typeof s.showFps === 'boolean' ? s.showFps : DEFAULTS.showFps,
     };
@@ -44,7 +44,7 @@ export function getSettings() { return { ...state }; }
 
 export function setSetting(key, value) {
   if (!(key in DEFAULTS)) return;
-  if (key === 'quality' && !PRESETS[value]) return;
+  if (key === 'quality' && !Object.hasOwn(PRESETS, value)) return;
   if (key === 'volume') value = Math.min(1, Math.max(0, Number(value) || 0));
   if (key === 'showFps') value = !!value;
   state[key] = value;
@@ -58,7 +58,7 @@ export function onSettingsChange(fn) { listeners.add(fn); return () => listeners
 
 // ---- hooks: each can be called on its own ----
 export function applyGraphics({ renderer, scene, sun, camera, pipeline } = ctx || {}) {
-  const p = PRESETS[state.quality];
+  const p = Object.hasOwn(PRESETS, state.quality) ? PRESETS[state.quality] : PRESETS.high;
   if (pipeline) pipeline.setPixelHeight(p.pixelHeight); // owns pixel ratio and canvas size
   else if (renderer) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelRatio));

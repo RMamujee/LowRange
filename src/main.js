@@ -14,6 +14,7 @@ import { Garage } from './garage_ui.js';
 import { initSettings } from './settings.js';
 import { PixelPipeline, noOutline } from './gfx/pipeline.js';
 import { SKY as SKY_COL, FOG as FOG_COL, SKY_BANDS } from './gfx/palette.js';
+import { createHud } from './hud/hud.js';
 import './platform.js';
 
 const H = 1 / 200;           // physics step
@@ -66,7 +67,6 @@ scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutlin
 const isRace = MAP_KIND === 'race';
 const gates = isRace ? [] : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
-const minimap = buildMinimapBase(220);
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
 scene.add(buildBackdrop());
 
@@ -111,15 +111,15 @@ let playing = false;
 let started = false;
 // Trails: drive through either end gate to start, out the other end to finish.
 const game = { time: 0, dist: 0, done: false, trails: TRAILS.map(() => ({ done: false, best: null })), active: null };
-const SYM = { green: '●', blue: '■', black: '◆', dblack: '◆◆' };
-const symHtml = (d) => `<span class="sym" style="width:22px;color:${d === 'green' || d === 'blue' ? DIFF[d].color : '#111'};text-shadow:0 0 2px #fff">${SYM[d]}</span>`;
 const trailEnds = TRAILS.map((t) => [pathPoint(t, 3), pathPoint(t, t.length - 3)]);
 const fmtT = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 function updateTrails(p) {
   TRAILS.forEach((t, i) => {
     trailEnds[i].forEach((e, end) => {
       const near = Math.hypot(e.x - p.x, e.z - p.z) < t.width / 2 + 2.5 && Math.abs(heightAt(e.x, e.z) - p.y) < 4;
-      if (!near) return;
+      const gate = i * 2 + end;
+      if (!near) { if (game.finishGate === gate) game.finishGate = -1; return; }
+      if (game.finishGate === gate) return; // just finished here: don't restart the trail until you drive out of the gate
       const a = game.active;
       if (a && a.trail === i && a.from !== end && a.t > 4) {
         // finished
@@ -128,7 +128,7 @@ function updateTrails(p) {
         st.done = true; st.best = st.best === null ? a.t : Math.min(st.best, a.t);
         setGateDone(gates[i * 2]); setGateDone(gates[i * 2 + 1]);
         toast(`${t.name} complete in ${fmtT(a.t)}${first ? '' : ' (best ' + fmtT(st.best) + ')'}`, 4);
-        game.active = null;
+        game.active = null; game.finishGate = gate;
         if (game.trails.every((x) => x.done) && !game.done) { game.done = true; toast(`All five trails conquered! Total ${fmtT(game.time)}`, 6); }
       } else if (!a || a.trail !== i) {
         game.active = { trail: i, from: end, t: 0 };
@@ -140,6 +140,9 @@ function updateTrails(p) {
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 const keys = new Set();
 let crawlLimit = false;
+let parkBrake = true;   // latching parking brake (P); every fresh truck starts with it on
+let paused = false;     // Esc mid-drive: menu up, simulation frozen, nothing respawned
+let muted = false;
 
 // ---------------- garage builds ----------------
 // The spec that gets driven: the base rig from specs.js with its saved garage build applied.
@@ -157,8 +160,9 @@ function spawn(i, opts) {
   if (opts.low && spec.ranges.low) { car.dt.range = 'low'; car.dt.fourWD = true; }
   car.dt.gear = 0;
   camState.heading = 0;
+  parkBrake = true;
   if (isRace) raceOnSpawn();
-  buildWheelHud();
+  hud.setSpec(spec);
 }
 
 // Swap in a brand-new (fully repaired) truck at a pose, keeping the driver's settings.
@@ -214,9 +218,9 @@ function restartTrail() {
 
 // ---------------- race mode ----------------
 // Lap timing lives in race.js; this glues it to the truck, the HUD and the gantry lights.
-let race = null, bigTimer = 0, goLights = 0, shownCp = null;
+let race = null, goLights = 0, shownCp = null;
 const raceHold = { throttle: 0, brake: 1, steer: 0, handbrake: true }; // held on the line during the countdown
-function bigMsg(text, secs = 1.2, cls = '') { const el = $('bigmsg'); el.textContent = text; el.className = 'show ' + cls; bigTimer = secs; }
+const bigMsg = (text, secs = 1.2, cls = '') => hud.bigMsg(text, secs, cls);
 function raceGearing() { const d = car.dt; d.range = 'high'; d.fourWD = true; d.gear = d.autoClutch ? 1 : 0; }
 
 function raceOnSpawn() {
@@ -258,134 +262,16 @@ function raceUpdate(dt) {
   const cp = race.racing ? race.next : -1;
   if (cp !== shownCp) { raceView.setNextCp(cp); shownCp = cp; }
   if (race.wrong) bigMsg('WRONG WAY', 0.3, 'warn');
-  if (bigTimer > 0) { bigTimer -= dt; if (bigTimer <= 0) $('bigmsg').className = ''; }
-}
-
-function raceHud(p) {
-  const row = (nm, val, cls = '') => `<div class="tr ${cls}"><span class="nm">${nm}</span><em>${val}</em></div>`;
-  $('trailList').innerHTML = [
-    row(race.lap ? `Lap ${race.lap}` : race.holding ? 'Wait for the lights' : 'Cross the start line', race.started ? fmtLap(race.lapTime) : '—', 'act'),
-    row('Last lap', fmtLap(race.last)),
-    row(`Best · ${spec.name}`, fmtLap(race.best), race.best != null ? 'done' : ''),
-  ].join('');
-  $('timer').textContent = `Race ${fmtLap(race.total)} · ${(game.dist / 1000).toFixed(2)} km`;
-  const c = CHECKPOINTS[race.next];
-  const dist = Math.hypot(c.x - p.x, c.z - p.z);
-  $('nextFlag').textContent = race.wrong ? 'Wrong way! Turn around' : `${race.next ? 'Checkpoint ' + race.next + '/' + (CHECKPOINTS.length - 1) : 'Start / finish'} · ${dist.toFixed(0)} m`;
-  const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
-  $('arrow').style.transform = `rotate(${Math.atan2(c.x - p.x, -(c.z - p.z)) - Math.atan2(camDir.x, -camDir.z)}rad)`;
 }
 
 // ---------------- HUD ----------------
+// The HUD itself lives in src/hud/ (pixel canvases); main.js feeds it a snapshot each frame.
 let toastTimer = 0;
-function toast(msg, secs = 2.2) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); toastTimer = secs; }
-
-const arcPath = (cx, cy, r, a0, a1) => {
-  const p = (a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-  const [x0, y0] = p(a0), [x1, y1] = p(a1);
-  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
-};
-const TA0 = Math.PI * 0.8, TA1 = Math.PI * 2.2;
-$('tachBg').setAttribute('d', arcPath(85, 72, 58, TA0, TA1));
-
-function buildWheelHud() {
-  const names = ['FL', 'FR', 'RL', 'RR'];
-  $('wheels').innerHTML = names.map((n, i) => `
-    <div class="wh">${i % 2 === 0 ? `<div class="m"><b id="wm${i}">—</b>${n}</div>` : ''}
-      <div class="trav"><i id="wt${i}"></i></div><div class="tyre" id="wy${i}"></div>
-      ${i % 2 === 1 ? `<div class="m"><b id="wm${i}">—</b>${n}</div>` : ''}</div>`).join('');
-  const redFrom = TA0 + (TA1 - TA0) * (spec.engine.redline * 0.92) / (spec.engine.redline * 1.1);
-  $('tachRed').setAttribute('d', arcPath(85, 72, 58, redFrom, TA1));
-}
-
-const lamp = (id, on, cls = 'on') => { const el = $(id); el.className = 'lamp' + (on ? ' ' + cls : ''); };
-let hudAcc = 0;
+function toast(msg, secs = 2.2) { hud.toast(msg, secs); toastTimer = secs; }
+const hudState = () => ({ car, spec, input, game, race, parkBrake, matInfo: MAT_INFO });
 function updateHud(dt) {
-  if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').classList.remove('show'); }
-  hudAcc += dt;
-  if (hudAcc < 1 / 30) return;
-  hudAcc = 0;
-  const d = car.dt, e = spec.engine;
-  const rpm = Math.max(0, d.rpm);
-  const frac = clamp(rpm / (e.redline * 1.1), 0, 1);
-  $('tachFg').setAttribute('d', frac > 0.002 ? arcPath(85, 72, 58, TA0, TA0 + (TA1 - TA0) * frac) : '');
-  $('tachFg').setAttribute('stroke', rpm > e.redline * 0.92 ? '#ff5a3d' : '#ffb340');
-  $('rpmTxt').textContent = Math.round(rpm);
-  $('gear').textContent = d.gearLabel;
-  $('range').textContent = d.range === 'low' ? '4-LO' : d.fourWD ? '4-HI' : '2-HI';
-  $('range').style.color = d.range === 'low' ? '#ffb340' : '';
-  const kmh = car.speed() * 3.6;
-  $('speed').innerHTML = `${Math.abs(kmh).toFixed(1)}<small>km/h</small>`;
-  lamp('l4wd', d.fourWD); lamp('lF', d.lockF); lamp('lR', d.lockR);
-  lamp('lAir', car.airedDown); lamp('lRS', car.rearSteerOn);
-  lamp('lEng', !d.running, 'warn'); $('lEng').textContent = d.running ? 'ENGINE' : 'STALLED · I';
-  lamp('lAC', d.autoClutch); $('lAC').textContent = d.autoClutch ? 'AUTO-CL' : 'MANUAL CL';
-  $('bT').style.height = `${input.throttle * 100}%`;
-  $('bB').style.height = `${input.brake * 100}%`;
-  $('bC').style.height = `${(1 - d.engagement) * 100}%`;
-  const att = car.attitude();
-  const pd = att.pitch * 57.3, rd = att.roll * 57.3;
-  $('pitchIcon').setAttribute('transform', `rotate(${(-pd).toFixed(1)})`);
-  $('rollIcon').setAttribute('transform', `rotate(${(rd).toFixed(1)})`);
-  $('pitchTxt').textContent = `${Math.abs(pd).toFixed(0)}° ${pd > 0.5 ? 'up' : pd < -0.5 ? 'down' : ''}`;
-  $('rollTxt').textContent = `${Math.abs(rd).toFixed(0)}°`;
-  $('pitchTxt').className = Math.abs(pd) > 38 ? 'warn' : '';
-  $('rollTxt').className = Math.abs(rd) > 30 ? 'warn' : '';
-  const H2 = car.health, pct = (x) => Math.round(x * 100);
-  const cls = (x) => (x > 0.75 ? '' : x > 0.35 ? 'mid' : 'bad');
-  $('dmg').innerHTML = `<span class="${cls(H2.engine)}">ENGINE ${car.dt.dead ? 'DEAD' : pct(H2.engine) + '%'}</span><span class="${cls(H2.body)}">BODY ${pct(H2.body)}%</span>`;
-  const comp = car.compression();
-  const s = spec.susp;
-  for (let i = 0; i < 4; i++) {
-    const ws = car.wheelState[i];
-    const c = clamp(comp[i], -s.droop - 0.15, s.bump + 0.15);
-    const f = 0.5 - c / ((s.bump + s.droop + 0.3)) ; // 0 top .. 1 bottom
-    $(`wt${i}`).style.top = `${clamp(f, 0, 1) * 40}px`;
-    const tyre = $(`wy${i}`);
-    tyre.className = 'tyre ' + (!ws.grounded ? 'air' : ws.slip > 0.7 ? 'slip' : 'grip');
-    const col = MAT_INFO[ws.mat].color;
-    tyre.style.background = `rgb(${col.map((x) => Math.round(x * 255)).join(',')})`;
-    $(`wm${i}`).textContent = car.broken[i] ? 'GONE' : car.health.tire[i] < 0.35 ? 'FLAT' : ws.grounded ? MAT_INFO[ws.mat].name : 'Air';
-    tyre.style.outline = car.broken[i] ? '2px solid #c0392b' : car.health.susp[i] < 0.75 ? '2px solid #ff7a3d' : 'none';
-  }
-  // objectives
-  if (isRace) { const p = car.chassis.translation(); raceHud(p); drawMinimap(p); return; }
-  $('trailList').innerHTML = TRAILS.map((t, i) => {
-    const st = game.trails[i], act = game.active && game.active.trail === i;
-    return `<div class="tr${st.done ? ' done' : ''}${act ? ' act' : ''}">${symHtml(t.diff)}<span class="nm">${t.name}</span><em>${act ? fmtT(game.active.t) : st.done ? '✓ ' + fmtT(st.best) : ''}</em></div>`;
-  }).join('');
-  $('timer').textContent = `${fmtT(game.time)} · ${(game.dist / 1000).toFixed(2)} km`;
-  const p = car.chassis.translation();
-  // guide arrow: to the active trail's far end, else the nearest unfinished trail end
-  let target = null, label = '';
-  if (game.active) { const t = TRAILS[game.active.trail]; target = trailEnds[game.active.trail][1 - game.active.from]; label = 'Finish: ' + t.name; }
-  else {
-    let bestD = Infinity;
-    TRAILS.forEach((t, i) => { if (game.trails[i].done) return; trailEnds[i].forEach((e) => { const d = Math.hypot(e.x - p.x, e.z - p.z); if (d < bestD) { bestD = d; target = e; label = t.name; } }); });
-  }
-  if (target) {
-    const dist = Math.hypot(target.x - p.x, target.z - p.z);
-    $('nextFlag').textContent = `${label} · ${dist.toFixed(0)} m`;
-    const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
-    const ang = Math.atan2(target.x - p.x, -(target.z - p.z)) - Math.atan2(camDir.x, -camDir.z);
-    $('arrow').style.transform = `rotate(${ang}rad)`;
-  } else $('nextFlag').textContent = 'Every trail done!';
-  drawMinimap(p);
-}
-
-const mmCtx = $('minimap').getContext('2d');
-function drawMinimap(p) {
-  mmCtx.drawImage(minimap.canvas, 0, 0);
-  if (isRace && race) { // ring the checkpoint you need next
-    const c = CHECKPOINTS[race.next];
-    mmCtx.strokeStyle = '#ffb340'; mmCtx.lineWidth = 2.5; mmCtx.beginPath(); mmCtx.arc(minimap.toPx(c.x), minimap.toPx(c.z), 9, 0, Math.PI * 2); mmCtx.stroke();
-  }
-  const { heading } = car.attitude();
-  const x = minimap.toPx(p.x), y = minimap.toPx(p.z);
-  mmCtx.save(); mmCtx.translate(x, y); mmCtx.rotate(-heading);
-  mmCtx.fillStyle = '#ffb340'; mmCtx.strokeStyle = '#000'; mmCtx.lineWidth = 1.5;
-  mmCtx.beginPath(); mmCtx.moveTo(0, -8); mmCtx.lineTo(5, 6); mmCtx.lineTo(0, 3); mmCtx.lineTo(-5, 6); mmCtx.closePath(); mmCtx.fill(); mmCtx.stroke();
-  mmCtx.restore();
+  if (toastTimer > 0) toastTimer -= dt;
+  hud.update(dt, hudState());
 }
 
 // ---------------- camera ----------------
@@ -460,18 +346,21 @@ function updateCamera(dt) {
 const CONTROLS = [
   ['W / S', 'throttle / brake'], ['A / D', 'steer'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
   ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
-  ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['B', 'handbrake'], ['I', 'start engine'],
+  ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
-  ['Mouse drag', 'orbit camera'], ['M', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch'], ['H / Esc', 'help / garage'],
+  ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('');
-$('helpBox').innerHTML = controlsHtml;
 $('menuControls').innerHTML = controlsHtml;
+const hud = createHud({
+  action: (n) => action(n), camera, isRace, mapId: MAP_ID, mapName: MAP_NAME, trees, scene, noOutline,
+  controls: () => CONTROLS, onResume: () => resumeDrive(), onRestart: () => startDrive({ fresh: true }),
+});
 
 // keyboard key -> action
 const KEYMAP = {
   KeyR: 'range', KeyQ: 'lockF', KeyE: 'lockR', KeyF: '4wd', KeyG: 'rsteer', KeyT: 'tyres', KeyI: 'ignition',
-  KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyM: 'mute', KeyH: 'help',
+  KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyN: 'mute', KeyM: 'map', KeyH: 'help', KeyP: 'park',
   PageUp: 'up', PageDown: 'down',
 };
 
@@ -494,14 +383,22 @@ function action(name) {
     case 'recover': recover(); break;
     case 'restart': restartTrail(); break;
     case 'camera': camState.mode = (camState.mode + 1) % CAM_MODES.length; camState.spot = null; toast(CAM_MODES[camState.mode] + ' camera', 1.2); break;
-    case 'mute': audio.setMuted(!audio.muted); toast(audio.muted ? 'Muted' : 'Sound on', 1.2); break;
-    case 'help': $('help').classList.toggle('hidden'); break;
+    case 'mute': muted = !muted; audio.setMuted(muted); toast(audio.muted ? 'Muted' : 'Sound on', 1.2); break;
+    case 'help': hud.toggleHelp(); break;
+    case 'map': hud.toggleMap(); break;
+    case 'park': parkBrake = !parkBrake; audio.clunk(); toast(parkBrake ? 'Parking brake ON' : 'Parking brake released', 1.4); break;
   }
+  if (msg && (name === 'up' || name === 'down')) hud.nudgeShifter();
   if (msg) toast(msg);
 }
 
 addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' || e.code === 'Tab') { e.preventDefault(); keys.clear(); if (playing) openMenu(); return; }
+  if (e.code === 'Escape' || e.code === 'Tab') {
+    e.preventDefault(); keys.clear();
+    if (playing && e.code === 'Escape' && hud.closeOverlay()) return;
+    if (playing) openMenu(); else if (paused && e.code === 'Escape' && !garage.isOpen) resumeDrive();
+    return;
+  }
   if (!playing) { if (e.code === 'Enter') startDrive(); return; }
   if (['Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();
   if (!e.repeat && KEYMAP[e.code]) action(KEYMAP[e.code]);
@@ -526,12 +423,6 @@ addEventListener('wheel', (e) => {
     wheelAcc = 0; wheelCool = now + 140;
   }
 }, { passive: false });
-
-// the cluster lamps are buttons too
-for (const [id, name] of [['l4wd', '4wd'], ['lF', 'lockF'], ['lR', 'lockR'], ['lAir', 'tyres'], ['lRS', 'rsteer'], ['lEng', 'ignition'], ['range', 'range'], ['lAC', 'autoclutch'], ['bUp', 'up'], ['bDn', 'down'], ['bRec', 'recover'], ['bCam', 'camera']]) {
-  const el = $(id);
-  if (el) el.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); action(name); });
-}
 
 // Gamepads: only trust a standard-mapped pad once its triggers have been seen at rest,
 // so a virtual / non-standard device whose "trigger" idles at a non-zero value can't hold the throttle.
@@ -569,6 +460,7 @@ function readInput(dt) {
       if (pressed(5)) action('up'); if (pressed(4)) action('down'); if (pressed(3)) action('range');
       if (pressed(12)) action('4wd'); if (pressed(14)) action('lockF'); if (pressed(15)) action('lockR');
       if (pressed(8)) action('camera'); if (pressed(13)) action('recover'); if (pressed(9)) openMenu();
+      if (pressed(0)) action('park'); if (pressed(11)) action('map');
       if (b(2) > 0.1) clutch = Math.max(clutch, b(2));
       if (b(1) > 0.5) hb = true;
       pad.buttons.forEach((x, i) => { padPrev[i] = x.value > 0.5; });
@@ -577,7 +469,7 @@ function readInput(dt) {
   // clutch: pushed in quickly, released slowly so you can feather it
   clutch = clutchDown ? Math.min(1, clutch + dt * 7) : Math.max(0, clutch - dt * 1.6);
   car.dt.clutchPedal = clutch;
-  input.throttle = thr; input.brake = brk; input.steer = st; input.handbrake = hb;
+  input.throttle = thr; input.brake = brk; input.steer = st; input.handbrake = hb || parkBrake;
 }
 
 // ---------------- menu ----------------
@@ -635,25 +527,43 @@ function switchMap() {
 }
 
 function openMenu() {
+  if (playing && started) { paused = true; audio.setMuted(true); }
   playing = false;
+  $('pauseBar').classList.toggle('hidden', !paused);
   $('menu').classList.remove('hidden');
   $('hud').classList.add('hidden');
 }
-function startDrive() {
+// Esc / RESUME: back to the exact same truck, pose, damage, gear and timers
+function resumeDrive() {
+  if (!paused) return;
+  paused = false;
+  garage.close();
+  audio.setMuted(muted);
+  $('menu').classList.add('hidden');
+  $('pauseBar').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  last = performance.now(); acc = 0;
+  playing = true;
+}
+function startDrive({ fresh = false } = {}) {
   if (selectedMap !== MAP_ID) { switchMap(); return; }
   const opts = { auto: $('optAuto').checked, low: $('optLow').checked, air: $('optAir').checked };
-  const damaged = car && (car.broken.some(Boolean) || car.health.engine < 1 || car.health.body < 1 || car.health.susp.some((x) => x < 1) || car.health.tire.some((x) => x < 1));
   garage.close();
   const sameRig = car && buildKey(car.spec) === buildKey(builtSpec(selected));
-  if (!started || !sameRig || damaged) {
-    if (started && damaged && sameRig) setTimeout(() => toast(isRace ? 'Repaired and back on the grid' : 'Repaired and back at the trailhead', 2.5), 3600);
+  // only a first start, a different rig / build, or the explicit restart button respawns (and repairs)
+  if (!started || !sameRig || fresh) {
+    if (started && fresh && sameRig) setTimeout(() => toast(isRace ? 'Repaired and back on the grid' : 'Repaired and back at the trailhead', 2.5), 3600);
     started = true;
     spawn(selected, opts);
     game.time = 0; game.dist = 0; game.done = false; game.active = null;
     if (isRace) raceStart();
   } else {
     car.dt.autoClutch = opts.auto;
+    if (paused) { resumeDrive(); return; }
   }
+  paused = false;
+  audio.setMuted(muted);
+  $('pauseBar').classList.add('hidden');
   audio.start(spec.engine.sound);
   audio.kind = spec.engine.sound;
   $('menu').classList.add('hidden');
@@ -661,6 +571,7 @@ function startDrive() {
   playing = true;
   if (isRace) toast(`${spec.name} on the grid: 4-HI, ${car.dt.gearLabel === 'N' ? 'neutral' : '1st gear'}. Go on green; scroll the wheel to shift.`, 3.5);
   else toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Scroll the mouse wheel up for first gear.`, 3.5);
+  if (parkBrake) setTimeout(() => { if (parkBrake && playing) toast('Parking brake is ON: press P to release it', 3.5); }, 3700);
 }
 
 // ---------------- loop ----------------
@@ -672,7 +583,7 @@ function frame(now) {
   if (car) {
     if (playing) readInput(dt);
     const inp = playing ? (race && race.holding ? raceHold : input) : idleInput;
-    acc += dt;
+    if (!paused) acc += dt; else acc = 0;   // paused: no physics steps at all, the truck is frozen in place
     let n = 0;
     while (acc >= H && n < MAX_STEPS) {
       car.step(inp, H);
@@ -689,7 +600,9 @@ function frame(now) {
       if (isRace) raceUpdate(dt); else updateTrails(p);
       // stopped, holding the brake, in a forward gear: hint how to reverse
       if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: scroll the wheel down through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
-      if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press R to recover', 1.5); }
+      if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press Backspace to recover', 1.5); }
+      // pulling away against the parking brake: remind
+      if (parkBrake && input.throttle > 0.6 && car.dt.gear !== 0 && Math.abs(car.speed()) < 1 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2);
       updateHud(dt);
       while (car.damageEvents.length) { toast(car.damageEvents.shift(), 3); audio.grind(); }
       if (car.health.engine < 0.5 && Math.random() < (0.5 - car.health.engine) * 1.5) {
@@ -736,7 +649,6 @@ addEventListener('resize', () => {
 spawn(0, { auto: true, low: true, air: false });
 camera.position.set(SPAWN.x + 10, heightAt(SPAWN.x + 10, SPAWN.z + 14) + 4, SPAWN.z + 14);
 $('loading').remove();
-if (isRace) { $('objTitle').textContent = `${MAP_NAME} · ${TRACK.name}`; }
 // garage picks carried over a map switch
 const qp = new URLSearchParams(location.search);
 if (qp.has('car')) selectCard(clamp(parseInt(qp.get('car'), 10) || 0, 0, VEHICLES.length - 1));
@@ -745,4 +657,4 @@ openMenu();
 if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, gfx: { renderer, pixels, scene, camera, sun } };
+window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, gfx: { renderer, pixels, scene, camera, sun } };
