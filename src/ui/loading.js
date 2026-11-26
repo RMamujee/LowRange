@@ -100,7 +100,7 @@ export function createLoadingScreen({ title = 'LowRange' } = {}) {
   // ------------------------------------------------ the art
   const ids = Object.keys(SHOTS);
   const asked = new URLSearchParams(location.search).get('shot');
-  const shot = SHOTS[asked] ? asked : ids[Math.floor(Math.random() * ids.length)];
+  const shot = ids.includes(asked) ? asked : ids[Math.floor(Math.random() * ids.length)];
   const base = import.meta.env.BASE_URL || '/';
   const still = new Image(), strip = new Image();
   let stillOk = false, stripOk = false;
@@ -165,7 +165,7 @@ export function createLoadingScreen({ title = 'LowRange' } = {}) {
     });
 
     const barW = clamp(Math.round(W * 0.34), 110, 190);
-    L = { ox, oy, bg, sign, signX: tx0 - 1, signBottom: ty0 + ph, caption: SHOTS[shot],
+    L = { ox, oy, bg, sign, signX: tx0 - 1, signBottom: ty0 + ph, caption: String(SHOTS[shot] ?? ''),
       px: tx0, barY: H - Math.max(16, Math.round(H * 0.07)), barW };
   }
 
