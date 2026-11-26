@@ -6,6 +6,8 @@ import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
 import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBase, setGateDone } from './world_view.js';
 import { EngineAudio } from './audio.js';
+import { applyBuild, loadBuild, isStock, stats } from './garage.js';
+import { Garage } from './garage_ui.js';
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -126,9 +128,14 @@ const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 const keys = new Set();
 let crawlLimit = false;
 
+// ---------------- garage builds ----------------
+// The spec that gets driven: the base rig from specs.js with its saved garage build applied.
+const builtSpec = (i) => applyBuild(VEHICLES[i], loadBuild(VEHICLES[i]));
+const buildKey = (s) => s.id + JSON.stringify(s.build);
+
 function spawn(i, opts) {
   if (car) { car.destroy(); view.dispose(); }
-  spec = VEHICLES[i];
+  spec = builtSpec(i);
   const y = heightAt(0, 0) + spec.tire.radius - spec.axleY + 0.15;
   car = new Vehicle(RAPIER, world, spec, terrain, { x: 0, y, z: 0 }, -Math.PI * 0.31);
   view = new VehicleView(scene, car);
@@ -477,24 +484,33 @@ function readInput(dt) {
 }
 
 // ---------------- menu ----------------
-function fmtRatio(s) { return (s.gears[0] * s.ranges.low * s.final).toFixed(0) + ':1'; }
-$('cards').innerHTML = VEHICLES.map((s, i) => `
+// cards show each rig as currently built in the garage
+let cards = [];
+function renderCards() {
+  $('cards').innerHTML = VEHICLES.map((b, i) => {
+    const s = builtSpec(i), st = stats(s);
+    return `
   <div class="card panel" data-i="${i}">
     <h3>${s.name}</h3><p>${s.blurb}</p>
     <dl class="stats">
-      <dt>Weight</dt><dd>${(s.chassis.mass + 2 * s.axleMass + 4 * s.tire.mass).toLocaleString()} kg</dd>
+      <dt>Weight</dt><dd>${Math.round(st.weight).toLocaleString()} kg</dd>
       <dt>Engine</dt><dd>${s.engine.peakT} N·m @ ${s.engine.peakRpm} rpm</dd>
-      <dt>Tyres</dt><dd>${Math.round(s.tire.radius * 2 / 0.0254)}" </dd>
-      <dt>Gears</dt><dd>${s.gears.length}-speed + low range</dd>
-      <dt>Crawl ratio</dt><dd>${fmtRatio(s)}</dd>
+      <dt>Tyres</dt><dd>${Math.round(st.tyreIn)}" </dd>
+      <dt>Gears</dt><dd>${s.gears.length}-speed${s.ranges.low ? ' + low range' : ''}</dd>
+      <dt>Crawl ratio</dt><dd>${st.crawl.toFixed(0)}:1</dd>
       <dt>Lockers</dt><dd>${[s.lockers.front && 'front', s.lockers.rear && 'rear'].filter(Boolean).join(' + ') || 'none'}</dd>
-    </dl>
-  </div>`).join('');
-const cards = [...document.querySelectorAll('.card')];
+    </dl>${isStock(b, s.build) ? '' : '<div class="mod">GARAGE BUILD</div>'}
+  </div>`;
+  }).join('');
+  cards = [...document.querySelectorAll('.card')];
+  cards.forEach((c, i) => { c.addEventListener('click', () => selectCard(i)); c.addEventListener('dblclick', () => { selectCard(i); startDrive(); }); });
+  selectCard(selected);
+}
 const selectCard = (i) => { selected = i; cards.forEach((c, j) => c.classList.toggle('sel', j === i)); };
-cards.forEach((c, i) => { c.addEventListener('click', () => selectCard(i)); c.addEventListener('dblclick', () => { selectCard(i); startDrive(); }); });
-selectCard(0);
+renderCards();
 $('goBtn').addEventListener('click', () => startDrive());
+const garage = new Garage(RAPIER, VEHICLES, { onChange: renderCards, onDrive: () => startDrive() });
+$('garageBtn').addEventListener('click', () => garage.open(selected));
 
 function openMenu() {
   playing = false;
@@ -504,8 +520,10 @@ function openMenu() {
 function startDrive() {
   const opts = { auto: $('optAuto').checked, low: $('optLow').checked, air: $('optAir').checked };
   const damaged = car && (car.broken.some(Boolean) || car.health.engine < 1 || car.health.body < 1 || car.health.susp.some((x) => x < 1) || car.health.tire.some((x) => x < 1));
-  if (!started || car.spec !== VEHICLES[selected] || damaged) {
-    if (started && damaged && car.spec === VEHICLES[selected]) setTimeout(() => toast('Repaired and back at the trailhead', 2.5), 3600);
+  garage.close();
+  const sameRig = car && buildKey(car.spec) === buildKey(builtSpec(selected));
+  if (!started || !sameRig || damaged) {
+    if (started && damaged && sameRig) setTimeout(() => toast('Repaired and back at the trailhead', 2.5), 3600);
     started = true;
     spawn(selected, opts);
     game.time = 0; game.dist = 0; game.done = false; game.active = null;
@@ -588,4 +606,4 @@ $('loading').remove();
 openMenu();
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, world, input, cam: camState };
+window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, world, input, cam: camState, garage };

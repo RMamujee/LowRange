@@ -111,6 +111,47 @@
   #help { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 9; pointer-events: none; }
   #help.hidden { display: none; }
   #help .controls { pointer-events: auto; font-size: 14px; }
+
+  /* garage */
+  .go.alt { background: transparent; color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; margin-left: 10px; }
+  .card .mod { float: right; font-size: 10px; letter-spacing: .14em; color: var(--amber); margin-top: 6px; }
+  #garage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 12; background: rgba(8,7,6,.6); }
+  #garage.hidden { display: none; }
+  .garage-inner { width: min(1240px, 96vw); height: min(780px, 94vh); display: flex; flex-direction: column; padding: 16px 18px; background: rgba(18,17,15,.9); }
+  .ghead { display: flex; align-items: baseline; gap: 14px; }
+  .ghead .t { font-size: 30px; font-weight: 600; letter-spacing: .04em; }
+  .ghead .t span { color: var(--amber); }
+  .ghead .sub { color: var(--muted); font-size: 13px; flex: 1; }
+  .gbody { flex: 1; display: flex; gap: 18px; min-height: 0; margin-top: 12px; }
+  .gleft { width: 46%; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  #gPreview { width: 100%; flex: 1; min-height: 220px; border-radius: 4px; border: 1px solid var(--line); cursor: grab; }
+  #gStats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+  .gstat { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 0 8px; font-size: 12px; }
+  .gstat .sl { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 10px; }
+  .gstat b { font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .gstat em { font-style: normal; font-size: 11px; min-width: 34px; text-align: right; color: var(--muted); }
+  .gstat em.up { color: var(--good); } .gstat em.down { color: var(--warn); }
+  .gstat small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+  .gbar { grid-column: 1 / -1; height: 4px; background: rgba(255,255,255,.07); border-radius: 2px; position: relative; margin: 3px 0 1px; }
+  .gbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--amber); border-radius: 2px; transition: width .2s; }
+  .gbar i.up { background: var(--good); } .gbar i.down { background: var(--warn); }
+  .gbar u { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink); opacity: .55; }
+  .gright { flex: 1; overflow-y: auto; padding-right: 6px; }
+  .gcat { border-top: 1px solid var(--line); padding: 5px 0 3px; }
+  .gcat h4 { margin: 0 0 3px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--amber); font-weight: 600; }
+  .grow { display: flex; align-items: center; gap: 10px; margin: 3px 0; }
+  .glbl { width: 92px; flex: none; font-size: 12px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { font-family: var(--font); font-size: 12px; color: var(--ink); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 3px; padding: 3px 10px; cursor: pointer; }
+  .chip:hover { border-color: var(--amber); }
+  .chip.on { background: var(--amber); border-color: var(--amber); color: #1a1206; font-weight: 600; }
+  .chip.swatch { width: 26px; height: 20px; padding: 0; }
+  .chip.swatch.stock { width: auto; padding: 0 8px; font-size: 9px; letter-spacing: .1em; color: #fff; text-shadow: 0 0 3px #000; }
+  .chip.swatch.on { box-shadow: 0 0 0 2px #1a1206 inset, 0 0 0 1px var(--amber); background-clip: padding-box; }
+  .gfootbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  #gNote { flex: 1; font-size: 13px; color: var(--muted); min-height: 1.2em; }
+  .gfootbar .btn { font-size: 13px; padding: 8px 14px; }
+  .gfootbar .go { padding: 10px 28px; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -194,8 +235,19 @@
       <label><input type="checkbox" id="optLow" checked /> Start in 4-Low</label>
       <label><input type="checkbox" id="optAir" /> Start aired down</label>
     </div>
-    <button class="go" id="goBtn">DRIVE</button>
+    <button class="go" id="goBtn">DRIVE</button><button class="go alt" id="garageBtn">GARAGE</button>
     <div class="controls panel" id="menuControls"></div>
+  </div>
+</div>
+
+<div id="garage" class="hidden">
+  <div class="garage-inner panel">
+    <div class="ghead"><div class="t">GARAGE <span id="gName"></span></div><div class="sub">Builds save automatically for each rig. Drag the preview to turn it.</div></div>
+    <div class="gbody">
+      <div class="gleft"><canvas id="gPreview"></canvas><div id="gStats"></div></div>
+      <div class="gright" id="gOpts"></div>
+    </div>
+    <div class="gfootbar"><div id="gNote"></div><button class="btn" id="gReset">Reset to stock</button><button class="btn" id="gBack">Back</button><button class="go" id="gDrive">DRIVE</button></div>
   </div>
 </div>
 
