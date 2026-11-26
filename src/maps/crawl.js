@@ -92,7 +92,7 @@ export const STAGE_DEFS = [
 //   rubble embedded rocks on the ground beside the tread, one per `rubble` m
 // Relief fades out just before every step face and gatekeeper, so the designed step heights hold.
 const RELIEF = [
-  /* 1 Warm-up      */ { lumps: 0.1, ruts: 0.07, holes: [8, 0.35, 0.13, 1.1], embed: { every: 1.7, size: [0.3, 0.7], proud: [0.06, 0.13] }, rubble: 3 },
+  /* 1 Warm-up      */ { lumps: 0.1, ruts: 0.07, holes: [8, 0.35, 0.13, 1.1], embed: { every: 2.2, size: [0.45, 0.9], proud: [0.06, 0.13] }, rubble: 3 },
   /* 2 Articulation */ { lumps: 0.07, ruts: 0.06, holes: [9, 0.25, 0.12, 1.0], embed: { every: 2.2, size: [0.3, 0.75], proud: [0.07, 0.16] }, rubble: 3 },
   /* 3 Ledges I     */ { lumps: 0.13, holes: [8, 0.3, 0.13, 1.0], embed: { every: 1.4, size: [0.35, 0.85], proud: [0.09, 0.22], tops: 1 }, rubble: 2.5 },
   /* 4 Side-slope   */ { lumps: 0.14, holes: [8, 0.3, 0.14, 1.0], embed: { every: 1.4, size: [0.35, 0.9], proud: [0.1, 0.24] }, rubble: 2.5 },
@@ -605,7 +605,7 @@ export function generateTrees() {
 export const LOOSE = { stones: [], logs: [] };
 {
   const R = rng(808);
-  for (const [st, every] of [[STAGES[0], 2.6], [STAGES[1], 5], [STAGES[3], 6], [STAGES[4], 6]]) {
+  for (const [st, every] of [[STAGES[0], 5], [STAGES[1], 7], [STAGES[3], 8], [STAGES[4], 8]]) {
     for (let u = 9; u < st.len - 6; u += every * (0.7 + R() * 0.6)) {
       const lat = (R() * 2 - 1) * (st.width / 2 - 0.5), p = pathPoint(TRAIL, st.s0 + u);
       LOOSE.stones.push({ x: p.x - p.tz * lat, z: p.z + p.tx * lat, ry: R() * 6.28, s: 0.28 + R() * 0.14 });

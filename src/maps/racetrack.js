@@ -197,8 +197,8 @@ function bake() {
           const tn = fbm(c.s * 0.05, c.lat * 0.08 + 3, 2);
           // a firmer swept line (dirt) runs through the bends towards the inside; off it the
           // surface is loose gravel marbles, a little less grip
-          const lineLat = -clamp(c.bank * 8, -1, 1) * (HW - 3), offLine = Math.abs(c.lat - lineLat) > 3.2;
-          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : offLine && tn > 0.05 ? MAT.GRAVEL : MAT.DIRT;
+          const lineLat = -clamp(c.bank * 8, -1, 1) * (HW - 3), offLine = Math.abs(c.lat - lineLat) > 4.0;
+          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : (offLine ? tn > 0.15 : tn > 0.55) ? MAT.GRAVEL : MAT.DIRT;
           if (inRocks) mat = MAT.ROCK;
           // the splash's surrounds churn to mud along the track edges (the line stays firm)
           if (water && c.s > water.s0 - 12 && c.s < water.s1 + 12 && c.d > HW - 2.6 && !inRocks) {

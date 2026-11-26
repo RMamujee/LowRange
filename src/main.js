@@ -126,7 +126,7 @@ dMat.onBeforeCompile = (sh) => {
   sh.vertexShader = sh.vertexShader
     .replace('uniform float size;', 'uniform float size;\nattribute float psize;')
     .replace('gl_PointSize = size;', 'gl_PointSize = size * psize;')
-    .replace('#include <fog_vertex>', '#include <fog_vertex>\n#ifdef USE_COLOR_ALPHA\nvColor.a *= smoothstep(3.5, 9.0, -mvPosition.z);\n#endif');
+    .replace('#include <fog_vertex>', '#include <fog_vertex>\n#ifdef USE_COLOR_ALPHA\nvColor.a *= smoothstep(2.0, 5.5, -mvPosition.z);\n#endif');
 };
 const dustPoints = new THREE.Points(dGeo, dMat);
 dustPoints.frustumCulled = false;
@@ -830,15 +830,15 @@ function frame(now) {
           while (plumeAcc[i] >= 1) {
             plumeAcc[i] -= 1;
             // the surface colour, lightened and greyed: haze, not confetti
-            const c = base.map((x) => Math.min(1, x * 0.7 + 0.24 + (Math.random() - 0.5) * 0.03));
+            const c = base.map((x) => Math.min(1, x * 0.6 + 0.34 + (Math.random() - 0.5) * 0.03));
             const kick = 0.6 + Math.min(1.2, ws.slip * 0.4);
             puff(w.x + (Math.random() - 0.5) * 0.4, gy + 0.15, w.z + (Math.random() - 0.5) * 0.4,
               cv.x * 0.12 + back.x * kick + (Math.random() - 0.5) * 0.7, 0.25 + Math.random() * 0.4, cv.z * 0.12 + back.z * kick + (Math.random() - 0.5) * 0.7,
-              c, 2.0 + Math.random() * 1.2, Math.min(0.2, 0.08 + sp * 0.005 + ws.slip * 0.02), 0.7 + Math.random() * 0.4);
+              c, 2.0 + Math.random() * 1.2, Math.min(0.3, 0.12 + sp * 0.008 + ws.slip * 0.02), 0.9 + Math.random() * 0.5);
           }
         }
         let rate = 0, kind = 'grit'; // small particles per second for this wheel
-        if (mat === MAT.MUD) { kind = 'mud'; rate = ws.slip > 0.4 ? Math.min(16, 4 + ws.slip * 4) : sp > 3 ? Math.min(6, (sp - 3) * 0.8) : 0; }
+        if (mat === MAT.MUD) { kind = 'mud'; rate = ws.slip > 0.4 ? Math.min(16, 4 + ws.slip * 4) : sp > 2 ? Math.min(8, (sp - 2) * 1.5) : 0; }
         else if (mat === MAT.WATER) { kind = 'water'; rate = sp > 1.5 ? Math.min(14, sp * 1.5) : 0; }
         else if (!dusty && ws.slip > 1.0) rate = Math.min(10, 2 + ws.slip * 2);
         dustAcc[i] += rate * dt;
