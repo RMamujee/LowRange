@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js';
+import { vehicleNode } from './art/assets.js';
 
 // No environment map in the scene, so keep metalness low or parts render near-black.
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.7, ...o });
@@ -379,6 +380,31 @@ function buildBody(spec) {
   return g;
 }
 
+// Swap in public/models/vehicles/<id>.glb (docs/MODELING_SPEC.md) when it exists: visuals only.
+// Body replaces the procedural body (and becomes the dentable shell), Wheel replaces each wheel
+// (mirrored on the left), AxleFront/AxleRear and Hub ride on the procedural rig (see constructor).
+// Physics and the procedural suspension links are unchanged.
+function useVehicleAsset(view, spec) {
+  const body = vehicleNode(spec.id, 'Body');
+  if (!body) return;
+  for (const c of [...view.body.children]) { c.visible = false; c.traverse((o) => { o.userData.noDent = true; }); }
+  body.traverse((o) => {
+    if (!o.isMesh) return;
+    o.userData.dentable = true;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m.name === 'TailLight') view.tailMats.push(m);
+  });
+  view.body.add(body);
+  const wheel = vehicleNode(spec.id, 'Wheel');
+  if (wheel) view.wheels.forEach((w, i) => {
+    w.children.forEach((c) => { c.visible = false; });
+    const m = i ? wheel.clone(true) : wheel;
+    if (i % 2 === 0) m.scale.x *= -1; // left side: mirror
+    w.add(m);
+  });
+  view.assetAxles = ['AxleFront', 'AxleRear'].map((n) => vehicleNode(spec.id, n));
+  view.assetHub = vehicleNode(spec.id, 'Hub');
+}
+
 const RIM = { taco: 0x8f7550, lc70: 0x6a6e74, wrx: 0xc9a43a, buggy: 0x3c3e42, truck: 0x6d6d4a };
 
 function buildWheel(spec) {
@@ -519,6 +545,8 @@ export class VehicleView {
     this.body = buildBody(spec);
     this.root.add(this.body);
     this.wheels = [0, 1, 2, 3].map(() => { const w = buildWheel(spec); this.root.add(w); return w; });
+    this.tailMats = []; // brake-light materials from a glTF body (named TailLight)
+    useVehicleAsset(this, spec);
 
     // under-truck materials are kept light and rough so they read in shadow
     const axleMat = std(0x5c6066, { roughness: 0.75 });
@@ -665,6 +693,17 @@ export class VehicleView {
       return rig;
     });
     // steering: solid front = tie rod + drag link from a frame box; IFS = rack + two tie rods
+    // glTF axle housings / hubs (visual swap only; links and springs stay procedural)
+    this.rigs.forEach((rig, a) => {
+      const m = this.assetAxles && this.assetAxles[a];
+      if (m && rig.axle) { rig.axle.children.forEach((c) => { c.visible = false; }); rig.axle.add(m); }
+    });
+    if (this.assetHub) this.hubs.forEach((h, i) => {
+      h.children.forEach((c) => { c.visible = false; });
+      const m = i ? this.assetHub.clone(true) : this.assetHub;
+      if (i % 2 === 0) m.scale.x *= -1;
+      h.add(m);
+    });
     const zf = -wb / 2;
     if (this.ind[0]) {
       hb(G.lpx * 2, 0.08, 0.08, 0, ay - R * 0.1, zf + R * 0.38); // rack
@@ -685,7 +724,7 @@ export class VehicleView {
     this.body.traverse((o) => {
       if (!o.isMesh) return;
       const inShell = o.parent === this.body.userData.shell && o.geometry.attributes.position.count > 60;
-      if (!(inShell || (o.geometry.type === 'BoxGeometry' && o.parent === this.body))) return;
+      if (o.userData.noDent || !(inShell || o.userData.dentable || (o.geometry.type === 'BoxGeometry' && o.parent === this.body))) return;
       o.updateMatrix();
       const m = o.matrix.clone();
       for (let p = o.parent; p && p !== this.body; p = p.parent) { p.updateMatrix(); m.premultiply(p.matrix); }
@@ -726,7 +765,11 @@ export class VehicleView {
   update(input) {
     const v = this.v, spec = v.spec;
     const L = this.body.userData.lights;
-    if (L && input) L.tail.emissiveIntensity = input.brake > 0.05 || input.handbrake ? 1.6 : 0.15;
+    if (L && input) {
+      const k = input.brake > 0.05 || input.handbrake ? 1.6 : 0.15;
+      L.tail.emissiveIntensity = k;
+      for (const m of this.tailMats) { if (m.emissive && m.emissive.getHex() === 0) m.emissive.set(0xff1a1a); m.emissiveIntensity = k; }
+    }
     const copy = (obj, body) => {
       const p = body.translation(), q = body.rotation();
       obj.position.set(p.x, p.y, p.z); obj.quaternion.set(q.x, q.y, q.z, q.w);
