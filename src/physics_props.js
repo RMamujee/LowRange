@@ -1,7 +1,8 @@
-// Loose set dressing as real physics: small/medium stones and fallen logs become dynamic
-// Rapier bodies the trucks can push, roll over, kick and get wedged on; stumps and big
-// decorative boulders become fixed colliders. (Trail rocks/ledges and trees are untouched:
-// they live in maps/common.js buildTerrainPhysics and define trail difficulty.)
+// Set dressing as real physics: only SMALL stones (fist to football size, under
+// DYNAMIC_MAX_WIDTH across) are loose, dynamic Rapier bodies the tyres kick, fling and roll
+// over; everything bigger (medium and large rocks), the trail-crew log edging and stumps are
+// fixed, solid colliders. (Trail rocks/ledges, embedded rocks and trees are untouched: they live
+// in maps/common.js buildTerrainPhysics and define trail difficulty.)
 //
 // Cost control: every prop is a cheap record; only those within `radius` of the truck get a
 // body (created asleep, removed again once far away and at rest, keeping wherever it was
@@ -19,7 +20,9 @@ import { MAT, GROUP_WORLD } from './maps/common.js';
 
 const DENSITY = { rock: 2500, log: 600 };      // kg/m³: granite-ish, seasoned softwood
 const FRICTION = { rock: 0.8, log: 0.6, boulder: 1.0, stump: 0.7 };
-const DYNAMIC_MAX_WIDTH = 1.6;                 // stones wider than this are fixed boulders
+// stones wider than this are fixed boulders: a 0.4 m stone weighs ~25 kg, the most a tyre
+// should bat about; anything bigger is a rock the truck climbs, not one it kicks
+export const DYNAMIC_MAX_WIDTH = 0.4;
 
 // world-space rotate p by unit quaternion q
 function qrot(q, p) {
@@ -43,8 +46,9 @@ export class PropPhysics {
 
   // it: { kind: 'rock'|'log'|'stump'|'boulder', pos {x,y,z}, rot {x,y,z,w}, pts: Float32Array of
   //       hull points in the body frame (metres), onPose?(pos, rot) }
+  // Only 'rock' (a small stone) is dynamic; logs, stumps and boulders are fixed.
   add(it) {
-    it.dynamic = it.kind === 'rock' || it.kind === 'log';
+    it.dynamic = it.kind === 'rock';
     it.mat = it.kind === 'log' || it.kind === 'stump' ? MAT.WOOD : MAT.ROCK;
     // local bounds: rough size, the long axis (logs) and the tipping arm (rocks)
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];

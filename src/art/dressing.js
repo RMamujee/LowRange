@@ -110,23 +110,45 @@ export function buildSetDressing(ctx) {
   const stoneTpls = [], stoneItems = [];
   const add = (tpl, it) => { let k = stoneTpls.indexOf(tpl); if (k < 0) { k = stoneTpls.push(tpl) - 1; stoneItems.push([]); } stoneItems[k].push(it); };
   // (a few hundred, not more: far away small stones are one dark pixel each, i.e. speckle)
+  // Small stones (about 0.16-0.34 m across) are the loose ones (src/physics_props.js makes
+  // everything under 0.4 m a dynamic body); medium and large rocks are fixed and kept well off
+  // every path.
+  const SMALL_W = { gltf: 0.64, proc: 0.7 }; // widest rock_small.glb / pebbleTemplate at s = 1
+  const smallScale = () => (0.16 + R() * 0.18) / (small ? SMALL_W.gltf : SMALL_W.proc);
   sample(340, 1.0, () => true, 0.6, 10).forEach((p, i) => {
     const r = R(), base = { x: p.x, y: H(p.x, p.z) - 0.04, z: p.z, ry: R() * 6.28, color: [0xffffff, 0xf2e6d0, 0xe0d8cc][i % 3] };
-    const size = r < 0.85 ? 'small' : r < 0.97 ? 'medium' : 'large';
+    const size = r < 0.86 ? 'small' : r < 0.97 ? 'medium' : 'large';
+    if (size !== 'small') {
+      // a fixed rock never pokes into a driving line: 0.8 m clear of the path edge
+      const w = size === 'medium' ? 1.3 : 2.6;
+      if (!ctx.clear(p.x, p.z, w / 2 + 0.8)) return;
+    }
     const set = { small, medium, large }[size];
-    if (set) add(set[i % set.length], { ...base, s: 0.75 + R() * 0.5 });
-    else add(proc[i % 3], { ...base, s: size === 'small' ? 0.7 + R() * 0.4 : size === 'medium' ? 1.4 + R() * 0.6 : 2.6 + R() * 0.8 }); // procedural is 0.7 m wide at s=1
+    if (size === 'small') add(set ? set[i % set.length] : proc[i % 3], { ...base, s: smallScale() });
+    else if (set) add(set[i % set.length], { ...base, s: 0.75 + R() * 0.5 });
+    else add(proc[i % 3], { ...base, s: size === 'medium' ? 1.4 + R() * 0.6 : 2.6 + R() * 0.8 }); // procedural is 0.7 m wide at s=1
   });
+  // a sprinkle of small loose stones on the rated trails' tread, mostly towards the edges where
+  // the tyres kick them about (never on the graded roads)
+  for (const p of ctx.paths.filter((q) => q.kind === 'trail' && q.pts.length > 1)) {
+    const L = p.pts.at(-1).s ?? 0;
+    for (let s = 12 + R() * 6; s < L - 10; s += 5 + R() * 7) {
+      let i = 1; while (i < p.pts.length - 1 && p.pts[i].s < s) i++;
+      const a = p.pts[i - 1], b = p.pts[i], d = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const hw = (a.w ?? p.width) / 2, lat = (R() < 0.5 ? -1 : 1) * hw * (0.35 + R() * 0.6);
+      const x = a.x - ((b.z - a.z) / d) * lat, z = a.z + ((b.x - a.x) / d) * lat;
+      if (ctx.matAt(x, z) === 3 || ctx.matAt(x, z) === 8) continue; // not in mud or water
+      add(small ? small[stoneItems.length % small.length] : proc[i % 3], { x, y: H(x, z) - 0.03, z, ry: R() * 6.28, s: smallScale(), color: 0xf2e6d0 });
+    }
+  }
   stoneTpls.forEach((tpl, k) => root.add(instance(tpl, stoneItems[k], { name: 'stones' })));
 
   // ---- logs + stumps ----
   const logA = assetPartsVariants('log');
   const logV = logA || [logTemplate()], stumpV = variants('stump', 1, stumpTemplate);
   const logs = logV.map(() => []), stumps = stumpV.map(() => []);
-  sample(70, 4, soft, 0.5, 14).forEach((p, i) => {
-    // the procedural log is unit length along X (stretched); a glTF log is used at its authored ~3 m
-    logs[i % logV.length].push({ x: p.x, y: H(p.x, p.z) - 0.06, z: p.z, ry: R() * 6.28, sx: logA ? 1 : 2.2 + R() * 1.6, s: 0.85 + R() * 0.4 });
-  });
+  // no fallen logs lying about: logs only as tidy, fixed trail-crew edging (see logEdging)
+  logEdging(ctx).forEach((it, i) => logs[i % logV.length].push({ ...it, sx: logA ? it.len / 3 : it.len }));
   sample(90, 3, soft, 0.5, 14).forEach((p, i) => stumps[i % stumpV.length].push({ x: p.x, y: H(p.x, p.z) - 0.05, z: p.z, ry: R() * 6.28, s: 0.7 + R() * 0.6 }));
   logV.forEach((tpl, v) => root.add(instance(tpl, logs[v], { name: 'logs' })));
   stumpV.forEach((tpl, v) => root.add(instance(tpl, stumps[v], { name: 'stumps' })));
@@ -136,6 +158,72 @@ export function buildSetDressing(ctx) {
   // ---- wooden arrow signs at the trailhead ----
   if (ctx.trailhead) root.add(arrowSigns(ctx));
   return root;
+}
+
+// Log edging, the only place logs appear: laid lengthwise by a trail crew, end to end, along the
+// outside of the tighter bends of the rated trails, as a short pair framing each trail entrance,
+// and as parking bumpers round the trailhead lot. Every log keeps at least 0.8 m (plus its own
+// radius) clear of every drivable path and sits on gentle ground, so it marks the course without
+// ever lying in a driving line. Returns [{ x, y, z, ry, rz, len, s }] (log along its local X).
+const LOG_R = 0.3, LOG_LEN = 3.0;
+function logEdging(ctx) {
+  const out = [];
+  const H = (x, z) => ctx.heightAt(x, z);
+  const clearOf = (x, z) => ctx.clear(x, z, 0.8 + LOG_R + 0.15);
+  // one log from a to b if both ends and the middle are clear and the ground is gentle
+  const lay = (ax, az, bx, bz) => {
+    const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+    if (![[ax, az], [mx, mz], [bx, bz]].every(([x, z]) => clearOf(x, z) && ctx.matAt(x, z) !== 3 && ctx.matAt(x, z) !== 8)) return false;
+    const ha = H(ax, az), hb = H(bx, bz), hm = H(mx, mz), len = Math.hypot(bx - ax, bz - az);
+    // across the log: no steep side slope (a log on a 30% cross-fall looks dropped, not laid)
+    const nx = -(bz - az) / len, nz = (bx - ax) / len;
+    const side = Math.abs(H(mx + nx, mz + nz) - H(mx - nx, mz - nz)) / 2;
+    if (Math.abs(hb - ha) > 0.9 || side > 0.3 || Math.abs(hm - (ha + hb) / 2) > 0.15) return false;
+    if (out.some((o) => Math.hypot(o.x - mx, o.z - mz) < 1.2)) return false;
+    out.push({ x: mx, y: (ha + hb) / 2 - 0.08, z: mz, ry: -Math.atan2(bz - az, bx - ax), rz: Math.atan2(hb - ha, len), len, s: 0.85 });
+    return true;
+  };
+  // offset point along a path at index i, `off` m to the right of travel
+  const offPt = (pts, i, off) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    return { x: pts[i].x - ((b.z - a.z) / L) * off, z: pts[i].z + ((b.x - a.x) / L) * off };
+  };
+  for (const p of ctx.paths.filter((q) => q.kind === 'trail' && q.pts.length > 8)) {
+    const pts = p.pts, n = pts.length, hw = (i) => (pts[i].w ?? p.width) / 2;
+    const off = (i) => hw(i) + 0.8 + LOG_R + 0.25; // log centre-line: 0.8 m+ clear of the tread edge
+    // per-point signed curvature over ±6 m (+ = turning left, i.e. the outside is on the right)
+    const head = (i) => { const a = pts[Math.max(0, i - 3)], b = pts[Math.min(n - 1, i + 3)]; return Math.atan2(b.x - a.x, b.z - a.z); };
+    const step = Math.max(1, Math.round(LOG_LEN / Math.max(0.3, (pts.at(-1).s ?? n) / n)));
+    // trail entrances: a log either side, angled slightly out like a funnel
+    for (const [i0, dir] of [[Math.min(n - 1, step), 1], [Math.max(0, n - 1 - step), -1]]) {
+      for (const sd of [-1, 1]) {
+        const a = offPt(pts, i0, sd * off(i0)), b = offPt(pts, Math.min(n - 1, Math.max(0, i0 + dir * step)), sd * (off(i0) + 0.5));
+        lay(a.x, a.z, b.x, b.z);
+      }
+    }
+    // runs along the outside of bends tighter than ~30 m radius
+    let run = 0;
+    for (let i = step * 2; i < n - step * 2; i += step) {
+      let d = head(i + step) - head(i - step); d = Math.atan2(Math.sin(d), Math.cos(d));
+      const k = d / Math.max(0.5, (pts[i + step].s ?? 0) - (pts[i - step].s ?? 0));
+      if (Math.abs(k) < 1 / 30) { run = 0; continue; }
+      if (run >= 6) continue; // a few logs per bend, not a wall
+      // heading = atan2(dx, dz): it grows when turning left (towards the travel's left), so then
+      // the outside of the bend is on the right (+ offset)
+      const sd = k > 0 ? 1 : -1;
+      const a = offPt(pts, i, sd * off(i)), b = offPt(pts, Math.min(n - 1, i + step), sd * off(Math.min(n - 1, i + step)));
+      if (lay(a.x, a.z, b.x, b.z)) run++;
+    }
+  }
+  // parking bumpers round the trailhead lot (gaps wherever a road or trail leaves)
+  const th = ctx.trailhead;
+  if (th) {
+    const r = th.r + 0.8 + LOG_R + 0.4, da = LOG_LEN / r;
+    for (let a = 0; a < Math.PI * 2 - da * 0.5; a += da * 1.15) {
+      lay(th.x + Math.cos(a) * r, th.z + Math.sin(a) * r, th.x + Math.cos(a + da) * r, th.z + Math.sin(a + da) * r);
+    }
+  }
+  return out;
 }
 
 function buildFences(ctx) {

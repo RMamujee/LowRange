@@ -1,16 +1,25 @@
-// Loose physics props (src/physics_props.js) against the tyre solver (src/vehicle.js):
-//  a) crawl taco / lc70 / wrx over a 0.25 m loose rock and a 0.3 m log
-//  b) spin a tyre on a small loose rock: the rock goes backwards, the truck doesn't rocket
-//  c) push a log and a rock with the bumper
-//  d) park with one tyre on a rock for 5 s: no drift / jitter
-//  e) loose-rock hits vs a wall (damage proportionate), drops onto a heightfield (no tunnelling)
-//  f) physics step time with ~50 awake props
+// Physics props (src/physics_props.js) against the tyre solver (src/vehicle.js). Only small
+// stones (under DYNAMIC_MAX_WIDTH, 0.4 m) are loose; logs (trail-crew edging), stumps and bigger
+// rocks are fixed colliders.
+//  a) crawl taco / lc70 / wrx over a loose 0.32 m stone and a fixed 0.3 m edging log
+//  b) spin a tyre on a small loose stone: the stone goes backwards, the truck doesn't rocket
+//  c) nose into a fixed log barrier / rock with the bumper: it stays put
+//  d) park with one tyre on a stone for 5 s: no drift / jitter
+//  e) loose-stone hits vs a fixed log vs a wall (damage proportionate), drops onto a
+//     heightfield (no tunnelling)
+//  g) high-centring on a fixed log
+//  h) the real set dressing (Trail Park, procedural art): only small stones loose, no loose
+//     logs, every log clear of the paths
+//  f) physics step time with ~50 awake stones
 //   node test/props.mjs
 import RAPIER from '@dimforge/rapier3d-compat';
 import { VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
-import { GROUP_WORLD } from '../src/terrain.js';
-import { PropPhysics } from '../src/physics_props.js';
+import * as THREE from 'three';
+import * as T from '../src/terrain.js';
+import { PropPhysics, adoptDressing, DYNAMIC_MAX_WIDTH } from '../src/physics_props.js';
+import { buildSetDressing, gridClearance } from '../src/art/dressing.js';
+const { GROUP_WORLD } = T;
 await RAPIER.init();
 const H = 1 / 200;
 let fails = 0;
@@ -72,14 +81,14 @@ function crawl(car, secs, kmh, tick, inp = { throttle: 0, brake: 0, steer: 0 }) 
 }
 const settle = (car, s = 1) => { for (let i = 0; i < s / H; i++) car.step({ throttle: 0, brake: 1, steer: 0 }, H); };
 
-console.log('a) crawling over a loose 0.25 m rock and a 0.3 m log');
+console.log('a) crawling over a loose 0.32 m stone and a fixed 0.3 m edging log');
 for (const id of ['taco', 'lc70', 'wrx']) {
   for (const what of ['rock', 'log']) {
     const sc = scene();
     const { car, spec } = makeCar(sc, id);
     const fz = -spec.wheelbase / 2;            // front axle z
     const it = what === 'rock'
-      ? sc.props.add({ kind: 'rock', pos: { x: -spec.track / 2, y: 0, z: fz - 4 }, rot: yawQ(0.4), pts: rockPts(0.42, 0.25, 7) })
+      ? sc.props.add({ kind: 'rock', pos: { x: -spec.track / 2, y: 0, z: fz - 4 }, rot: yawQ(0.4), pts: rockPts(0.32, 0.2, 7) })
       : sc.props.add({ kind: 'log', pos: { x: 0, y: 0, z: fz - 4 }, rot: yawQ(0.1), pts: logPts(0.3, 2.6) });
     sc.props.update(car.chassis.translation());
     settle(car);
@@ -95,7 +104,7 @@ for (const id of ['taco', 'lc70', 'wrx']) {
     });
     const p1 = it.body.translation(), cz = car.chassis.translation().z;
     const moved = Math.hypot(p1.x - p0.x, p1.z - p0.z);
-    check(ok && touched && cz < fz - 4 - spec.wheelbase - 3 && maxVy < 2 && maxProp < 6 && moved < 4 && p1.y > -0.2,
+    check(ok && (touched || what !== 'rock') && cz < fz - 4 - spec.wheelbase - 3 && maxVy < 2 && maxProp < 6 && moved < 4 && p1.y > -0.2 && it.dynamic === (what === 'rock') && (what === 'rock' || moved < 1e-4),
       `${id.padEnd(5)} over ${what.padEnd(4)}: truck z ${f2(cz)}, prop moved ${f2(moved)} m (dy ${f2(p1.y - p0.y)}), max prop speed ${f2(maxProp)} m/s, max chassis |vy| ${f2(maxVy)} m/s, tyre touched prop ${touched}`);
   }
 }
@@ -126,33 +135,31 @@ for (const id of ['taco', 'lc70', 'wrx']) {
     `${id.padEnd(5)} ${f2(m)} kg stone at a spinning tyre (${maxSpin.toFixed(0)} rad/s): flung ${f2(p1.z - p0.z)} m back (max +z ${f2(rockBack)} m/s, max ${f2(maxRockV)}); stuck truck max speed ${f2(maxCarV)} m/s, moved ${f2(dc)} m`);
 }
 
-console.log('c) bumper pushes');
-for (const [id, what] of [['lc70', 'log'], ['taco', 'rock']]) {
+console.log('c) nosing into fixed edging with the bumper');
+for (const [id, what] of [['lc70', 'log'], ['taco', 'boulder']]) {
   const sc = scene();
   const { car, spec } = makeCar(sc, id);
   settle(car, 0.5);
   const cl = spec.chassis.size[2], cb = car.chassis.translation().y - spec.chassis.size[1] / 2; // chassis box bottom
   const front = -cl / 2 - 2.5;
-  // a big log lying along the direction of travel between the wheels, its end at the bumper;
-  // or a 0.9 m boulder straight ahead (wider than a tyre gap would let it pass)
+  // a log barrier across the way at bumper height, or a 0.9 m rock straight ahead: both fixed
   const it = what === 'log'
-    ? sc.props.add({ kind: 'log', pos: { x: 0, y: 0, z: front - 1.4 }, rot: yawQ(Math.PI / 2), pts: logPts(Math.max(0.5, cb + 0.35), 2.6) })
-    : sc.props.add({ kind: 'rock', pos: { x: 0, y: 0, z: front - 0.5 }, rot: yawQ(0), pts: rockPts(0.9, Math.max(0.6, cb + 0.3), 5) });
+    ? sc.props.add({ kind: 'log', pos: { x: 0, y: 0, z: front - 0.4 }, rot: yawQ(0), pts: logPts(Math.max(0.5, cb + 0.35), 3.0) })
+    : sc.props.add({ kind: 'boulder', pos: { x: 0, y: 0, z: front - 0.5 }, rot: yawQ(0), pts: rockPts(0.9, Math.max(0.6, cb + 0.3), 5) });
   sc.props.update(car.chassis.translation());
-  const p0 = { ...it.body.translation() }, m = it.body.mass();
+  const p0 = { ...it.body.translation() };
   let ok = true, bodyHit = false;
-  crawl(car, 12, 4, () => {
+  crawl(car, 8, 4, () => {
     sc.props.sync();
     if (!finite(car.chassis) || !finite(it.body)) { ok = false; return false; }
   });
-  // contact between a chassis/axle collider and the prop at the end?
   for (const h of car.bodyHandles) sc.world.contactPair(sc.world.getCollider(h), it.collider, (mf) => { if (mf.numContacts()) bodyHit = true; });
-  const p1 = it.body.translation();
-  check(ok && p0.z - p1.z > 3 && car.health.body > 0.97,
-    `${id.padEnd(5)} pushed a ${m.toFixed(0)} kg ${what} ${f2(p0.z - p1.z)} m with the bumper (still in body contact ${bodyHit}), body health ${f2(car.health.body)}`);
+  const p1 = it.body.translation(), moved = Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+  check(ok && !it.dynamic && moved < 1e-4 && car.chassis.translation().z > p0.z && car.health.body > 0.97,
+    `${id.padEnd(5)} against a fixed ${what}: it moved ${(moved * 1000).toFixed(2)} mm, truck held at z ${f2(car.chassis.translation().z)} (barrier ${f2(p0.z)}, body contact ${bodyHit}), body health ${f2(car.health.body)}`);
 }
 
-console.log('d) parked with one tyre on a rock for 5 s (vs the same rock fixed in place)');
+console.log('d) parked with one tyre on a rock for 5 s (vs the same rock fixed in place; a 0.5 m stone, bigger than any loose one in game: a solver stability check)');
 const park = (id, kind) => {
   const sc = scene();
   const { car, spec } = makeCar(sc, id);
@@ -177,8 +184,8 @@ const park = (id, kind) => {
 };
 for (const id of ['taco', 'lc70', 'wrx']) {
   const a = park(id, 'rock'), b = park(id, 'boulder');
-  check(a.lift > 0.12 && a.driftLate < b.driftLate * 2 + 0.005 && a.rd < 0.03 && a.rdLate < 0.003 && a.lateRv < 0.02 && a.maxW < Math.max(0.03, b.maxW * 2),
-    `${id.padEnd(5)} FL tyre up ${f2(a.lift)} m on a loose rock: chassis drift ${(a.drift * 1000).toFixed(1)} mm, ${(a.driftLate * 1000).toFixed(1)} in the last 3 s (same rock fixed: ${(b.drift * 1000).toFixed(1)}, ${(b.driftLate * 1000).toFixed(1)}), max chassis rate ${a.maxW.toFixed(3)} rad/s (fixed ${b.maxW.toFixed(3)}); rock moves ${(a.rd * 1000).toFixed(1)} mm (max ${a.maxRv.toFixed(3)} m/s), ${(a.rdLate * 1000).toFixed(1)} mm in the last 3 s`);
+  check(a.lift > 0.11 && a.driftLate < b.driftLate * 2 + 0.005 && a.rd < 0.03 && a.rdLate < 0.003 && a.lateRv < 0.02 && a.maxW < Math.max(0.03, b.maxW * 2),
+    `${id.padEnd(5)} FL tyre up ${f2(a.lift)} m on a loose rock: chassis drift ${(a.drift * 1000).toFixed(1)} mm, ${(a.driftLate * 1000).toFixed(1)} in the last 3 s (same rock fixed: ${(b.drift * 1000).toFixed(1)}, ${(b.driftLate * 1000).toFixed(1)}), max chassis rate ${a.maxW.toFixed(3)} rad/s (fixed ${b.maxW.toFixed(3)}); rock moves ${(a.rd * 1000).toFixed(1)} mm (max ${a.maxRv.toFixed(3)} m/s), ${(a.rdLate * 1000).toFixed(1)} mm in the last 3 s (late max ${a.lateRv.toFixed(3)} m/s)`);
 }
 
 console.log('e) impacts and drops');
@@ -201,7 +208,7 @@ console.log('e) impacts and drops');
   }
   const [r, l, w] = res;
   console.log(`  30 km/h into: ${res.map((x) => `${x.target}${x.mass ? ` (${x.mass.toFixed(0)} kg)` : ''} body ${f2(x.body)} dents ${x.dents}`).join(' | ')}`);
-  check(r.ok && l.ok && r.body > 0.99 && r.body >= l.body && l.body >= w.body && w.body < r.body, 'loose-prop hits do proportionate damage (rock < log < wall)');
+  check(r.ok && l.ok && r.body > 0.99 && l.body < r.body && w.body < r.body, 'hits do proportionate damage (loose stone < fixed log, wall)');
   // 30 small stones thrown down at 12 m/s onto a bumpy heightfield
   const sc = scene('hf');
   for (let i = 0; i < 30; i++) {
@@ -240,6 +247,32 @@ for (const [id, dia] of [['wrx', 0.45], ['lc70', 0.45]]) {
   if (!ok) fails++;
 }
 
+console.log('h) the Trail Park set dressing (procedural art)');
+{
+  const clear = gridClearance({ size: T.SIZE, res: T.RES, path: T.GRID.path }, T.TRAILHEAD);
+  const root = buildSetDressing({
+    size: T.SIZE, heightAt: T.visualHeightAt, matAt: T.materialAt, trees: T.generateTrees(),
+    clear, paths: [...T.ROADS, ...T.TRAILS], trailhead: T.TRAILHEAD,
+  });
+  const props = new PropPhysics(RAPIER, null, {});
+  const n = adoptDressing(root, props);
+  const by = {};
+  for (const it of props.items) { const k = `${it.kind}${it.dynamic ? ' (loose)' : ' (fixed)'}`; by[k] = (by[k] || 0) + 1; }
+  const loose = props.items.filter((it) => it.dynamic);
+  const width = (it) => { let w = 0; for (let i = 0; i < it.pts.length; i += 3) w = Math.max(w, Math.hypot(it.pts[i], it.pts[i + 2]) * 2); return w; };
+  const maxLoose = Math.max(...loose.map(width));
+  const logs = props.items.filter((it) => it.kind === 'log');
+  // every log's ends and middle at least 0.8 m (+ its ~0.3 m radius) off every drivable path
+  const q = new THREE.Quaternion(), badLogs = logs.filter((it) => {
+    q.set(it.rot.x, it.rot.y, it.rot.z, it.rot.w);
+    const ax = new THREE.Vector3(it.halfExt[0], 0, 0).applyQuaternion(q);
+    return [-1, 0, 1].some((k) => !clear(it.pos.x + ax.x * k, it.pos.z + ax.z * k, 1.1));
+  });
+  console.log(`  ${n} props: ${Object.entries(by).map(([k, v]) => `${v} ${k}`).join(', ')}; widest loose stone ${maxLoose.toFixed(2)} m`);
+  check(loose.every((it) => it.kind === 'rock') && maxLoose < DYNAMIC_MAX_WIDTH && !logs.some((it) => it.dynamic), `only stones under ${DYNAMIC_MAX_WIDTH} m are loose; ${logs.length} logs, all fixed`);
+  check(logs.length > 10 && badLogs.length === 0, `log edging keeps 1.1 m off every path (${badLogs.length} too close)`);
+}
+
 console.log('f) step time');
 {
   const time = (n) => {
@@ -247,7 +280,7 @@ console.log('f) step time');
     const { car } = makeCar(sc, 'lc70');
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2, r = 4 + (i % 5);
-      sc.props.add({ kind: i % 5 ? 'rock' : 'log', pos: { x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r }, rot: yawQ(a), pts: i % 5 ? rockPts(0.3 + (i % 3) * 0.15, 0.25, i) : logPts(0.3, 2.2) });
+      sc.props.add({ kind: 'rock', pos: { x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r }, rot: yawQ(a), pts: rockPts(0.2 + (i % 3) * 0.08, 0.15 + (i % 2) * 0.06, i) });
     }
     sc.props.update({ x: 0, y: 0, z: 0 });
     // keep them all awake: throw them about

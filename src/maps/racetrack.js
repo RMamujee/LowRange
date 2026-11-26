@@ -2,7 +2,7 @@
 // patches and a tarmac start/finish straight, banked turns, whoops, a tabletop, a
 // step-up, a rock garden and a water splash. Edges are marked with posts, cones, tyre
 // walls and concrete barriers (the walls and barriers have colliders).
-import { MAT, fbm, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit } from './common.js';
+import { MAT, fbm, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
 
 export const ID = 'race';
 export const NAME = 'Race Track';
@@ -135,6 +135,16 @@ function nearestOnTrack(x, z, bins, nb, B) {
   return best;
 }
 
+// 0..1: braking zone strength at s, the ~30 m before a bend tighter than ~45 m radius (and not
+// in the bend itself), where braking bumps form
+const BRAKE = new Float32Array(NP);
+for (let i = 0; i < NP; i++) {
+  let m = 0;
+  for (let q = 3; q <= 17; q++) m = Math.max(m, Math.abs(pts[(i + q) % NP].k)); // 6-34 m ahead (2 m spacing)
+  BRAKE[i] = smooth(1 / 75, 1 / 45, m) * (1 - smooth(1 / 90, 1 / 55, Math.abs(pts[i].k)));
+}
+const brakeBumps = (s) => BRAKE[clamp(Math.round((wrap(s) / L) * NP), 0, NP - 1)];
+
 function bake() {
   const B = 16, nb = Math.ceil(SIZE / B);
   const bins = Array.from({ length: nb * nb }, () => []);
@@ -151,7 +161,7 @@ function bake() {
     for (let iz = 0; iz <= RES; iz++) {
       const z = -SIZE / 2 + iz * CELL;
       const idx = ix * N1 + iz;
-      let h = baseHeight(x, z);
+      let h = baseHeight(x, z), vis = null; // vis: shown height where it differs (mud sinks in)
       const n = fbm(x * 0.08 + 9, z * 0.08 - 4, 3);
       let mat = n > 0.15 ? MAT.DIRT : MAT.GRASS;
       if (Math.max(Math.abs(x), Math.abs(z)) > 178) mat = n > 0 ? MAT.ROCK : MAT.GRAVEL;
@@ -168,6 +178,14 @@ function bake() {
         let surf = c.base + feature(c.s) + lat * c.bank;
         surf -= Math.min(1, c.d / HW) ** 2 * 0.08; // crown for drainage
         surf += fbm(x * 0.3, z * 0.3, 2) * 0.05;
+        // rally-stage character off the tarmac and the built features: a washboard on the
+        // straights, braking bumps into the bends, soft lumps and the odd shallow pothole
+        const graded = !inR(c.s, F.tarmac) && Math.abs(feature(c.s)) < 0.02 && !(c.s > F.rocks[0] - 4 && c.s < F.rocks[1] + 4);
+        if (graded) {
+          const ease = smooth(HW + 1, HW - 1, c.d);
+          surf += (brakeBumps(c.s) * 0.035 * Math.sin(c.s * 1.96) + 0.018 * (1 - smooth(0.02, 0.1, Math.abs(c.bank))) * Math.sin(c.s * 2.24)) * ease;
+          surf += lumps(x, z, 0.025) + potholes(x, z, 11, 0.25, 0.07, 1.2, 5) * ease;
+        }
         const inRocks = c.s > F.rocks[0] && c.s < F.rocks[1];
         if (inRocks) surf += fbm(x * 0.5, z * 0.5, 2) * 0.08 * smooth(F.rocks[0], F.rocks[0] + 4, c.s) * smooth(F.rocks[1], F.rocks[1] - 4, c.s);
         // tabletop and step-up sides fall away steeply instead of fanning out into the field
@@ -177,13 +195,21 @@ function bake() {
         h = lerp(h, surf, w);
         if (c.d < HW + 0.4) {
           const tn = fbm(c.s * 0.05, c.lat * 0.08 + 3, 2);
-          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : tn > 0.4 ? MAT.GRAVEL : MAT.DIRT;
+          // a firmer swept line (dirt) runs through the bends towards the inside; off it the
+          // surface is loose gravel marbles, a little less grip
+          const lineLat = -clamp(c.bank * 8, -1, 1) * (HW - 3), offLine = Math.abs(c.lat - lineLat) > 3.2;
+          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : offLine && tn > 0.05 ? MAT.GRAVEL : MAT.DIRT;
           if (inRocks) mat = MAT.ROCK;
+          // the splash's surrounds churn to mud along the track edges (the line stays firm)
+          if (water && c.s > water.s0 - 12 && c.s < water.s1 + 12 && c.d > HW - 2.6 && !inRocks) {
+            const ruts = 0.05 * (0.6 + 0.8 * clamp(fbm(x * 0.2, z * 0.2, 2) + 0.5, 0, 1));
+            mat = MAT.MUD; h -= 0.06 + ruts; vis = h + 0.06 + ruts * 0.4; GRID.tone[idx] = Math.min(255, Math.round(120 + ruts * 1500));
+          }
           GRID.path[idx] = 0; // worn, darker racing surface
         } else if (c.d < HW + 1.6 && !inR(c.s, F.tarmac)) mat = MAT.GRAVEL; // loose verge, then the field
         if (water && c.s > water.s0 && c.s < water.s1 && h < water.y && c.d < HW + 3) mat = MAT.WATER;
       }
-      GRID.h[idx] = h; GRID.vis[idx] = h; GRID.mat[idx] = mat;
+      GRID.h[idx] = h; GRID.vis[idx] = vis ?? h; GRID.mat[idx] = mat;
     }
   }
 }
