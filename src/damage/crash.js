@@ -226,6 +226,8 @@ export class CrashModel {
     ev.tl = this.time;
     ev.E += W; ev.Es += Ws; ev.J += J;
     ev.vmax = Math.max(ev.vmax || 0, vn);
+    const cl = this.v.chassis.linvel();
+    ev.speed = Math.max(ev.speed || 0, Math.hypot(cl.x, cl.y, cl.z)); // how fast the truck itself was going
     // impulse-weighted contact point / direction, energy-weighted when there is energy
     const wgt = J * (0.05 + Math.max(0, vn));
     ev.p.x += lp.x * wgt; ev.p.y += lp.y * wgt; ev.p.z += lp.z * wgt; ev.wsum = (ev.wsum || 0) + wgt;
@@ -282,7 +284,10 @@ export class CrashModel {
     if (p.y > Ly.belt) e += 0.35 * es;
     if (ar) e *= n.y > 0.6 ? ar.under : Math.abs(n.x) > Math.abs(n.z) ? ar.side : ar.end;
     // slow contact (crawling into a rock, resting, sliding) never deforms anything
-    const plastic = (ev.vmax || 0) < V_DAMAGE && !(p.y > Ly.belt && es > 12) ? 0 : Math.max(0, e - E_ELASTIC);
+    // (a tumble at speed still crushes the greenhouse though each roof landing is a glancing one;
+    // a crawl-speed tip-over onto the roof does not)
+    const tumble = p.y > Ly.belt && (ev.speed || 0) > 4 && (ev.vmax || 0) > 1.5;
+    const plastic = (ev.vmax || 0) < V_DAMAGE && !tumble ? 0 : Math.max(0, e - E_ELASTIC);
     if (final) {
       this.scrape += es;
       if (e > 0.5 || es > 0.5) this.lastHit = { e, plastic, scrape: es, p, n, part: ev.part, dur: this.time - ev.t0, kind: classify(ev, e, es, this.time) };
