@@ -10,7 +10,7 @@ for (const spec of VEHICLES){
   for (const drop of [1,2.5,5]){
     const world=new RAPIER.World({x:0,y:-9.81,z:0}); world.timestep=H;
     const ground=world.createCollider(RAPIER.ColliderDesc.cuboid(200,1,200).setTranslation(0,-1,0).setCollisionGroups(GROUP_WORLD));
-    const car=new Vehicle(RAPIER, world, spec, {ground, rockHandles:new Set()}, {x:0,y:spec.tire.radius-spec.axleY+0.05+drop,z:0}, 0);
+    const car=new Vehicle(RAPIER, world, spec, {ground, rockHandles:new Set()}, {x:0,y:spec.tire.radius-spec.axleY+0.05+drop,z:0}, 0); car.grace=0;
     for(let i=0;i<600;i++) car.step({throttle:0,brake:0,steer:0},H);
     out.push(`drop ${drop}m: ${fmt(car)}`);
   }
