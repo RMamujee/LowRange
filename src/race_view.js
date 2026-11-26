@@ -3,6 +3,7 @@
 // crowd, the paddock, painted lines and the water splash.
 import * as THREE from 'three';
 import { GRID, RES, SIZE, MAT, heightAt, visualHeightAt, TRACK, CHECKPOINTS, PROPS, MAP, rng } from './terrain.js';
+import { fitFace, bannerBoard, signMaterial, faceYaw, SIGN_GLOW } from './art/signs.js';
 
 const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.85, ...extra });
 
@@ -113,9 +114,11 @@ export function buildRaceDressing(scene) {
   }
   const beam = new THREE.Mesh(new THREE.BoxGeometry(G.span * 2 + 0.9, 1.6, 0.7), steel);
   beam.position.y = 6.4; beam.castShadow = true; gantry.add(beam);
-  const banner = labelTexture('START · FINISH', { w: 1024, h: 128, check: true });
+  // pixel-font banner (src/art/signs.js) on both faces of the beam, chequered frame
+  const banner = fitFace({ title: 'START · FINISH', style: 'check', frame: 2 }, { m: 1.5 / 15, maxW: G.span * 2 - 0.6 });
+  const bannerMat = signMaterial(banner.texture);
   for (const ry of [0, Math.PI]) {
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(G.span * 2 - 0.6, 1.3), new THREE.MeshStandardMaterial({ map: banner }));
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(banner.w, banner.h), bannerMat);
     b.position.set(0, 6.4, ry ? -0.36 : 0.36); b.rotation.y = ry; gantry.add(b);
   }
   const lights = [];
@@ -143,19 +146,22 @@ export function buildRaceDressing(scene) {
     g.position.set(c.x, heightAt(c.x, c.z), c.z); g.rotation.y = Math.atan2(c.tx, c.tz);
     const span = TRACK.width / 2 + 3.2;
     const m = std(0xf2f2ee);
+    // a big number and the word on a two-faced board (it was one double-sided plane, which read
+    // mirrored from the approach side), steel frame; the poles stop at its lower edge
+    const face = fitFace({ title: 'CHECKPOINT', num: i, style: 'steel', frame: 2 }, { m: 0.065, maxW: span * 2 });
+    const y0 = 3.6;
     for (const sd of [-1, 1]) {
-      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.22, 4.6, 0.22), m);
       const gy = heightAt(c.x - c.tz * sd * span, c.z + c.tx * sd * span) - g.position.y;
-      pole.position.set(sd * span, 2.3 + gy, 0); pole.castShadow = true; g.add(pole);
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.22, y0 - gy + 0.3, 0.22), m);
+      pole.position.set(sd * span, (y0 + gy - 0.3) / 2, 0); pole.castShadow = true; g.add(pole);
     }
-    const tex = labelTexture(`CHECKPOINT ${i}`, { w: 1024, h: 128, bg: '#1d1d1d', fg: '#f2efe6' });
-    const bmat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0x000000, side: THREE.DoubleSide });
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(span * 2, 0.9), bmat);
-    b.position.y = 4.3; g.add(b);
+    const board = bannerBoard(face);
+    board.position.y = y0 + face.h / 2; g.add(board);
     scene.add(g);
-    return bmat;
+    return board.userData.material;
   });
-  const setNextCp = (next) => arches.forEach((m, i) => { if (!m) return; const on = i === next; m.color.set(on ? 0xffc060 : 0xffffff); m.emissive.set(on ? 0x6a3c00 : 0x000000); });
+  // the next checkpoint's board glows amber
+  const setNextCp = (next) => arches.forEach((m, i) => { if (!m) return; const on = i === next; m.color.set(on ? 0xffc060 : 0xffffff); m.emissive.set(on ? 0xa87a30 : SIGN_GLOW); });
 
   // ---- grandstands + crowd ----
   const spots = [];
@@ -238,12 +244,19 @@ export function buildRaceDressing(scene) {
   }
 
   // ---- venue sign ----
+  // faces the traffic coming up to it (it stood side-on to the track), toed in towards the track
   const sp = MAP.trackFrame(CHECKPOINTS[0].s - 30);
-  const sign = new THREE.Mesh(new THREE.BoxGeometry(7, 1.6, 0.15), [steel, steel, steel, steel, new THREE.MeshStandardMaterial({ map: labelTexture(TRACK.name.toUpperCase(), { w: 1024, h: 160, bg: '#1d1d1d', fg: '#ffb340' }) }), steel]);
+  const vf = fitFace({ title: TRACK.name, style: 'steel', maxTitleW: 70 }, { m: 0.085 });
   const lat = -(TRACK.width / 2 + 6), sx = sp.x - sp.tz * lat, sz = sp.z + sp.tx * lat;
-  sign.position.set(sx, heightAt(sx, sz) + 3.2, sz); sign.rotation.y = Math.atan2(-sp.tz, sp.tx); sign.castShadow = true;
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(vf.w, vf.h, 0.15), [steel, steel, steel, steel, signMaterial(vf.texture), steel]);
+  const gy = heightAt(sx, sz), vy = gy + 1.4 + vf.h / 2;
+  sign.position.set(sx, vy, sz); sign.rotation.y = faceYaw([-sp.tx, -sp.tz], sx, sz, sp.x, sp.z, 0.6); sign.castShadow = true;
   scene.add(sign);
-  for (const sd of [-3, 3]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.2, 0.2), steel); p.position.set(sx + Math.cos(sign.rotation.y) * sd, heightAt(sx, sz) + 1.6, sz - Math.sin(sign.rotation.y) * sd); scene.add(p); }
+  for (const sd of [-1, 1]) {
+    // legs stop at the board's lower edge so they never cross the letters
+    const o = sd * (vf.w / 2 - 0.4), top = vy - vf.h / 2 + 0.1, p = new THREE.Mesh(new THREE.BoxGeometry(0.2, top - gy + 0.3, 0.2), steel);
+    p.position.set(sx + Math.cos(sign.rotation.y) * o, (top + gy - 0.3) / 2, sz - Math.sin(sign.rotation.y) * o); scene.add(p);
+  }
 
   return { setLights, setNextCp };
 }
