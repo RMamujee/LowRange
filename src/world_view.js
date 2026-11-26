@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, ROADS, TRAILS, DIFF, TRAILHEAD, pathPoint } from './terrain.js';
+import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, pathPoint } from './terrain.js';
+import { buildSetDressing, gridClearance } from './art/dressing.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -55,23 +56,13 @@ export function buildRocks(rocks) {
   return mesh;
 }
 
+// trees (on their physics colliders) plus all the decorative set dressing (src/art/dressing.js)
 export function buildTrees(trees) {
-  const group = new THREE.Group();
-  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.24, 3, 6), new THREE.MeshStandardMaterial({ color: 0x5a3f2a, flatShading: true }), trees.length);
-  const leaves = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 4.2, 7), new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 }), trees.length * 2);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-  const col = new THREE.Color();
-  trees.forEach((t, i) => {
-    s.setScalar(t.s); q.setFromEuler(new THREE.Euler(0, i * 1.7, 0));
-    m.compose(p.set(t.x, t.y + 1.5 * t.s, t.z), q, s); trunk.setMatrixAt(i, m);
-    m.compose(p.set(t.x, t.y + 3.6 * t.s, t.z), q, s); leaves.setMatrixAt(i * 2, m);
-    m.compose(p.set(t.x, t.y + 5.4 * t.s, t.z), q, s.multiplyScalar(0.7)); leaves.setMatrixAt(i * 2 + 1, m);
-    col.setHSL(0.28 + (i % 7) * 0.014, 0.4, 0.2 + (i % 5) * 0.025);
-    leaves.setColorAt(i * 2, col); leaves.setColorAt(i * 2 + 1, col);
+  return buildSetDressing({
+    size: SIZE, heightAt: visualHeightAt, matAt: materialAt, trees,
+    clear: gridClearance({ size: SIZE, res: RES, path: GRID.path }, TRAILHEAD),
+    paths: [...ROADS, ...TRAILS], trailhead: TRAILHEAD,
   });
-  trunk.castShadow = leaves.castShadow = true;
-  group.add(trunk, leaves);
-  return group;
 }
 
 // difficulty symbol drawn on a 2D canvas
