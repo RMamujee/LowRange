@@ -6,7 +6,7 @@ const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(process.env.URL || `http://localhost:${process.env.PORT || 5199}/`, { waitUntil: 'load' }); // URL=...?map=race also works
+await page.goto(process.env.URL || `http://localhost:${process.env.PORT || 5199}/${process.env.QS || ''}`, { waitUntil: 'load' }); // URL=...?map=race also works
 await page.waitForFunction(() => window.__game && window.__game.car, null, { timeout: 60000 });
 await page.screenshot({ path: `${out}/menu.png` });
 const plan = JSON.parse(process.argv[3] || '[]');
