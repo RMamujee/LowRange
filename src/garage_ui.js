@@ -49,19 +49,20 @@ export class Garage {
     // same pixel-art look as the game (src/gfx/pipeline.js): low-res, toon, outlines
     this.pixels = new PixelPipeline(r, { pixelHeight: 200 });
     const sc = this.scene = new THREE.Scene();
-    sc.background = new THREE.Color(0x1c1915);
-    sc.fog = new THREE.Fog(0x1c1915, 14, 30);
+    // a warm workshop: dark plank floor, wooden turntable with a gold rim
+    sc.background = new THREE.Color(0x2b1910);
+    sc.fog = new THREE.Fog(0x2b1910, 14, 30);
     sc.add(new THREE.HemisphereLight(0xfff1dc, 0x6a5a48, 1.7));
     const sun = new THREE.DirectionalLight(0xffe2b8, 2.6);
     sun.position.set(-5, 9, 4); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
     Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
     sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
     sc.add(sun); this.sun = sun;
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x2a251f, roughness: 0.95 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x55321e, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; sc.add(floor);
-    const table = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.3, 0.04, 64), new THREE.MeshStandardMaterial({ color: 0x3b342b, roughness: 0.8 }));
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.3, 0.04, 64), new THREE.MeshStandardMaterial({ color: 0x7d4b27, roughness: 0.8 }));
     table.position.y = -0.02; table.receiveShadow = true; sc.add(table);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(4.25, 0.025, 6, 96), new THREE.MeshBasicMaterial({ color: 0xffb340 }));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(4.25, 0.025, 6, 96), new THREE.MeshBasicMaterial({ color: 0xffd866 }));
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; sc.add(ring);
     this.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
     const R = this.R;
@@ -79,6 +80,8 @@ export class Garage {
     this.isOpen = true;
     this.resize();
     this.changed(false);
+    // keyboard: start on the first fitted part, so arrows and Enter work straight away
+    $('gOpts').querySelector('.chip.on')?.focus({ preventScroll: true });
     this.last = performance.now();
     // one loop only: a close() + open() before the next frame must not start a second one
     if (!this.looping) { this.looping = true; requestAnimationFrame((t) => this.frame(t)); }
@@ -88,6 +91,7 @@ export class Garage {
     if (!this.isOpen) return;
     this.isOpen = false;
     $('garage').classList.add('hidden');
+    if ($('garage').contains(document.activeElement) || document.activeElement === document.body) $('garageBtn')?.focus({ preventScroll: true });
   }
 
   resize() {
@@ -117,6 +121,8 @@ export class Garage {
 
   renderOptions() {
     const b = this.build, groups = buildOptions(this.base);
+    // re-rendering replaces the chips: keep keyboard focus on the same one
+    const f = document.activeElement, keep = f && f.classList && f.classList.contains('chip') ? [f.dataset.key, f.dataset.k] : null;
     $('gOpts').innerHTML = groups.map((g) => `
       <section class="gcat"><h4>${g.label}</h4>
         ${g.items.map((it) => `<div class="grow"><span class="glbl">${it.label}</span><div class="chips${it.swatch ? ' sw' : ''}">
@@ -124,16 +130,19 @@ export class Garage {
             const on = c.value === b[it.key];
             if (it.swatch) {
               const col = c.color === null ? '#4a4640' : hex(c.color);
-              return `<button class="chip swatch${on ? ' on' : ''}${c.value === null ? ' stock' : ''}" data-key="${it.key}" data-k="${k}" title="${c.label}" style="background:${col}">${c.value === null ? 'STOCK' : ''}</button>`;
+              return `<button class="chip swatch${on ? ' on' : ''}${c.value === null ? ' stock' : ''}" data-key="${it.key}" data-k="${k}" title="${c.label}" aria-label="${it.label} ${c.label}" aria-pressed="${on}" style="background:${col}">${c.value === null ? '<span>Stock</span>' : ''}</button>`;
             }
-            return `<button class="chip${on ? ' on' : ''}" data-key="${it.key}" data-k="${k}" data-note="${c.note || ''}">${c.label}</button>`;
+            return `<button class="chip${on ? ' on' : ''}" data-key="${it.key}" data-k="${k}" aria-pressed="${on}" data-note="${c.note || ''}"><span>${c.label}</span></button>`;
           }).join('')}</div></div>`).join('')}
       </section>`).join('');
     const items = Object.fromEntries(groups.flatMap((g) => g.items).map((it) => [it.key, it]));
     $('gOpts').querySelectorAll('.chip').forEach((el) => {
       el.addEventListener('click', () => { this.build[el.dataset.key] = items[el.dataset.key].choices[+el.dataset.k].value; this.changed(); });
-      el.addEventListener('mouseenter', () => { $('gNote').textContent = el.dataset.note || el.title || ''; });
+      const note = () => { $('gNote').textContent = el.dataset.note || el.title || ''; };
+      el.addEventListener('mouseenter', note);
+      el.addEventListener('focus', note);
     });
+    if (keep) $('gOpts').querySelector(`.chip[data-key="${keep[0]}"][data-k="${keep[1]}"]`)?.focus({ preventScroll: true });
   }
 
   renderStats() {

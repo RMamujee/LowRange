@@ -60,20 +60,20 @@ if (which === 'all' || which === 'park') {
   await page.evaluate(async () => { const c = window.__game.car; c.reset({ x: 6, y: 2.5, z: 4 }, 0); await new Promise((r) => setTimeout(r, 2500)); c.health.engine = 0.5; c.health.body = 0.7; c.dt.gear = 2; });
   const before = await page.evaluate(() => ({ p: window.__game.car.chassis.translation(), h: window.__game.car.health.engine, gear: window.__game.car.dt.gear }));
   await key(page, 'Escape'); await sleep(page, 1500);
-  const paused = await page.evaluate(() => ({ paused: window.__game.paused, menu: !document.getElementById('menu').classList.contains('hidden'), bar: !document.getElementById('pauseBar').classList.contains('hidden'), p: window.__game.car.chassis.translation() }));
+  const paused = await page.evaluate(() => ({ paused: window.__game.paused, menu: !document.getElementById('menu').classList.contains('hidden'), bar: !document.getElementById('pauseSign').classList.contains('hidden'), p: window.__game.car.chassis.translation() }));
   check(paused.paused && paused.menu && paused.bar, 'Esc opens the menu as a pause with RESUME');
   check(Math.hypot(paused.p.x - before.p.x, paused.p.z - before.p.z) < 0.05, 'the truck is frozen while paused');
   await key(page, 'Escape'); await sleep(page, 400);
   const after = await page.evaluate(() => ({ playing: !document.getElementById('hud').classList.contains('hidden'), paused: window.__game.paused, p: window.__game.car.chassis.translation(), h: window.__game.car.health.engine, gear: window.__game.car.dt.gear }));
   check(after.playing && !after.paused && Math.hypot(after.p.x - before.p.x, after.p.z - before.p.z) < 0.3 && after.h === 0.5 && after.gear === before.gear, `Esc again resumes the same truck: same spot, damage and gear (no respawn, no repair) ${JSON.stringify({ before, after })}`);
   await key(page, 'Escape'); await sleep(page, 300);
-  await page.evaluate(() => document.querySelector('#pauseBar .resume').click()); await sleep(page, 300);
+  await page.evaluate(() => document.getElementById('goBtn').click()); await sleep(page, 300);
   check(!(await page.evaluate(() => window.__game.paused)) && (await page.evaluate(() => window.__game.car.health.engine)) === 0.5, 'RESUME button resumes without repair');
   await key(page, 'Escape'); await sleep(page, 300);
   await page.evaluate(() => document.getElementById('goBtn').click()); await sleep(page, 600);
   check((await page.evaluate(() => window.__game.car.health.engine)) === 0.5, 'DRIVE with the same rig also resumes (no forced repair)');
   await key(page, 'Escape'); await sleep(page, 300);
-  await page.evaluate(() => document.querySelector('#pauseBar .restart').click()); await sleep(page, 1200);
+  await page.evaluate(() => document.getElementById('restartBtn').click()); await sleep(page, 1200);
   const rs = await page.evaluate(() => ({ h: window.__game.car.health.engine, p: window.__game.car.chassis.translation(), paused: window.__game.paused }));
   check(rs.h === 1 && Math.hypot(rs.p.x, rs.p.z) < 3 && !rs.paused, 'RESTART AT TRAILHEAD respawns repaired at the trailhead');
   // --- big map + waypoints
