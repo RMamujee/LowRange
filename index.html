@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛰</text></svg>" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Low Range: a 4x4 crawler</title>
+<style>
+  :root {
+    --amber: #ffb340; --amber-dim: #7a5520; --ink: #e9e4d8; --muted: #9a9384;
+    --panel: rgba(18, 17, 15, 0.72); --line: rgba(255, 220, 160, 0.16);
+    --good: #5fd47a; --warn: #ff7a3d; --font: 'Bahnschrift', 'DIN Alternate', 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0c0b; color: var(--ink); font-family: var(--font); }
+  canvas { display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(6px); }
+  #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+  #hud.hidden { display: none; }
+
+  /* top-left: objective */
+  #obj { position: absolute; top: 14px; left: 14px; padding: 10px 14px; min-width: 250px; }
+  #obj .t { font-size: 11px; letter-spacing: .18em; color: var(--muted); text-transform: uppercase; }
+  #obj .flags { font-size: 22px; margin-top: 2px; }
+  #obj .next { font-size: 13px; margin-top: 6px; display: flex; align-items: center; gap: 8px; color: var(--amber); }
+  #obj .arrow { width: 18px; height: 18px; display: inline-block; transition: transform .1s linear; }
+  #obj .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* bottom-left: cluster */
+  #cluster { position: absolute; left: 14px; bottom: 14px; padding: 12px 14px; display: flex; gap: 16px; align-items: flex-end; }
+  #tach { width: 170px; height: 120px; }
+  .gearbox { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
+  #gear { font-size: 64px; line-height: 0.9; color: var(--amber); font-weight: 600; }
+  #range { font-size: 13px; letter-spacing: .15em; margin-top: 4px; }
+  .readouts { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  #speed { font-size: 30px; font-variant-numeric: tabular-nums; }
+  #speed small { font-size: 12px; color: var(--muted); margin-left: 3px; }
+  .lamps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .lamp { font-size: 10px; letter-spacing: .1em; padding: 3px 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); text-align: center; }
+  #cluster, #mapbox { pointer-events: auto; }
+  button.lamp, .btn { font-family: var(--font); background: rgba(255,255,255,.03); cursor: pointer; }
+  button.lamp:hover, .btn:hover { border-color: var(--amber); color: var(--ink); }
+  .btn { color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 10px; font-size: 11px; }
+  #range { margin-top: 4px; font-size: 12px; }
+  #mapbox { position: absolute; top: 14px; right: 14px; padding: 8px; }
+  #minimap { display: block; border-radius: 4px; width: 220px; height: 220px; }
+  .maphint { font-size: 11px; color: var(--muted); margin-top: 6px; text-align: center; }
+  #trailList { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+  #trailList .tr { display: flex; gap: 8px; align-items: center; }
+  #trailList .tr .nm { flex: 1; }
+  #trailList .tr em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #trailList .tr.done .nm { color: var(--good); }
+  #trailList .tr.act .nm, #trailList .tr.act em { color: var(--amber); }
+  .lamp.on { color: #1a1206; background: var(--amber); border-color: var(--amber); }
+  .lamp.warn { color: #fff; background: #c0392b; border-color: #c0392b; }
+  .lamp.good { color: #062010; background: var(--good); border-color: var(--good); }
+  .bars { display: flex; gap: 6px; align-items: flex-end; height: 64px; }
+  .bar { width: 10px; height: 100%; background: rgba(255,255,255,.07); border-radius: 2px; position: relative; overflow: hidden; }
+  .bar i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--amber); }
+  .bar.b i { background: #e5533d; } .bar.c i { background: #6fb0ff; }
+  .barlbl { display: flex; gap: 6px; font-size: 9px; color: var(--muted); }
+  .barlbl span { width: 10px; text-align: center; }
+
+  /* bottom-right: inclinometer + wheels */
+  #chassis { position: absolute; right: 14px; bottom: 14px; padding: 12px 14px; display: flex; gap: 16px; align-items: stretch; }
+  .incl { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
+  .incl svg { width: 84px; height: 54px; }
+  .incl b { color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .incl b.warn { color: var(--warn); }
+  #wheels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; align-content: center; }
+  .wh { display: flex; align-items: center; gap: 6px; font-size: 10px; }
+  .wh .trav { width: 8px; height: 44px; background: rgba(255,255,255,.07); border-radius: 2px; position: relative; }
+  .wh .trav i { position: absolute; left: 0; right: 0; height: 4px; background: var(--ink); border-radius: 1px; }
+  .wh .trav::after { content: ''; position: absolute; left: -2px; right: -2px; top: 50%; height: 1px; background: var(--muted); }
+  .wh .tyre { width: 18px; height: 40px; border-radius: 4px; background: #333; border: 2px solid #555; }
+  .wh .tyre.grip { border-color: var(--good); } .wh .tyre.slip { border-color: var(--warn); } .wh .tyre.air { border-color: #444; opacity: .45; }
+  .wh .m { color: var(--muted); width: 44px; }
+  .wh .m b { display: block; color: var(--ink); font-weight: 500; font-size: 11px; }
+
+  #toast { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); font-size: 20px; padding: 10px 18px; opacity: 0; transition: opacity .25s; text-align: center; }
+  #toast.show { opacity: 1; }
+
+
+  kbd { font-family: var(--font); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; background: rgba(255,255,255,.04); }
+
+  /* menu */
+  #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 30%, rgba(40,30,18,.55), rgba(8,7,6,.88)); z-index: 10; }
+  #menu.hidden { display: none; }
+  .menu-inner { width: min(1240px, 96vw); }
+  .title { font-size: 52px; font-weight: 600; letter-spacing: .04em; }
+  .title span { color: var(--amber); }
+  .tag { color: var(--muted); margin: 4px 0 22px; font-size: 15px; }
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  #dmg { display: flex; gap: 10px; font-size: 10px; letter-spacing: .08em; margin-top: 8px; color: var(--good); }
+  #dmg .mid { color: var(--amber); } #dmg .bad { color: #ff5a3d; }
+  .card { padding: 16px; cursor: pointer; transition: border-color .15s, transform .15s; }
+  .card:hover { border-color: rgba(255, 179, 64, .5); transform: translateY(-2px); }
+  .card.sel { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+  .card h3 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+  .card p { margin: 0 0 10px; font-size: 12px; color: var(--muted); line-height: 1.4; min-height: 84px; }
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; }
+  .stats dt { color: var(--muted); } .stats dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .opts { display: flex; gap: 22px; margin: 18px 0; font-size: 14px; flex-wrap: wrap; }
+  .opts label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .opts input { accent-color: var(--amber); width: 16px; height: 16px; }
+  .go { font-family: var(--font); font-size: 18px; letter-spacing: .12em; padding: 12px 34px; background: var(--amber); color: #1a1206; border: 0; border-radius: 4px; cursor: pointer; font-weight: 600; }
+  .go:hover { filter: brightness(1.08); }
+  .controls { display: grid; grid-template-columns: repeat(4, auto); gap: 6px 18px; font-size: 13px; color: var(--muted); margin-top: 22px; padding: 14px 16px; }
+  .controls span { white-space: nowrap; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--muted); z-index: 20; background: #0d0c0b; letter-spacing: .1em; }
+  #help { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 9; pointer-events: none; }
+  #help.hidden { display: none; }
+  #help .controls { pointer-events: auto; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="loading">LOADING TERRAIN…</div>
+
+<div id="hud" class="hidden">
+  <div id="obj" class="panel">
+    <div class="t">Trails</div>
+    <div id="trailList"></div>
+    <div class="next"><svg class="arrow" id="arrow" viewBox="0 0 20 20"><path d="M10 1 L17 18 L10 13 L3 18 Z" fill="currentColor"/></svg><span id="nextFlag">—</span></div>
+    <div class="sub" id="timer">00:00 · 0.0 km</div>
+  </div>
+  <div id="mapbox" class="panel"><canvas id="minimap" width="220" height="220"></canvas>
+    <div class="maphint"><kbd>H</kbd> controls · <kbd>Esc</kbd> garage</div></div>
+  <div id="toast" class="panel"></div>
+
+  <div id="cluster" class="panel">
+    <svg id="tach" viewBox="0 0 170 120">
+      <path id="tachBg" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10" stroke-linecap="round"/>
+      <path id="tachRed" fill="none" stroke="#c0392b" stroke-width="10"/>
+      <path id="tachFg" fill="none" stroke="#ffb340" stroke-width="10" stroke-linecap="round"/>
+      <text id="rpmTxt" x="85" y="92" text-anchor="middle" fill="#e9e4d8" font-size="22" font-family="Bahnschrift, Segoe UI">0</text>
+      <text x="85" y="108" text-anchor="middle" fill="#9a9384" font-size="10" letter-spacing="2" font-family="Bahnschrift, Segoe UI">RPM</text>
+    </svg>
+    <div class="gearbox">
+      <button class="btn small" id="bUp">▲</button>
+      <div id="gear">N</div>
+      <button class="btn small" id="bDn">▼</button>
+      <button class="lamp" id="range">HI</button>
+    </div>
+    <div class="readouts">
+      <div id="speed">0.0<small>km/h</small></div>
+      <div class="lamps">
+        <button class="lamp" id="l4wd">4WD</button>
+        <button class="lamp" id="lF">F LOCK</button>
+        <button class="lamp" id="lR">R LOCK</button>
+        <button class="lamp" id="lAir">AIRED</button>
+        <button class="lamp" id="lRS">R-STEER</button>
+        <button class="lamp" id="lAC">AUTO-CL</button>
+        <button class="lamp" id="lEng">ENGINE</button>
+        <button class="lamp" id="bRec">RECOVER</button>
+        <button class="lamp" id="bCam">CAMERA</button>
+      </div>
+    </div>
+    <div>
+      <div class="bars">
+        <div class="bar"><i id="bT"></i></div>
+        <div class="bar b"><i id="bB"></i></div>
+        <div class="bar c"><i id="bC"></i></div>
+      </div>
+      <div class="barlbl"><span>T</span><span>B</span><span>C</span></div>
+    </div>
+  </div>
+
+  <div id="chassis" class="panel">
+    <div class="incl">
+      PITCH
+      <svg viewBox="-42 -27 84 54"><line x1="-40" y1="0" x2="40" y2="0" stroke="rgba(255,255,255,.12)"/><g id="pitchIcon"><rect x="-24" y="-10" width="48" height="10" rx="2" fill="#e9e4d8"/><rect x="-6" y="-17" width="20" height="8" rx="1" fill="#e9e4d8"/><circle cx="-15" cy="3" r="6" fill="#ffb340"/><circle cx="15" cy="3" r="6" fill="#ffb340"/></g></svg>
+      <b id="pitchTxt">0°</b>
+    </div>
+    <div class="incl">
+      ROLL
+      <svg viewBox="-42 -27 84 54"><line x1="-40" y1="0" x2="40" y2="0" stroke="rgba(255,255,255,.12)"/><g id="rollIcon"><rect x="-15" y="-16" width="30" height="16" rx="3" fill="#e9e4d8"/><rect x="-19" y="-2" width="8" height="10" rx="2" fill="#ffb340"/><rect x="11" y="-2" width="8" height="10" rx="2" fill="#ffb340"/></g></svg>
+      <b id="rollTxt">0°</b>
+    </div>
+    <div><div id="wheels"></div><div id="dmg"></div></div>
+  </div>
+</div>
+
+<div id="help" class="hidden">
+  <div class="controls panel" id="helpBox"></div>
+</div>
+
+<div id="menu" class="hidden">
+  <div class="menu-inner">
+    <div class="title">LOW <span>RANGE</span></div>
+    <div class="tag">Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.</div>
+    <div class="cards" id="cards"></div>
+    <div class="opts">
+      <label><input type="checkbox" id="optAuto" checked /> Auto-clutch (anti-stall)</label>
+      <label><input type="checkbox" id="optLow" checked /> Start in 4-Low</label>
+      <label><input type="checkbox" id="optAir" /> Start aired down</label>
+    </div>
+    <button class="go" id="goBtn">DRIVE</button>
+    <div class="controls panel" id="menuControls"></div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

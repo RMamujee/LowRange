@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.playwright-mcp/
+.omc/
+Claude outputs/
+test/shots/
+test/audio-samples/
