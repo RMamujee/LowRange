@@ -6,6 +6,8 @@ import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
 import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBase, setGateDone } from './world_view.js';
 import { EngineAudio } from './audio.js';
+import { initSettings } from './settings.js';
+import './platform.js';
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -90,6 +92,7 @@ function updateParticles(dt) {
 
 // ---------------- game state ----------------
 const audio = new EngineAudio();
+initSettings({ renderer, scene, sun, camera, audio });
 let car = null, view = null, spec = null;
 let selected = 0;
 let playing = false;
