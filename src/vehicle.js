@@ -261,7 +261,8 @@ export class Vehicle {
     const rs = this.rearSteerOn ? -1 : 0;
     const targets = [left, right, rs * right, rs * left];
     for (let i = 0; i < 4; i++) {
-      const bend = (1 - this.health.susp[i]) * 0.16 * (i % 2 ? -1 : 1); // bent tie rod / arm: toe out
+      // bent tie rod / arm: toe out, front wheels only (toe-out at the rear caused snap oversteer)
+      const bend = i < 2 ? (1 - this.health.susp[i]) * 0.16 * (i % 2 ? -1 : 1) : 0;
       this.steerJoints[i].configureMotorPosition(targets[i] + (this.health.susp[i] < 0.75 ? bend : 0), ks, cs);
     }
     // anti-roll bars on independent axles

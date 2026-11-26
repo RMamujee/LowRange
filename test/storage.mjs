@@ -2,7 +2,7 @@
 // Fast (no physics): node test/storage.mjs
 const mem = new Map();
 globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
-const { VEHICLES } = await import('../src/specs.js');
+const { VEHICLES, ALL_VEHICLES } = await import('../src/specs.js');
 const { loadBuild, saveBuild, defaultBuild, sanitizeBuild } = await import('../src/garage.js');
 const { RaceLaps } = await import('../src/race.js');
 
@@ -28,7 +28,7 @@ for (const raw of raws) {
   check(loadBuild(base).lift === 1, `saveBuild over ${raw} did not persist`);
 }
 mem.set(BUILDS, '{"mule":{"tyreSize":99,"lift":2}}');
-const mule = VEHICLES.find((v) => v.id === 'mule');
+const mule = ALL_VEHICLES.find((v) => v.id === 'mule');
 check(loadBuild(mule).tyreSize === 0 && loadBuild(mule).lift === 2, 'stale values dropped, legal ones kept');
 for (const junk of [null, undefined, 'x', 7, true]) tryIt(`sanitizeBuild(${junk})`, () => sanitizeBuild(mule, junk));
 
