@@ -26,6 +26,8 @@ for (const [ci, cfg] of configs.entries()) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   // PIXEL=n: start with that pixel size (through the saved settings, as a player would have it)
   if (process.env.PIXEL) await page.addInitScript((v) => localStorage.setItem('lowrange.settings.v1', JSON.stringify({ pixelSize: v })), +process.env.PIXEL);
+  // SETTINGS='{"look":"vivid"}': start with those saved settings instead
+  if (process.env.SETTINGS) await page.addInitScript((v) => localStorage.setItem('lowrange.settings.v1', v), process.env.SETTINGS);
   await page.goto(`http://localhost:${process.env.PORT || 5881}/${process.env.QS || ''}`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__game.car, null, { timeout: 90000 });
   await page.evaluate(async () => { document.getElementById('goBtn').click(); await new Promise((r) => setTimeout(r, 2000)); });
