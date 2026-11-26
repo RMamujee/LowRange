@@ -14,9 +14,9 @@ let fails = 0;
 const ok = (c, msg) => { console.log(`  ${c ? 'ok  ' : 'FAIL'} ${msg}`); if (!c) fails++; };
 const state = () => page.evaluate(() => { const p = window.__game.gfx.pixels, cv = window.__game.gfx.renderer.domElement; return { scale: p.scale, w: p.w, h: p.h, bw: cv.width, bh: cv.height, img: getComputedStyle(cv).imageRendering, saved: JSON.parse(localStorage.getItem('lowrange.settings.v1') || '{}').pixelSize }; });
 const s0 = await state();
-ok(s0.scale === 2 && s0.img === 'pixelated', `default: Fine 2x on a 1080p window (scale ${s0.scale}, ${s0.w}x${s0.h}, ${s0.img})`);
+ok(s0.scale === 1 && s0.img === 'pixelated', `default: HD 1x on a 1080p window (scale ${s0.scale}, ${s0.w}x${s0.h}, ${s0.img})`);
 await page.keyboard.press('F10');
-for (const [v, want] of [[4, 4], [3, 3], [1, 1], [2, 2]]) {
+for (const [v, want] of [[4, 4], [3, 3], [2, 2], [1, 1]]) {
   await page.click(`#lrSettings [data-k=pixelSize] button[data-v="${v}"]`);
   const s = await state();
   ok(s.scale === want && s.w * s.scale >= s.bw && (s.w - 1) * s.scale < s.bw && s.h * s.scale >= s.bh && (s.h - 1) * s.scale < s.bh && s.saved === v,

@@ -33,6 +33,9 @@ const TIPS = [
 const SHOTS = { lc70: 'Cruiser 76', taco: 'Trail Pickup', wrx: 'Rally Sedan' };
 const ART_W = 480, ART_H = 270, FRAMES = 8, FPS = 5;
 const EDGE_COLS = 48, EDGE_ROWS = 40;   // clean backdrop strips used to extend the art past its edges
+// [gfx comfort] the rendered shots were made with the first, brighter ground palette: a per-pixel
+// colour grade (no blur) brings them in line with the in-game Soft look (gfx/toon.js uWorldGrade)
+const ART_GRADE = 'saturate(0.86) brightness(0.95) contrast(0.96)';
 
 // ---------------------------------------------------------------- palette
 const C = {
@@ -227,12 +230,14 @@ export function createLoadingScreen({ title = 'LowRange' } = {}) {
     if (st.done && st.shown >= 0.999 && !st.ready) becomeReady();
 
     if (L.bg) {
+      ctx.filter = ART_GRADE; // [gfx comfort]
       ctx.drawImage(L.bg, 0, 0);
       if (stripOk && !reduced) {
         const f = Math.floor(st.t * FPS) % FRAMES;
         ctx.drawImage(strip, f * ART_W, 0, ART_W, ART_H, L.ox, L.oy, ART_W, ART_H);
       }
-    } else { ctx.fillStyle = '#efc67c'; ctx.fillRect(0, 0, W, H); }
+      ctx.filter = 'none';
+    } else { ctx.fillStyle = '#e2c085'; ctx.fillRect(0, 0, W, H); }
     ctx.drawImage(L.sign, L.signX, 0);
     text(L.caption, L.px + 2, L.signBottom + 6, C.paint);
     drawTip();

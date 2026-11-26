@@ -35,6 +35,59 @@ def tone(a):
                 spread=round(float(np.percentile(L, 95) - np.percentile(L, 5)), 3), dark=round(float((L < 0.22).mean()), 3))
 
 
+def comfort(a, top_frac=0.22):
+    """Eye-comfort numbers on one frame, resampled (box filter) to 480 x 270 so screenshots of any
+    resolution, pixel size or source compare on equal terms.
+      L5/L50/L95 - luminance percentiles (Rec.709, display-encoded 0..1); Lmean
+      white/black - share of near-white (L > 0.9) and near-black (L < 0.08) pixels
+      sat/sat95  - mean and 95th percentile HSV saturation
+      loud       - share of pixels that are both bright and strongly saturated (V > 0.75, S > 0.55):
+                   big areas of this are what reads as 'too bright / neon'
+      rms        - global RMS luminance contrast; local - mean local contrast (std of L in 4x4
+                   blocks of the 480 frame)
+      edges      - edge density: share of pixels whose Sobel luminance gradient exceeds 0.25
+      hues       - number of 15-degree hue bins holding at least 2% of the coloured (S > 0.2) pixels
+      skygap     - mean L of the top band minus mean L of the bottom half (sky / far vs ground)
+    """
+    im = Image.fromarray(a.astype(np.uint8)).resize((480, 270), Image.BOX)
+    f = np.asarray(im).astype(np.float32) / 255.0
+    mx, mn = f.max(-1), f.min(-1)
+    S = np.where(mx > 1e-3, (mx - mn) / np.maximum(mx, 1e-3), 0)
+    L = 0.2126 * f[..., 0] + 0.7152 * f[..., 1] + 0.0722 * f[..., 2]
+    gx = np.zeros_like(L); gy = np.zeros_like(L)
+    gx[1:-1, 1:-1] = (L[:-2, 2:] + 2 * L[1:-1, 2:] + L[2:, 2:] - L[:-2, :-2] - 2 * L[1:-1, :-2] - L[2:, :-2]) / 4
+    gy[1:-1, 1:-1] = (L[2:, :-2] + 2 * L[2:, 1:-1] + L[2:, 2:] - L[:-2, :-2] - 2 * L[:-2, 1:-1] - L[:-2, 2:]) / 4
+    G = np.hypot(gx, gy)
+    blk = L[:268, :480].reshape(67, 4, 120, 4).std(axis=(1, 3))
+    # hue
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    d = np.maximum(mx - mn, 1e-6)
+    h = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) * 60
+    col = S > 0.2
+    hist = np.histogram(h[col], bins=24, range=(0, 360))[0]
+    hues = int((hist > 0.02 * max(col.sum(), 1)).sum())
+    t = int(270 * top_frac)
+    p = lambda q: round(float(np.percentile(L, q)), 3)
+    return dict(L5=p(5), L50=p(50), L95=p(95), Lmean=round(float(L.mean()), 3),
+                white=round(float((L > 0.9).mean()), 3), black=round(float((L < 0.08).mean()), 3),
+                sat=round(float(S.mean()), 3), sat95=round(float(np.percentile(S, 95)), 3),
+                loud=round(float(((mx > 0.75) & (S > 0.55)).mean()), 3),
+                rms=round(float(L.std()), 3), local=round(float(blk.mean()), 4),
+                edges=round(float((G > 0.25).mean()), 4), hues=hues,
+                skygap=round(float(L[:t].mean() - L[135:].mean()), 3))
+
+
+def comfort_table(paths, label_fn=os.path.basename):
+    rows = []
+    for p in paths:
+        c = comfort(load(p)); rows.append(c)
+        print(f'{label_fn(p):28s}', ' '.join(f'{k}={v}' for k, v in c.items()))
+    if rows:
+        m = {k: round(float(np.mean([r[k] for r in rows])), 4) for k in rows[0]}
+        print(f'{"MEAN":28s}', ' '.join(f'{k}={v}' for k, v in m.items()))
+        return m
+
+
 def grid_purity(a, s):
     h, w, _ = a.shape
     a = a[int(h * 0.25):int(h * 0.72), int(w * 0.2):int(w * 0.8)]
@@ -85,6 +138,9 @@ def zoom(p, out, s=4, cw=240, ch=135):
 
 
 def main():
+    if sys.argv[1] == 'comfort':  # py tools/clarity_metrics.py comfort <images...>
+        comfort_table(sys.argv[2:])
+        return
     d = sys.argv[1]
     rep = json.load(open(os.path.join(d, 'report.json'))) if os.path.exists(os.path.join(d, 'report.json')) else {}
     print('== grid purity (device-pixel screenshots, central crop) ==')
@@ -101,6 +157,8 @@ def main():
         print(os.path.basename(p), t)
     if allt:
         print('mean', {k: round(float(np.mean([t[k] for t in allt])), 3) for k in allt[0]})
+    print('== comfort (internal frames, 480x270) ==')
+    comfort_table(sorted(glob.glob(os.path.join(d, 'internal_*.png'))))
     print('== flicker (A-B-A share, mean abs diff) ==')
     for bd in sorted(glob.glob(os.path.join(d, 'burst_*'))):
         for kind in ('orbit', 'drive'):

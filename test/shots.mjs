@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 const out = process.argv[2];
 const browser = await chromium.launch({ executablePath: process.env.CHROME, args: ['--use-gl=angle', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const page = await browser.newPage({ viewport: { width: +(process.env.VW || 1600), height: +(process.env.VH || 900) } }); // VW=1920 VH=969: a 1080p browser window
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
