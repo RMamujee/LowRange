@@ -11,14 +11,14 @@
 // surface, then snap that to 3 bands (warm hue-shifted shade, lit, highlight). Undersides get a
 // slightly deeper shade so forms read as light tops / dark bases. Specular is dropped (flat paint).
 import * as THREE from 'three';
-import { GROUND_GLSL, groundTextureArray } from './pixeltex.js';
+import { GROUND_GLSL, groundTextureArray, LAYER_BOULDER } from './pixeltex.js';
 
 const col = (hex) => new THREE.Color(hex); // stored linear (ColorManagement converts from sRGB hex)
 
 // Shared uniform objects: every patched program references these, so one write retunes all.
 export const TOON = {
   uSunRad: { value: new THREE.Color(1, 1, 1) },     // sun colour * intensity (linear), set per render
-  uToonShade: { value: col(0xc4a6aa) },             // multiplier in shadow: warm, nudged towards mauve
+  uToonShade: { value: col(0xccb0a8) },             // multiplier in shadow: warm, nudged towards mauve, not too dark
   uToonLit: { value: col(0xfff8ec) },               // multiplier when lit
   uToonHi: { value: col(0xfffbe8) },                // multiplier on the brightest, sun-facing band
   uToonUnder: { value: 0.82 },                      // extra shade factor for down-facing surfaces
@@ -34,7 +34,13 @@ const FRAG = /* glsl */ `
   float lit = (dd.r + dd.g + dd.b) / toonDen;
   vec3 wN = inverseTransformDirection(normal, viewMatrix);
   vec3 shade = uToonShade * mix(uToonUnder, 1.0, smoothstep(-0.6, 0.2, wN.y));
-  vec3 k = lit < uToonBands.x ? shade : lit < uToonBands.y ? uToonLit : uToonHi;
+  #ifdef TOON_SOFT
+    // terrain: shade, a half-step, lit; thresholds sit away from flat ground's sun angle so
+    // gentle bumps never flip a band, and the half-step widens the turn of a hill
+    vec3 k = lit < 0.16 ? shade : lit < 0.42 ? mix(shade, uToonLit, 0.55) : uToonLit;
+  #else
+    vec3 k = lit < uToonBands.x ? shade : lit < uToonBands.y ? uToonLit : uToonHi;
+  #endif
   outgoingLight = diffuseColor.rgb * k + totalEmissiveRadiance;
 }
 #endif
@@ -63,8 +69,8 @@ export function toonPatch(shader, material) {
 // Pixel detail for untextured, vertex-coloured props (the procedural trees, bushes, logs, stones,
 // fences of src/art): their flat colours are modulated by the luminance of a ground tile,
 // box-projected in world space at 32 px/m (instancing aware), so they carry the same hand-pixelled
-// texture density as everything else. Leafy (green) colours take the grass tile, the rest the rock
-// tile. Opt in with material.userData.pixelDetail = true; the shared dressing materials are
+// texture density as everything else. Leafy (green) colours take the grass tile, the rest the
+// boulder tile. Opt in with material.userData.pixelDetail = true; the shared dressing materials are
 // recognised by name. Textured (glTF) materials never get it: their own pixels are the art.
 function wantsDetail(m) {
   return !m.map && (m.userData.pixelDetail === true || (m.userData.pixelDetail !== false && m.name === 'dressing_solid'));
@@ -90,7 +96,7 @@ ${GROUND_GLSL}`)
       {
         vec3 an = abs(vDNrm);
         vec2 p = an.y > max(an.x, an.z) ? vDPos.xz : an.x > an.z ? vDPos.zy : vDPos.xy;
-        float layer = diffuseColor.g > diffuseColor.r * 1.15 ? 0.0 : 2.0;
+        float layer = diffuseColor.g > diffuseColor.r * 1.15 ? 0.0 : ${LAYER_BOULDER.toFixed(1)};
         const vec3 LUM = vec3(0.3, 0.59, 0.11);
         float k = dot(groundTex(p, layer), LUM) / max(dot(textureLod(uGround, vec3(p / 4.0, layer), 7.0).rgb, LUM), 1e-3);
         diffuseColor.rgb *= clamp(mix(1.0, k, 0.85), 0.5, 1.5);

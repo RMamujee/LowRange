@@ -7,7 +7,7 @@ import { buildRaceDressing } from './race_view.js';
 import { VEHICLES } from './specs.js';
 import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
-import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBase, setGateDone } from './world_view.js';
+import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBase, setGateDone, buildBackdrop } from './world_view.js';
 import { EngineAudio } from './audio.js';
 import { applyBuild, loadBuild, isStock, stats } from './garage.js';
 import { Garage } from './garage_ui.js';
@@ -67,10 +67,8 @@ const isRace = MAP_KIND === 'race';
 const gates = isRace ? [] : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
 const minimap = buildMinimapBase(220);
-// distant ground beyond the map edge
-const outer = new THREE.Mesh(new THREE.RingGeometry(SIZE * 0.68, 900, 32), new THREE.MeshStandardMaterial({ color: 0xc89a48, flatShading: true }));
-outer.rotation.x = -Math.PI / 2; outer.position.y = 18;
-scene.add(outer);
+// distant ranges beyond the map edge (layered silhouettes, world_view.js)
+scene.add(buildBackdrop());
 
 // ---------------- particles (dust, mud, sand) ----------------
 const PMAX = 700;

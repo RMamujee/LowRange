@@ -78,7 +78,14 @@ void main() {
                          max(idEdge(id, w, ip + ivec2(0, -1)), idEdge(id, w, ip + ivec2(0, 1)))));
     float dist = 1.0 / w;
     float fogF = smoothstep(uFog.x, uFog.y, dist);
-    float a = edge * (1.0 - fogF) * 0.9;
+    // fade with distance (far silhouettes are a pixel or two wide and would only flicker); ground
+    // against ground (a ridge over the valley behind it) only outlines close by
+    float fade = id == 1.0 ? 1.0 - smoothstep(18.0, 55.0, dist) : 1.0 - smoothstep(55.0, 140.0, dist);
+    // a feature one pixel thin (rack bar, rail, post, far branch: farther on both opposite sides)
+    // is all outline; at this resolution it pops in and out from frame to frame, so it only gets
+    // a light darkening and the flicker is a small tone change instead of a dark line blinking
+    bool thin = (w > wl * 1.01 && w > wr * 1.01) || (w > wu * 1.01 && w > wd * 1.01);
+    float a = edge * (1.0 - fogF) * fade * (thin ? 0.4 : 0.9);
     c = mix(c, mix(c * 0.35, uOutline, 0.6), a);
   }
   gl_FragColor = sRGBTransferOETF(vec4(c, 1.0)); // stored display-ready in an 8-bit target
@@ -148,6 +155,7 @@ export class PixelPipeline {
     const r = this.renderer;
     if (!this.w) this.setSize(innerWidth, innerHeight);
     setToonSun(sun);
+    if (sun && sun.castShadow) snapShadow(sun);
     r.setRenderTarget(this.rt);
     r.render(scene, camera);
 
@@ -163,6 +171,22 @@ export class PixelPipeline {
     r.setRenderTarget(null);
     r.render(this.postScene, this.postCam);
   }
+}
+
+// A shadow camera that follows the truck slides its texel grid across the world every frame, so
+// shadow edges crawl. Snap the light's target (and the light with it) to whole shadow texels in
+// light space: the grid then stays put in the world and edges hold still.
+const _sm = new THREE.Matrix4(), _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sz = new THREE.Vector3(), _sd = new THREE.Vector3();
+function snapShadow(sun) {
+  const sc = sun.shadow.camera, t = sun.target.position;
+  const texel = (sc.right - sc.left) / sun.shadow.mapSize.x;
+  _sd.subVectors(sun.position, t);
+  _sm.lookAt(sun.position, t, sun.up).extractBasis(_sx, _sy, _sz);
+  const a = t.dot(_sx), b = t.dot(_sy);
+  t.addScaledVector(_sx, Math.round(a / texel) * texel - a).addScaledVector(_sy, Math.round(b / texel) * texel - b);
+  sun.position.copy(t).add(_sd);
+  sun.target.updateMatrixWorld();
+  sun.updateMatrixWorld();
 }
 
 // Exclude an object (and its children) from outlines: drawn last among opaques, without depth writes.

@@ -6,7 +6,8 @@ import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from './terrain.js';
 import { buildSetDressing, gridClearance } from './art/dressing.js';
-import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals } from './gfx/terrain_look.js';
+import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals, visualSurface } from './gfx/terrain_look.js';
+import { FOG } from './gfx/palette.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -30,12 +31,45 @@ export function buildTerrainMesh() {
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  softenTerrainNormals(geo, { GRID, RES, SIZE });
-  // pixel-art ground (src/gfx/terrain_look.js): textured per GRID.mat in the shader, softened normals
-  // so the toon bands follow the hills; the vertex colours above are kept for anything that reads them
+  softenTerrainNormals(geo, { GRID, RES, SIZE, MAT });
+  // pixel-art ground (src/gfx/terrain_look.js): GRID.mat on the paths, a calm visual surface off
+  // them, softened normals so the toon bands follow the hills; the vertex colours above are kept
+  // for anything that reads them
   const mesh = new THREE.Mesh(geo, terrainMaterial({ GRID, RES, SIZE, NROADS, MAT }));
   mesh.receiveShadow = true;
   return mesh;
+}
+
+// Distant ranges beyond the map edge: three rings of soft mountain silhouettes, flat colours that
+// step from muted hill green towards the haze, nearest to farthest (no lighting, no fog, no
+// outlines), so the horizon reads as painted layers of hills behind hills.
+export function buildBackdrop() {
+  const g = new THREE.Group(); g.name = 'backdrop';
+  const hill = new THREE.Color(0x8c9a5c), haze = new THREE.Color(FOG);
+  const LAYERS = [
+    { r: SIZE * 0.78, top: 38, amp: 34, f: 2.2, seed: 3, haze: 0.5 },
+    { r: SIZE * 1.08, top: 62, amp: 42, f: 1.7, seed: 11, haze: 0.68 },
+    { r: SIZE * 1.45, top: 92, amp: 50, f: 1.3, seed: 23, haze: 0.84 },
+  ];
+  const SEG = 240;
+  for (const L of LAYERS) {
+    const pos = [];
+    const prof = (i) => {
+      const a = (i / SEG) * Math.PI * 2, cx = Math.cos(a) * L.f, cz = Math.sin(a) * L.f;
+      const n = fbm(cx + L.seed, cz - L.seed, 3) * 0.7 + (1 - Math.abs(fbm(cx * 2.3 - L.seed, cz * 2.3, 2))) * 0.3;
+      return [Math.cos(a) * L.r, L.top + n * L.amp, Math.sin(a) * L.r];
+    };
+    for (let i = 0; i < SEG; i++) {
+      const [x0, y0, z0] = prof(i), [x1, y1, z1] = prof(i + 1);
+      pos.push(x0, -40, z0, x1, -40, z1, x1, y1, z1, x0, -40, z0, x1, y1, z1, x0, y0, z0);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: hill.clone().lerp(haze, L.haze), fog: false, side: THREE.DoubleSide }));
+    m.frustumCulled = false;
+    g.add(m);
+  }
+  return g;
 }
 
 export function buildRocks(rocks) {
@@ -55,10 +89,11 @@ export function buildRocks(rocks) {
   return mesh;
 }
 
-// trees (on their physics colliders) plus all the decorative set dressing (src/art/dressing.js)
+// trees (on their physics colliders) plus all the decorative set dressing (src/art/dressing.js);
+// bushes and tufts follow the surface the ground shows, so green slopes get the bushes
 export function buildTrees(trees) {
   return buildSetDressing({
-    size: SIZE, heightAt: visualHeightAt, matAt: materialAt, trees,
+    size: SIZE, heightAt: visualHeightAt, matAt: visualSurface({ GRID, RES, SIZE, MAT }).materialAt, trees,
     clear: gridClearance({ size: SIZE, res: RES, path: GRID.path }, TRAILHEAD),
     paths: [...ROADS, ...TRAILS], trailhead: TRAILHEAD,
   });

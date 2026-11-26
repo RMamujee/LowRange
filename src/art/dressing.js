@@ -95,7 +95,7 @@ export function buildSetDressing(ctx) {
   const tuftA = assetPartsVariants('grass_tuft');
   const tuftV = tuftA || [tuftTemplate(false)], ftuft = tuftTemplate(true);
   const tufts = tuftV.map(() => []), ftufts = [];
-  sample(9000, 0.8, (m) => m === GRASS || m === DIRT || m === GRAVEL, 0.65, 18).forEach((p, i) => {
+  sample(6000, 0.8, (m) => m === GRASS || m === DIRT || m === GRAVEL, 0.65, 18).forEach((p, i) => {
     const m = ctx.matAt(p.x, p.z);
     const it = { x: p.x, y: H(p.x, p.z) - 0.03, z: p.z, ry: R() * 6.28, s: 0.7 + R() * 0.7 };
     if (m === GRASS && R() < 0.2) ftufts.push(it);
@@ -109,12 +109,13 @@ export function buildSetDressing(ctx) {
   const proc = [0, 1, 2].map((v) => pebbleTemplate(v));
   const stoneTpls = [], stoneItems = [];
   const add = (tpl, it) => { let k = stoneTpls.indexOf(tpl); if (k < 0) { k = stoneTpls.push(tpl) - 1; stoneItems.push([]); } stoneItems[k].push(it); };
-  sample(700, 1.0, () => true, 0.6, 10).forEach((p, i) => {
+  // (a few hundred, not more: far away small stones are one dark pixel each, i.e. speckle)
+  sample(340, 1.0, () => true, 0.6, 10).forEach((p, i) => {
     const r = R(), base = { x: p.x, y: H(p.x, p.z) - 0.04, z: p.z, ry: R() * 6.28, color: [0xffffff, 0xf2e6d0, 0xe0d8cc][i % 3] };
     const size = r < 0.85 ? 'small' : r < 0.97 ? 'medium' : 'large';
     const set = { small, medium, large }[size];
     if (set) add(set[i % set.length], { ...base, s: 0.75 + R() * 0.5 });
-    else add(proc[i % 3], { ...base, s: size === 'small' ? 0.4 + R() * 0.6 : size === 'medium' ? 1.4 + R() * 0.6 : 2.6 + R() * 0.8 }); // procedural is 0.7 m wide at s=1
+    else add(proc[i % 3], { ...base, s: size === 'small' ? 0.7 + R() * 0.4 : size === 'medium' ? 1.4 + R() * 0.6 : 2.6 + R() * 0.8 }); // procedural is 0.7 m wide at s=1
   });
   stoneTpls.forEach((tpl, k) => root.add(instance(tpl, stoneItems[k], { name: 'stones' })));
 

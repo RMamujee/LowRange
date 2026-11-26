@@ -1,8 +1,8 @@
 // The ART_STYLE.md palette (sRGB hex), each ramp ordered highlight, base, shade, deep shade.
 // Single source for the renderer's generated textures, light tints and sky.
 export const RAMP = {
-  dirt:   [0xf2c25a, 0xe0a440, 0xc4832e, 0x9a5f24],
-  grass:  [0x8fd14a, 0x5fae36, 0x3f8a2e, 0x2a6628],
+  dirt:   [0xecc77e, 0xd9aa5e, 0xbd8c4e, 0x91693f], // softened from the first contract ramp: less glare
+  grass:  [0x94c95c, 0x67a641, 0x488a36, 0x316a2e], // softened: a touch less lime than the canopies
   leaf:   [0x7cc843, 0x4fa032, 0x2f7d2c, 0x1f5a27],
   pine:   [0x4f9f4a, 0x2f7f3f, 0x1f6236, 0x164a2e],
   bark:   [0xc98a4e, 0xa5683a, 0x7d4a2a, 0x55301f],
@@ -11,7 +11,7 @@ export const RAMP = {
   // not in the contract table; derived from it (dirt pushed darker / paler, glass pushed teal)
   mud:    [0x9a6a3c, 0x7a4f2c, 0x5c3a22, 0x402818],
   sand:   [0xf8e2a4, 0xeecb7e, 0xd8ac5e, 0xb88a44],
-  road:   [0xf6d07a, 0xe8b85e, 0xcf9a46, 0xa87632],
+  road:   [0xefd497, 0xe0bd7c, 0xc79f62, 0x9e7c4b],
   tarmac: [0x6a645a, 0x4f4a43, 0x3b3732, 0x2a2724],
   water:  [0x9fdcec, 0x5bb0cc, 0x3c88aa, 0x2a6488],
 };
