@@ -1,0 +1,320 @@
+/* Menu, pause, garage and settings screens in the HUD's pixel-art style.
+   --p is one art pixel (a whole number of device pixels, set by src/menu/art.js); every size below is a
+   multiple of it, the textures and frames are pixel canvases scaled with hard edges, and text uses the
+   bitmap font as a web font (src/ui/pixelwebfont.js) at 9 * --p, i.e. one font pixel = one art pixel. */
+
+:root {
+  --p: 2px;
+  --ol: #2a1a14;
+  --text: #2a1a14;        /* ink on parchment: 13:1 */
+  --text-soft: #5e3f24;   /* labels on parchment: 7.6:1 */
+  --paint: #f8e8b8;
+  --gold: #ffd866;
+  --amber: #ffb347;
+  --pix: 'LowRangePixel', monospace;
+  --f1: calc(9 * var(--p));
+  --f2: calc(18 * var(--p));
+  --lh1: calc(12 * var(--p));
+  --lh2: calc(24 * var(--p));
+  --olsh:
+    calc(-1 * var(--p)) 0 0 var(--ol), var(--p) 0 0 var(--ol), 0 calc(-1 * var(--p)) 0 var(--ol), 0 var(--p) 0 var(--ol),
+    calc(-1 * var(--p)) calc(-1 * var(--p)) 0 var(--ol), var(--p) calc(-1 * var(--p)) 0 var(--ol),
+    calc(-1 * var(--p)) var(--p) 0 var(--ol), var(--p) var(--p) 0 var(--ol), var(--p) calc(2 * var(--p)) 0 var(--ol);
+}
+
+/* ------------------------------------------------------------ shared pieces */
+#menu, #garage, html body #lrSettings {
+  font-family: var(--pix); font-size: var(--f1); line-height: var(--lh1);
+  font-synthesis: none; font-kerning: none; text-rendering: optimizeSpeed; -webkit-font-smoothing: none;
+  letter-spacing: 0; color: var(--text);
+  /* own compositing layer with a see-through background: Chrome then draws the text with greyscale
+     coverage instead of LCD subpixel filtering, so the pixel-aligned glyph edges stay exactly crisp */
+  will-change: transform;
+}
+:where(#menu, #garage) :where(h1, h2, h3, h4, b, strong, dt, dd, p) { font-weight: normal; margin: 0; }
+:where(#menu, #garage, #lrSettings) :where(button, input, select) { font: inherit; letter-spacing: 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.hidden { display: none !important; }
+
+/* wooden board with a nailed frame */
+.m-board {
+  border: calc(6 * var(--p)) solid transparent;
+  border-image: var(--frame-wood) 6 / calc(6 * var(--p)) stretch;
+  background: var(--tex-wood) 0 0 / calc(var(--tex-wood-w) * var(--p)) calc(var(--tex-wood-h) * var(--p));
+  background-clip: padding-box;
+  image-rendering: pixelated;
+  padding: calc(3 * var(--p));
+  --focus: var(--gold);
+}
+/* parchment card */
+.m-paper {
+  border: calc(3 * var(--p)) solid transparent;
+  border-image: var(--frame-paper) 3 / calc(3 * var(--p)) stretch;
+  background: #f4e5b9 var(--tex-paper) 0 0 / calc(48 * var(--p));
+  background-clip: padding-box;
+  image-rendering: pixelated;
+  color: var(--text);
+  padding: calc(2 * var(--p)) calc(4 * var(--p));
+  --focus: #c4392b;
+}
+/* Text drawn on a see-through background goes through an alpha threshold (#lrCrisp in index.html), so
+   the system rasteriser's soft edge columns snap to solid pixels like the canvas-drawn HUD text. Text on
+   opaque faces (buttons, chips) can't use it and keeps the rasteriser's near-crisp greyscale edges. */
+.card :is(h3, .c-rate, .c-blurb, .stats), .m-paper > p, .m-h, .paint, .m-pause :is(b, span), .m-check, .hint, .controls .ck span,
+.gstat, .gcat h4, .glbl, .ghead .t, html body #lrSettings :is(h2, .row > span:first-child, .foot > span) {
+  filter: url(#lrCrisp);
+}
+/* button / chip / keycap labels sit in their own see-through span for the same treatment */
+.pbtn > span, .chip > span, kbd > span { filter: url(#lrCrisp); }
+.chip > span, kbd > span { display: inline-block; }
+/* painted lettering on wood */
+.m-h, .paint { color: var(--paint); text-shadow: var(--olsh); }
+
+/* pixel button: light wood (or amber) face, lit top row, shaded bottom, outline and a 2px drop that
+   disappears when pressed */
+.pbtn {
+  --face: #e6b77a; --hi: #f6d7a0; --lo: #cf9757;
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: calc(3 * var(--p));
+  color: var(--text); background: var(--face); border: 0; border-radius: 0; cursor: pointer;
+  padding: calc(3 * var(--p)) calc(7 * var(--p)) calc(4 * var(--p));
+  margin: var(--p) var(--p) calc(3 * var(--p));
+  box-shadow: inset 0 var(--p) 0 var(--hi), inset 0 calc(-2 * var(--p)) 0 var(--lo),
+    0 0 0 var(--p) var(--ol), 0 calc(3 * var(--p)) 0 0 var(--ol);
+  white-space: nowrap; user-select: none;
+}
+.pbtn:hover { --face: #f0c78e; --hi: #fbe3b4; }
+.pbtn:active, .pbtn.down {
+  transform: translateY(calc(2 * var(--p)));
+  box-shadow: inset 0 var(--p) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 var(--p) 0 0 var(--ol);
+}
+.pbtn.primary { --face: var(--amber); --hi: #ffe08a; --lo: #d9922f; font-size: var(--f2); line-height: var(--lh2); padding: calc(3 * var(--p)) calc(6 * var(--p)) calc(5 * var(--p)); white-space: normal; text-align: center; }
+.pbtn.primary:hover { --face: #ffc463; --hi: #fff0b0; }
+.pbtn:focus { outline: none; }
+.pbtn:focus-visible, .card:focus-visible, .m-check input:focus-visible, .chip:focus-visible {
+  outline: var(--p) solid var(--focus, var(--gold)); outline-offset: calc(2 * var(--p));
+}
+.pbtn[disabled] { cursor: default; --face: #c9a77a; --hi: #d6b88f; --lo: #b08d60; color: #5e3f24; }
+
+/* pixel checkbox */
+.m-check { display: inline-flex; align-items: center; gap: calc(4 * var(--p)); cursor: pointer; white-space: nowrap; }
+.m-check input {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; cursor: pointer;
+  width: calc(9 * var(--p)); height: calc(9 * var(--p));
+  background: var(--img-check-off) 0 0 / 100% 100%; image-rendering: pixelated; border-radius: 0;
+}
+.m-check input:checked { background-image: var(--img-check-on); }
+.m-check:hover input { filter: brightness(1.04); }
+
+/* keycap */
+#menu kbd, #garage kbd {
+  font: inherit; display: inline-block; min-width: calc(9 * var(--p)); text-align: center;
+  color: var(--text); background: #e6b77a; padding: 0 calc(3 * var(--p)); margin: var(--p) var(--p) calc(2 * var(--p));
+  box-shadow: inset 0 var(--p) 0 #f6d7a0, 0 0 0 var(--p) var(--ol), 0 calc(2 * var(--p)) 0 0 var(--ol);
+  white-space: nowrap;
+}
+
+/* the focused button in a column gets a little pointer, like a farm-sim menu cursor */
+.m-actions .pbtn:focus-visible::before, .m-actions .pbtn:hover::before {
+  content: ''; position: absolute; left: calc(-10 * var(--p)); top: 50%; transform: translateY(-50%);
+  width: calc(7 * var(--p)); height: calc(9 * var(--p)); background: var(--img-cursor) 0 0 / 100% 100%; image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------ menu layout */
+#menu {
+  position: fixed; inset: 0; z-index: 10; display: flex; overflow: auto;
+  padding: calc(4 * var(--p));
+  background: rgba(30, 18, 10, 0.42);
+}
+.menu-inner {
+  margin: auto; display: flex; gap: calc(6 * var(--p)); align-items: flex-start;
+  width: min(100%, calc(780 * var(--p)));
+}
+.m-left { flex: none; width: calc(160 * var(--p)); display: flex; flex-direction: column; align-items: stretch; }
+.m-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(5 * var(--p)); }
+
+/* hanging sign */
+.m-sign { margin: 0; line-height: 0; }
+.m-sign canvas { display: block; image-rendering: pixelated; }
+
+/* "Paused" sub-sign hanging under the title */
+.m-pause {
+  position: relative; align-self: center; margin: calc(6 * var(--p)) 0 0; text-align: center;
+  border: calc(3 * var(--p)) solid transparent; border-image: var(--frame-plank) 3 / calc(3 * var(--p)) stretch;
+  background: var(--tex-wood) 0 calc(-2 * var(--p)) / calc(var(--tex-wood-w) * var(--p)) calc(var(--tex-wood-h) * var(--p));
+  background-clip: padding-box; image-rendering: pixelated;
+  padding: calc(1 * var(--p)) calc(8 * var(--p)) calc(2 * var(--p));
+}
+.m-pause::before, .m-pause::after {
+  content: ''; position: absolute; top: calc(-10 * var(--p)); width: calc(4 * var(--p)); height: calc(7 * var(--p));
+  background: var(--img-rope) 0 0 / calc(4 * var(--p)) calc(4 * var(--p)); image-rendering: pixelated;
+}
+.m-pause::before { left: calc(10 * var(--p)); } .m-pause::after { right: calc(10 * var(--p)); }
+.m-pause b { display: block; font-size: var(--f2); line-height: var(--lh2); color: var(--paint); text-shadow: var(--olsh); }
+.m-pause span { display: block; color: var(--paint); text-shadow: var(--olsh); margin-bottom: var(--p); }
+
+.m-actions { margin-top: calc(6 * var(--p)); display: flex; flex-direction: column; align-items: stretch; padding: calc(5 * var(--p)) calc(4 * var(--p)) calc(4 * var(--p)) calc(10 * var(--p)); }
+.m-actions .pbtn { width: auto; margin-bottom: calc(5 * var(--p)); }
+.m-note { margin: 0 var(--p) calc(5 * var(--p)); padding: var(--p) calc(4 * var(--p)) calc(2 * var(--p)); }
+.m-note:has(p:empty) { display: none; }
+#lrMenuBar { display: flex; flex-direction: column; align-items: stretch; margin-top: calc(4 * var(--p)); padding-top: calc(5 * var(--p)); border-top: var(--p) solid #2b1910; position: relative; }
+#lrMenuBar::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: var(--p); background: #a86c38; }
+
+/* map picker (right end of the board's tab row) */
+.m-tabs .m-h { margin-left: auto; }
+.maps { display: flex; gap: calc(4 * var(--p)); }
+.mapbtn.sel, .tab.sel { --face: var(--amber); --hi: #ffe08a; --lo: #d9922f; }
+.m-main .tag { margin: 0; }
+
+
+/* rigs / controls board */
+.m-main { display: flex; flex-direction: column; gap: calc(4 * var(--p)); }
+.m-tabs { display: flex; gap: calc(4 * var(--p)); align-items: center; }
+.opts .hint { margin-left: auto; color: var(--text-soft); }
+.tab.sel, .mapbtn.sel {
+  transform: translateY(calc(2 * var(--p)));
+  box-shadow: inset 0 var(--p) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 var(--p) 0 0 var(--ol);
+}
+
+.cards { margin-top: calc(6 * var(--p)); display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(132 * var(--p)), 1fr)); gap: calc(5 * var(--p)); }
+.card {
+  position: relative; cursor: pointer; display: flex; flex-direction: column; gap: calc(3 * var(--p));
+  border: calc(3 * var(--p)) solid transparent;
+  border-image: var(--frame-paper) 3 / calc(3 * var(--p)) stretch;
+  background: #f4e5b9 var(--tex-paper) 0 0 / calc(48 * var(--p)); background-clip: padding-box; image-rendering: pixelated;
+  padding: calc(4 * var(--p)) calc(6 * var(--p)) calc(6 * var(--p));
+  --focus: var(--gold);
+}
+.card:hover { transform: translateY(calc(-1 * var(--p))); }
+.card.sel { border-width: calc(4 * var(--p)); border-image: var(--frame-sel) 4 / calc(4 * var(--p)) stretch; padding: calc(3 * var(--p)) calc(5 * var(--p)) calc(5 * var(--p)); transform: none; }
+.card .c-head { display: flex; align-items: baseline; justify-content: space-between; gap: calc(4 * var(--p)); }
+.card h3 { font-size: var(--f2); line-height: var(--lh2); color: var(--text); white-space: nowrap; }
+.card .c-tag { position: absolute; top: calc(-8 * var(--p)); right: calc(4 * var(--p)); padding: 0 calc(3 * var(--p)); background: var(--amber); color: var(--text); box-shadow: inset 0 var(--p) 0 #ffe08a, 0 0 0 var(--p) var(--ol); visibility: hidden; }
+.card.sel .c-tag { visibility: visible; }
+.card.current .c-tag { visibility: visible; background: #8fd14a; }
+.card .c-rate { display: flex; align-items: center; gap: calc(3 * var(--p)); color: var(--text-soft); }
+.card .c-rate i { display: inline-block; height: calc(11 * var(--p)); background: center / 100% 100% no-repeat; image-rendering: pixelated; }
+.card .c-rate i.green, .card .c-rate i.blue, .card .c-rate i.black { width: calc(9 * var(--p)); }
+.card .c-rate i.dblack { width: calc(15 * var(--p)); }
+.card .c-rate b { color: var(--text); }
+.card .c-blurb { color: var(--text); flex: 1; }
+.card .stats { display: grid; grid-template-columns: auto 1fr; gap: 0 calc(6 * var(--p)); margin: 0; padding-top: calc(3 * var(--p)); border-top: var(--p) solid #e0c68d; }
+.card .stats dt { color: var(--text-soft); }
+.card .stats dd { margin: 0; color: var(--text); white-space: nowrap; }
+.card .mod { position: absolute; left: calc(4 * var(--p)); top: calc(-8 * var(--p)); padding: 0 calc(3 * var(--p)); color: var(--paint); background: #74241a; box-shadow: 0 0 0 var(--p) var(--ol); }
+
+.opts { display: flex; flex-wrap: wrap; gap: calc(3 * var(--p)) calc(12 * var(--p)); padding: calc(3 * var(--p)) calc(6 * var(--p)); }
+
+/* controls list */
+.controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(140 * var(--p)), 1fr)); gap: var(--p) calc(10 * var(--p)); padding: calc(4 * var(--p)) calc(6 * var(--p)); }
+.controls .ck { display: grid; grid-template-columns: calc(66 * var(--p)) 1fr; align-items: start; }
+.controls .ck kbd { justify-self: start; }
+.controls .ck span { padding-top: var(--p); }
+
+/* ------------------------------------------------------------ garage */
+#garage { position: fixed; inset: 0; z-index: 12; display: flex; overflow: auto; padding: calc(4 * var(--p)); background: rgba(30, 18, 10, 0.5); }
+.garage-inner {
+  margin: auto; display: flex; flex-direction: column; gap: calc(4 * var(--p));
+  width: min(100%, calc(780 * var(--p))); height: min(calc(100vh - 8 * var(--p)), calc(440 * var(--p)));
+  padding: calc(4 * var(--p)) calc(5 * var(--p));
+}
+.ghead { display: flex; align-items: center; gap: calc(8 * var(--p)); }
+.ghead .t { font-size: var(--f2); line-height: var(--lh2); color: var(--paint); text-shadow: var(--olsh); white-space: nowrap; }
+.ghead .sub { flex: 1; min-width: 0; }
+.gbody { flex: 1; display: flex; gap: calc(5 * var(--p)); min-height: 0; }
+.gleft { width: 47%; display: flex; flex-direction: column; gap: calc(4 * var(--p)); min-height: 0; }
+.gwell { flex: 1; min-height: calc(90 * var(--p)); display: flex; border: calc(3 * var(--p)) solid transparent; border-image: var(--frame-well) 3 / calc(3 * var(--p)) stretch; background: #1c1915; image-rendering: pixelated; }
+#gPreview { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; cursor: grab; image-rendering: pixelated; }
+#gStats { display: grid; grid-template-columns: 1fr 1fr; gap: calc(2 * var(--p)) calc(8 * var(--p)); padding: calc(3 * var(--p)) calc(5 * var(--p)); }
+.gstat { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 0 calc(4 * var(--p)); }
+.gstat .sl { color: var(--text-soft); }
+.gstat b { color: var(--text); white-space: nowrap; }
+.gstat em { font-style: normal; min-width: calc(20 * var(--p)); text-align: right; color: var(--text-soft); }
+.gstat em.up { color: #1b5017; } .gstat em.down { color: #8a1f16; }
+.gstat small { grid-column: 1 / -1; font-size: inherit; color: var(--text-soft); }
+/* segmented pixel bar: dark well, stock marker, cells */
+.gbar { grid-column: 1 / -1; position: relative; height: calc(5 * var(--p)); margin: var(--p) 0; background: #4a3020; box-shadow: 0 0 0 var(--p) var(--ol); }
+.gbar i { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(90deg, #e6b23a 0 calc(3 * var(--p)), #b9862a calc(3 * var(--p)) calc(4 * var(--p))); box-shadow: inset 0 var(--p) 0 #ffd866; }
+.gbar i.up { background: repeating-linear-gradient(90deg, #5fae36 0 calc(3 * var(--p)), #2a6628 calc(3 * var(--p)) calc(4 * var(--p))); box-shadow: inset 0 var(--p) 0 #8fd14a; }
+.gbar i.down { background: repeating-linear-gradient(90deg, #d8483a 0 calc(3 * var(--p)), #8e2e22 calc(3 * var(--p)) calc(4 * var(--p))); box-shadow: inset 0 var(--p) 0 #ff8a6a; }
+.gbar u { position: absolute; top: calc(-2 * var(--p)); bottom: calc(-2 * var(--p)); width: var(--p); background: var(--ol); }
+.gright { flex: 1; overflow-y: auto; padding: calc(2 * var(--p)) calc(5 * var(--p)) calc(4 * var(--p)); scrollbar-width: auto; scrollbar-color: #a86c38 #e0c68d; }
+.gright::-webkit-scrollbar { width: calc(6 * var(--p)); }
+.gright::-webkit-scrollbar-track { background: #e0c68d; }
+.gright::-webkit-scrollbar-thumb { background: #a86c38; box-shadow: inset 0 0 0 var(--p) var(--ol); }
+.gcat { padding: calc(2 * var(--p)) 0 calc(2 * var(--p)); }
+.gcat + .gcat { border-top: var(--p) solid #e0c68d; }
+.gcat h4 { margin: 0 0 var(--p); color: #7a2419; }
+.grow { display: flex; align-items: flex-start; gap: calc(4 * var(--p)); margin: 0; }
+.glbl { width: calc(50 * var(--p)); flex: none; color: var(--text-soft); padding-top: calc(3 * var(--p)); }
+.chips { display: flex; flex-wrap: wrap; gap: 0 calc(3 * var(--p)); }
+.chip {
+  --face: #e6b77a; --hi: #f6d7a0; --lo: #cf9757;
+  color: var(--text); background: var(--face); border: 0; border-radius: 0; cursor: pointer;
+  padding: var(--p) calc(4 * var(--p)) calc(2 * var(--p)); margin: var(--p) var(--p) calc(3 * var(--p));
+  box-shadow: inset 0 var(--p) 0 var(--hi), inset 0 calc(-1 * var(--p)) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 calc(2 * var(--p)) 0 0 var(--ol);
+  white-space: nowrap;
+}
+.chip:hover { --face: #f0c78e; }
+.chip:active { transform: translateY(var(--p)); }
+.chip.on { --face: var(--amber); --hi: #ffe08a; --lo: #d9922f; transform: translateY(var(--p)); box-shadow: inset 0 var(--p) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 var(--p) 0 0 var(--ol); }
+.chip.swatch { width: calc(14 * var(--p)); height: calc(12 * var(--p)); padding: 0; box-shadow: inset 0 0 0 var(--p) rgba(255, 255, 255, .25), 0 0 0 var(--p) var(--ol), 0 calc(2 * var(--p)) 0 0 var(--ol); }
+.chip.swatch.stock { width: auto; padding: 0 calc(4 * var(--p)); color: var(--paint); text-shadow: var(--olsh); }
+.chip.swatch.on { transform: translateY(var(--p)); box-shadow: inset 0 0 0 var(--p) var(--ol), inset 0 0 0 calc(2 * var(--p)) var(--gold), 0 0 0 var(--p) var(--ol), 0 0 0 calc(2 * var(--p)) var(--gold), 0 0 0 calc(3 * var(--p)) var(--ol); }
+.gfootbar { display: flex; align-items: center; gap: calc(4 * var(--p)); }
+.gnote { flex: 1; min-height: calc(18 * var(--p)); display: flex; align-items: center; }
+
+/* ------------------------------------------------------------ settings overlay (markup from src/settings.js) */
+html body #lrSettings { background: rgba(30, 18, 10, 0.5); }
+html body #lrSettings .box {
+  width: min(calc(100vw - 16 * var(--p)), calc(250 * var(--p)));
+  border: calc(6 * var(--p)) solid transparent; border-radius: 0;
+  border-image: var(--frame-wood) 6 / calc(6 * var(--p)) stretch;
+  background: #f4e5b9 var(--tex-paper) 0 0 / calc(48 * var(--p)); background-clip: padding-box; image-rendering: pixelated;
+  padding: calc(4 * var(--p)) calc(8 * var(--p)) calc(6 * var(--p));
+  color: var(--text); --focus: #c4392b;
+}
+html body #lrSettings h2 { margin: 0 0 calc(4 * var(--p)); font-size: var(--f2); line-height: var(--lh2); font-weight: normal; letter-spacing: 0; color: var(--text); text-transform: none; }
+html body #lrSettings .row { margin: calc(4 * var(--p)) 0; gap: calc(6 * var(--p)); font-size: inherit; color: var(--text); }
+html body #lrSettings .row b { font-weight: normal; color: var(--text-soft); }
+html body #lrSettings .seg { gap: calc(3 * var(--p)); }
+html body #lrSettings button {
+  --face: #e6b77a; --hi: #f6d7a0; --lo: #cf9757;
+  color: var(--text); background: var(--face); border: 0; border-radius: 0; cursor: pointer; font-size: inherit; letter-spacing: 0;
+  padding: var(--p) calc(4 * var(--p)) calc(2 * var(--p)); margin: var(--p) var(--p) calc(3 * var(--p));
+  box-shadow: inset 0 var(--p) 0 var(--hi), inset 0 calc(-1 * var(--p)) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 calc(2 * var(--p)) 0 0 var(--ol);
+}
+html body #lrSettings button:hover { --face: #f0c78e; color: var(--text); border: 0; }
+html body #lrSettings button:active { transform: translateY(var(--p)); }
+html body #lrSettings button.on { --face: var(--amber); --hi: #ffe08a; --lo: #d9922f; color: var(--text); transform: translateY(var(--p)); box-shadow: inset 0 var(--p) 0 var(--lo), 0 0 0 var(--p) var(--ol), 0 var(--p) 0 0 var(--ol); }
+html body #lrSettings button:focus { outline: none; }
+html body #lrSettings button:focus-visible, html body #lrSettings input:focus-visible { outline: var(--p) solid var(--focus); outline-offset: calc(2 * var(--p)); }
+html body #lrSettings input[type=checkbox] {
+  appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer; border-radius: 0;
+  width: calc(9 * var(--p)); height: calc(9 * var(--p)); background: var(--img-check-off) 0 0 / 100% 100%; image-rendering: pixelated;
+}
+html body #lrSettings input[type=checkbox]:checked { background-image: var(--img-check-on); }
+html body #lrSettings input[type=range] { -webkit-appearance: none; appearance: none; width: calc(90 * var(--p)); height: calc(11 * var(--p)); background: transparent; margin: 0; cursor: pointer; }
+html body #lrSettings input[type=range]::-webkit-slider-runnable-track { height: calc(5 * var(--p)); background: #4a3020; box-shadow: 0 0 0 var(--p) var(--ol), inset 0 var(--p) 0 #2b1910; }
+html body #lrSettings input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: calc(7 * var(--p)); height: calc(11 * var(--p)); margin-top: calc(-3 * var(--p)); border-radius: 0;
+  background: var(--amber); box-shadow: inset 0 var(--p) 0 #ffe08a, inset 0 calc(-2 * var(--p)) 0 #d9922f, 0 0 0 var(--p) var(--ol);
+}
+html body #lrSettings input[type=range]::-moz-range-track { height: calc(5 * var(--p)); background: #4a3020; border: var(--p) solid var(--ol); }
+html body #lrSettings input[type=range]::-moz-range-thumb { width: calc(7 * var(--p)); height: calc(11 * var(--p)); border-radius: 0; border: var(--p) solid var(--ol); background: var(--amber); }
+html body #lrSettings .foot { margin-top: calc(6 * var(--p)); padding-top: calc(4 * var(--p)); border-top: var(--p) solid #e0c68d; font-size: inherit; color: var(--text-soft); gap: calc(6 * var(--p)); }
+html body #lrSettings select {
+  font: inherit; color: var(--text); background: #fff8de; border: 0; border-radius: 0; padding: 0 calc(3 * var(--p));
+  box-shadow: 0 0 0 var(--p) var(--ol), inset 0 var(--p) 0 #e0c68d;
+}
+
+/* two-line button (restart: label + what it does) */
+.pbtn > span { display: flex; flex-direction: column; align-items: center; }
+.pbtn small { font-size: inherit; color: #3f2716; }
+
+/* map-switch cover while the page reloads on the other map */
+#loading.m-cover {
+  font-family: var(--pix); font-size: var(--f2); line-height: var(--lh2); letter-spacing: 0;
+  color: var(--paint); text-shadow: var(--olsh);
+  background: #55321e var(--tex-wood-dark) 0 0 / calc(var(--tex-wood-w) * var(--p)) calc(var(--tex-wood-h) * var(--p)); image-rendering: pixelated;
+}
+.ctrl-foot { margin: calc(4 * var(--p)) 0 0 calc(2 * var(--p)); }

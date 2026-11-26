@@ -16,6 +16,7 @@ import { PixelPipeline, noOutline } from './gfx/pipeline.js';
 import { SKY as SKY_COL, FOG as FOG_COL, SKY_BANDS } from './gfx/palette.js';
 import { createHud } from './hud/hud.js';
 import './platform.js';
+import { mountMenuChrome, rigRating, enableArrowNav } from './menu/menu.js';
 import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics props]
 
 const H = 1 / 200;           // physics step
@@ -355,7 +356,7 @@ const CONTROLS = [
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
-const controlsHtml = CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('');
+const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ck"><kbd><span>${k}</span></kbd><span>${v}</span></div>`).join('');
 $('menuControls').innerHTML = controlsHtml;
 const hud = createHud({
   action: (n) => action(n), camera, isRace, mapId: MAP_ID, mapName: MAP_NAME, trees, scene, noOutline,
@@ -398,13 +399,13 @@ function action(name) {
 }
 
 addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' || e.code === 'Tab') {
+  if (e.code === 'Escape' || (e.code === 'Tab' && playing)) {
     e.preventDefault(); keys.clear();
     if (playing && e.code === 'Escape' && hud.closeOverlay()) return;
     if (playing) openMenu(); else if (paused && e.code === 'Escape' && !garage.isOpen) resumeDrive();
     return;
   }
-  if (!playing) { if (e.code === 'Enter') startDrive(); return; }
+  if (!playing) { if (e.code === 'Enter' && !e.target.closest?.('button, input, label, .card')) startDrive(); return; }
   if (['Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();
   if (!e.repeat && KEYMAP[e.code]) action(KEYMAP[e.code]);
   keys.add(e.code);
@@ -478,33 +479,69 @@ function readInput(dt) {
 }
 
 // ---------------- menu ----------------
-// cards show each rig as currently built in the garage
+// Pixel-art menu (src/menu/): the cards show each rig as currently built in the garage.
+mountMenuChrome();
 let cards = [];
+const fmtKg = (v) => Math.round(v).toLocaleString('en-US');
 function renderCards() {
   $('cards').innerHTML = VEHICLES.map((b, i) => {
-    const s = builtSpec(i), st = stats(s);
+    const s = builtSpec(i), st = stats(s), r = rigRating(s, st);
     return `
-  <div class="card panel" data-i="${i}">
-    <h3>${s.name}</h3><p>${s.blurb}</p>
+  <div class="card" data-i="${i}" role="radio" aria-checked="false" tabindex="-1">
+    <div class="c-head"><h3>${s.name}</h3><span class="c-tag">Selected</span></div>
+    <div class="c-rate">Trails up to <i class="${r}" style="background-image:var(--img-diff-${r})" aria-hidden="true"></i><b>${DIFF[r].label}</b></div>
+    <p class="c-blurb">${s.blurb}</p>
     <dl class="stats">
-      <dt>Weight</dt><dd>${Math.round(st.weight).toLocaleString()} kg</dd>
+      <dt>Weight</dt><dd>${fmtKg(st.weight)} kg</dd>
       <dt>Engine</dt><dd>${s.engine.peakT} N·m @ ${s.engine.peakRpm} rpm</dd>
-      <dt>Tyres</dt><dd>${Math.round(st.tyreIn)}" </dd>
+      <dt>Tyres</dt><dd>${Math.round(st.tyreIn)}"</dd>
       <dt>Gears</dt><dd>${s.gears.length}-speed${s.ranges.low ? ' + low range' : ''}</dd>
-      <dt>Crawl ratio</dt><dd>${st.crawl.toFixed(0)}:1</dd>
+      <dt>Crawl</dt><dd>${st.crawl.toFixed(0)}:1</dd>
       <dt>Lockers</dt><dd>${[s.lockers.front && 'front', s.lockers.rear && 'rear'].filter(Boolean).join(' + ') || 'none'}</dd>
-    </dl>${isStock(b, s.build) ? '' : '<div class="mod">GARAGE BUILD</div>'}
+    </dl>${isStock(b, s.build) ? '' : '<div class="mod">Garage build</div>'}
   </div>`;
   }).join('');
   cards = [...document.querySelectorAll('.card')];
-  cards.forEach((c, i) => { c.addEventListener('click', () => selectCard(i)); c.addEventListener('dblclick', () => { selectCard(i); startDrive(); }); });
+  cards.forEach((c, i) => {
+    c.addEventListener('click', () => selectCard(i));
+    c.addEventListener('focus', () => selectCard(i));
+    c.addEventListener('dblclick', () => { selectCard(i); startDrive(); });
+    c.addEventListener('keydown', (e) => {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); selectCard(i); startDrive(); }
+      else if (e.code === 'Space') { e.preventDefault(); selectCard(i); }
+    });
+  });
   selectCard(selected);
 }
-const selectCard = (i) => { selected = i; cards.forEach((c, j) => c.classList.toggle('sel', j === i)); };
-renderCards();
-$('goBtn').addEventListener('click', () => startDrive());
+function selectCard(i) {
+  selected = i;
+  const cur = paused && car ? car.spec.id : null;
+  cards.forEach((c, j) => {
+    const on = j === i, driving = VEHICLES[j].id === cur;
+    c.classList.toggle('sel', on);
+    c.classList.toggle('current', driving);
+    c.setAttribute('aria-checked', String(on));
+    c.tabIndex = on ? 0 : -1;
+    c.querySelector('.c-tag').textContent = driving ? 'Driving' : 'Selected';
+  });
+  updateGo();
+}
 const garage = new Garage(RAPIER, VEHICLES, { onChange: renderCards, onDrive: () => startDrive() });
+$('goBtn').addEventListener('click', () => startDrive());
 $('garageBtn').addEventListener('click', () => garage.open(selected));
+$('restartBtn').addEventListener('click', () => startDrive({ fresh: true }));
+$('restartBtn').innerHTML = `<span>${isRace ? 'Back to the grid' : 'Restart at trailhead'}<small>Repairs your rig</small></span>`;
+
+// Rigs / Controls pages of the main board
+function showTab(which) {
+  const ctrl = which === 'controls';
+  $('rigView').classList.toggle('hidden', ctrl);
+  $('ctrlView').classList.toggle('hidden', !ctrl);
+  $('rigsBtn').classList.toggle('sel', !ctrl); $('rigsBtn').setAttribute('aria-selected', String(!ctrl));
+  $('ctrlBtn').classList.toggle('sel', ctrl); $('ctrlBtn').setAttribute('aria-selected', String(ctrl));
+}
+$('rigsBtn').addEventListener('click', () => showTab('rigs'));
+$('ctrlBtn').addEventListener('click', () => showTab('controls'));
 
 // Map selector. Each map bakes its own terrain at load, so switching reloads the page on
 // the chosen map (?map=), carrying the rig and options over and driving straight off.
@@ -513,30 +550,57 @@ const MAP_TAGS = {
   race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
 };
 let selectedMap = MAP_ID;
-$('maps').innerHTML = MAPS.map((m) => `<button class="mapbtn" data-id="${m.id}">${m.name}</button>`).join('');
+const mapName = (id) => MAPS.find((m) => m.id === id).name;
+$('maps').innerHTML = MAPS.map((m) => `<button class="pbtn mapbtn" role="radio" aria-checked="false" data-id="${m.id}"><span>${m.name}</span></button>`).join('');
 const mapBtns = [...document.querySelectorAll('.mapbtn')];
 function selectMap(id) {
   selectedMap = id;
-  mapBtns.forEach((b) => b.classList.toggle('sel', b.dataset.id === id));
+  mapBtns.forEach((b) => { b.classList.toggle('sel', b.dataset.id === id); b.setAttribute('aria-checked', String(b.dataset.id === id)); });
   $('tagline').textContent = MAP_TAGS[id];
+  updateGo();
 }
 mapBtns.forEach((b) => b.addEventListener('click', () => selectMap(b.dataset.id)));
-selectMap(MAP_ID);
 function switchMap() {
   const o = ['optAuto', 'optLow', 'optAir'].map((id) => ($(id).checked ? 1 : 0)).join('');
   const q = new URLSearchParams({ map: selectedMap, car: String(selected), o, go: '1' });
   const cover = document.createElement('div');
-  cover.id = 'loading'; cover.textContent = `LOADING ${MAPS.find((m) => m.id === selectedMap).name.toUpperCase()}…`;
+  cover.id = 'loading'; cover.className = 'm-cover'; cover.textContent = `Loading ${mapName(selectedMap)}…`;
   document.body.appendChild(cover);
   location.search = q.toString();
 }
 
+// The primary button says what it will do: resume this run, or start a new drive (other rig / build / map).
+function updateGo() {
+  let label = 'Drive', note = '';
+  const sel = builtSpec(selected);
+  if (selectedMap !== MAP_ID) { label = `Drive on ${mapName(selectedMap)}`; note = `Loads the ${mapName(selectedMap)}${paused ? ' and ends this run' : ''}.`; }
+  else if (paused && car) {
+    if (buildKey(car.spec) === buildKey(sel)) label = 'Resume';
+    else {
+      label = 'Drive this rig';
+      note = car.spec.id === sel.id ? 'Garage changes start a new drive. Esc returns to your run.' : `Starts a new drive in the ${sel.name}. Esc returns to your run.`;
+    }
+  }
+  $('goBtn').firstElementChild.textContent = label;
+  $('goNote').textContent = note;
+}
+
+function setPausedUi() {
+  $('pauseSign').classList.toggle('hidden', !paused);
+  $('restartBtn').classList.toggle('hidden', !paused);
+  selectCard(selected);
+}
 function openMenu() {
-  if (playing && started) { paused = true; audio.setMuted(true); }
+  if (playing && started) {
+    paused = true; audio.setMuted(true);
+    const ci = VEHICLES.findIndex((v) => v.id === car.spec.id);
+    if (ci >= 0) selected = ci;   // the pause menu opens on the rig you're driving
+  }
   playing = false;
-  $('pauseBar').classList.toggle('hidden', !paused);
+  setPausedUi();
   $('menu').classList.remove('hidden');
   $('hud').classList.add('hidden');
+  $('goBtn').focus({ preventScroll: true });
 }
 // Esc / RESUME: back to the exact same truck, pose, damage, gear and timers
 function resumeDrive() {
@@ -545,7 +609,8 @@ function resumeDrive() {
   garage.close();
   audio.setMuted(muted);
   $('menu').classList.add('hidden');
-  $('pauseBar').classList.add('hidden');
+  if ($('menu').contains(document.activeElement)) document.activeElement.blur();   // no menu button keeps keyboard focus while driving
+  setPausedUi();
   $('hud').classList.remove('hidden');
   last = performance.now(); acc = 0;
   playing = true;
@@ -568,16 +633,21 @@ function startDrive({ fresh = false } = {}) {
   }
   paused = false;
   audio.setMuted(muted);
-  $('pauseBar').classList.add('hidden');
+  setPausedUi();
   audio.start(spec.engine.sound);
   audio.kind = spec.engine.sound;
   $('menu').classList.add('hidden');
+  if ($('menu').contains(document.activeElement)) document.activeElement.blur();   // no menu button keeps keyboard focus while driving
   $('hud').classList.remove('hidden');
   playing = true;
   if (isRace) toast(`${spec.name} on the grid: 4-HI, ${car.dt.gearLabel === 'N' ? 'neutral' : '1st gear'}. Go on green; scroll the wheel to shift.`, 3.5);
   else toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Scroll the mouse wheel up for first gear.`, 3.5);
   if (parkBrake) setTimeout(() => { if (parkBrake && playing) toast('Parking brake is ON: press P to release it', 3.5); }, 3700);
 }
+renderCards();
+selectMap(MAP_ID);
+// arrow keys move focus around whichever menu layer is up (the settings overlay handles its own keys)
+enableArrowNav(() => (garage.isOpen ? $('garage') : !$('menu').classList.contains('hidden') ? $('menu') : null));
 
 // ---------------- loop ----------------
 let acc = 0, last = performance.now(), revHint = 0;

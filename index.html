@@ -18,85 +18,13 @@
   #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
   #hud.hidden { display: none; }
 
-  /* driving HUD: pixel canvases, see src/hud/hud.css */
+  /* driving HUD: pixel canvases, see src/hud/hud.css; menu, garage and settings: src/menu/menu.css */
   .btn { font-family: var(--font); color: var(--muted); background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 3px; padding: 1px 10px; font-size: 11px; cursor: pointer; }
   .btn:hover { border-color: var(--amber); color: var(--ink); }
-  /* menu: map selector */
-  .maps { display: flex; gap: 8px; margin: 0 0 14px; }
-  .mapbtn { font-family: var(--font); font-size: 15px; letter-spacing: .08em; padding: 8px 20px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; text-transform: uppercase; }
-  .mapbtn:hover { border-color: rgba(255, 179, 64, .5); color: var(--ink); }
-  .mapbtn.sel { color: #1a1206; background: var(--amber); border-color: var(--amber); }
-
-
-  kbd { font-family: var(--font); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; background: rgba(255,255,255,.04); }
-
-  /* menu */
-  #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 30%, rgba(40,30,18,.55), rgba(8,7,6,.88)); z-index: 10; }
-  #menu.hidden { display: none; }
-  .menu-inner { width: min(1240px, 96vw); }
-  .title { font-size: 52px; font-weight: 600; letter-spacing: .04em; }
-  .title span { color: var(--amber); }
-  .tag { color: var(--muted); margin: 4px 0 22px; font-size: 15px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 360px)); justify-content: center; gap: 12px; }
-  .card { padding: 16px; cursor: pointer; transition: border-color .15s, transform .15s; }
-  .card:hover { border-color: rgba(255, 179, 64, .5); transform: translateY(-2px); }
-  .card.sel { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
-  .card h3 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
-  .card p { margin: 0 0 10px; font-size: 12px; color: var(--muted); line-height: 1.4; min-height: 84px; }
-  .stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; }
-  .stats dt { color: var(--muted); } .stats dd { margin: 0; font-variant-numeric: tabular-nums; }
-  .opts { display: flex; gap: 22px; margin: 18px 0; font-size: 14px; flex-wrap: wrap; }
-  .opts label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
-  .opts input { accent-color: var(--amber); width: 16px; height: 16px; }
-  .go { font-family: var(--font); font-size: 18px; letter-spacing: .12em; padding: 12px 34px; background: var(--amber); color: #1a1206; border: 0; border-radius: 4px; cursor: pointer; font-weight: 600; }
-  .go:hover { filter: brightness(1.08); }
-  .controls { display: grid; grid-template-columns: repeat(4, auto); gap: 6px 18px; font-size: 13px; color: var(--muted); margin-top: 22px; padding: 14px 16px; }
-  .controls span { white-space: nowrap; }
+  #menu.hidden, #garage.hidden { display: none; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--muted); z-index: 20; background: #0d0c0b; letter-spacing: .1em; }
   #help { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 9; pointer-events: none; }
   #help.hidden { display: none; }
-  #help .controls { pointer-events: auto; font-size: 14px; }
-
-  /* garage */
-  .go.alt { background: transparent; color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; margin-left: 10px; }
-  .card .mod { float: right; font-size: 10px; letter-spacing: .14em; color: var(--amber); margin-top: 6px; }
-  #garage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 12; background: rgba(8,7,6,.6); }
-  #garage.hidden { display: none; }
-  .garage-inner { width: min(1240px, 96vw); height: min(780px, 94vh); display: flex; flex-direction: column; padding: 16px 18px; background: rgba(18,17,15,.9); }
-  .ghead { display: flex; align-items: baseline; gap: 14px; }
-  .ghead .t { font-size: 30px; font-weight: 600; letter-spacing: .04em; }
-  .ghead .t span { color: var(--amber); }
-  .ghead .sub { color: var(--muted); font-size: 13px; flex: 1; }
-  .gbody { flex: 1; display: flex; gap: 18px; min-height: 0; margin-top: 12px; }
-  .gleft { width: 46%; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-  #gPreview { width: 100%; flex: 1; min-height: 220px; border-radius: 4px; border: 1px solid var(--line); cursor: grab; }
-  #gStats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
-  .gstat { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 0 8px; font-size: 12px; }
-  .gstat .sl { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 10px; }
-  .gstat b { font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
-  .gstat em { font-style: normal; font-size: 11px; min-width: 34px; text-align: right; color: var(--muted); }
-  .gstat em.up { color: var(--good); } .gstat em.down { color: var(--warn); }
-  .gstat small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
-  .gbar { grid-column: 1 / -1; height: 4px; background: rgba(255,255,255,.07); border-radius: 2px; position: relative; margin: 3px 0 1px; }
-  .gbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--amber); border-radius: 2px; transition: width .2s; }
-  .gbar i.up { background: var(--good); } .gbar i.down { background: var(--warn); }
-  .gbar u { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink); opacity: .55; }
-  .gright { flex: 1; overflow-y: auto; padding-right: 6px; }
-  .gcat { border-top: 1px solid var(--line); padding: 5px 0 3px; }
-  .gcat h4 { margin: 0 0 3px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--amber); font-weight: 600; }
-  .grow { display: flex; align-items: center; gap: 10px; margin: 3px 0; }
-  .glbl { width: 92px; flex: none; font-size: 12px; color: var(--muted); }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .chip { font-family: var(--font); font-size: 12px; color: var(--ink); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 3px; padding: 3px 10px; cursor: pointer; }
-  .chip:hover { border-color: var(--amber); }
-  .chip.on { background: var(--amber); border-color: var(--amber); color: #1a1206; font-weight: 600; }
-  .chip.swatch { width: 26px; height: 20px; padding: 0; }
-  .chip.swatch.stock { width: auto; padding: 0 8px; font-size: 9px; letter-spacing: .1em; color: #fff; text-shadow: 0 0 3px #000; }
-  .chip.swatch.on { box-shadow: 0 0 0 2px #1a1206 inset, 0 0 0 1px var(--amber); background-clip: padding-box; }
-  .gfootbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-  #gNote { flex: 1; font-size: 13px; color: var(--muted); min-height: 1.2em; }
-  .gfootbar .btn { font-size: 13px; padding: 8px 14px; }
-  .gfootbar .go { padding: 10px 28px; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -106,31 +34,56 @@
 
 <div id="help" class="hidden"></div>
 
+<!-- hard-edged text: rounds the font rasteriser's edge coverage to on/off (used by .crisp text in src/menu/menu.css) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="lrCrisp"><feComponentTransfer><feFuncA type="discrete" tableValues="0 1" /></feComponentTransfer></filter></svg>
+
 <div id="menu" class="hidden">
   <div class="menu-inner">
-    <div id="pauseBar" class="hidden"></div>
-    <div class="title">LOW <span>RANGE</span></div>
-    <div class="maps" id="maps"></div>
-    <div class="tag" id="tagline">Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.</div>
-    <div class="cards" id="cards"></div>
-    <div class="opts">
-      <label><input type="checkbox" id="optAuto" checked /> Auto-clutch (anti-stall)</label>
-      <label><input type="checkbox" id="optLow" checked /> Start in 4-Low</label>
-      <label><input type="checkbox" id="optAir" /> Start aired down</label>
+    <div class="m-left">
+      <h1 class="m-sign" id="mSign"><span class="sr">LowRange</span></h1>
+      <div id="pauseSign" class="m-pause hidden" role="status"><b>Paused</b><span>Esc resumes</span></div>
+      <nav class="m-board m-actions" id="mActions" aria-label="Menu">
+        <button class="pbtn primary" id="goBtn"><span>Drive</span></button>
+        <div class="m-paper m-note"><p id="goNote" aria-live="polite"></p></div>
+        <button class="pbtn hidden" id="restartBtn"><span>Restart at trailhead</span></button>
+        <button class="pbtn" id="garageBtn"><span>Garage</span></button>
+      </nav>
     </div>
-    <button class="go" id="goBtn">DRIVE</button><button class="go alt" id="garageBtn">GARAGE</button>
-    <div class="controls panel" id="menuControls"></div>
+    <div class="m-right">
+      <section class="m-board m-main">
+        <div class="m-tabs" role="tablist" aria-label="Menu pages">
+          <button class="pbtn tab sel" id="rigsBtn" role="tab" aria-selected="true" aria-controls="rigView"><span>Rigs</span></button>
+          <button class="pbtn tab" id="ctrlBtn" role="tab" aria-selected="false" aria-controls="ctrlView"><span>Controls</span></button>
+          <h2 class="m-h" id="mapH">Map</h2>
+          <div class="maps" id="maps" role="radiogroup" aria-labelledby="mapH"></div>
+        </div>
+        <div class="m-paper tag"><p id="tagline">Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.</p></div>
+        <div id="rigView" role="tabpanel" aria-labelledby="rigsBtn">
+          <div class="cards" id="cards" role="radiogroup" aria-label="Rig"></div>
+          <div class="m-paper opts" role="group" aria-label="Start options">
+            <label class="m-check"><input type="checkbox" id="optAuto" checked /> Auto-clutch (anti-stall)</label>
+            <label class="m-check"><input type="checkbox" id="optLow" checked /> Start in 4-Low</label>
+            <label class="m-check"><input type="checkbox" id="optAir" /> Start aired down</label>
+            <span class="hint" id="tabHint">Double-click a rig to drive</span>
+          </div>
+        </div>
+        <div id="ctrlView" class="hidden" role="tabpanel" aria-labelledby="ctrlBtn">
+          <div class="m-paper controls" id="menuControls"></div>
+          <p class="paint ctrl-foot">Press H while driving to bring this list up.</p>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
 <div id="garage" class="hidden">
-  <div class="garage-inner panel">
-    <div class="ghead"><div class="t">GARAGE <span id="gName"></span></div><div class="sub">Builds save automatically for each rig. Drag the preview to turn it.</div></div>
+  <div class="garage-inner m-board" role="dialog" aria-label="Garage">
+    <div class="ghead"><h2 class="t">Garage: <span id="gName"></span></h2><div class="sub m-paper"><p>Builds save automatically for each rig. Drag the preview to turn it.</p></div></div>
     <div class="gbody">
-      <div class="gleft"><canvas id="gPreview"></canvas><div id="gStats"></div></div>
-      <div class="gright" id="gOpts"></div>
+      <div class="gleft"><div class="gwell"><canvas id="gPreview"></canvas></div><div id="gStats" class="m-paper"></div></div>
+      <div class="gright m-paper" id="gOpts"></div>
     </div>
-    <div class="gfootbar"><div id="gNote"></div><button class="btn" id="gReset">Reset to stock</button><button class="btn" id="gBack">Back</button><button class="go" id="gDrive">DRIVE</button></div>
+    <div class="gfootbar"><div class="m-paper gnote"><p id="gNote" aria-live="polite"></p></div><button class="pbtn" id="gReset"><span>Reset to stock</span></button><button class="pbtn" id="gBack"><span>Back</span></button><button class="pbtn primary" id="gDrive"><span>Drive</span></button></div>
   </div>
 </div>
 

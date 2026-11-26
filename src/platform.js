@@ -1,5 +1,5 @@
 // Platform glue: desktop (Electron, via the preload's window.lowrange) vs browser.
-// Adds a small SETTINGS button to the garage menu everywhere, and QUIT only in the desktop app.
+// Adds a Settings button to the menu's button board everywhere, and Quit only in the desktop app.
 import { openSettings } from './settings.js';
 
 export const desktop = window.lowrange && window.lowrange.isDesktop ? window.lowrange : null;
@@ -10,19 +10,17 @@ function addMenuButtons() {
   if (!menu || document.getElementById('lrMenuBar')) return;
   const bar = document.createElement('div');
   bar.id = 'lrMenuBar';
-  bar.style.cssText = 'position:absolute;top:14px;right:14px;display:flex;gap:8px;z-index:1';
-  const mk = (label, fn) => {
+  const mk = (id, label, fn) => {
     const b = document.createElement('button');
-    b.className = 'btn';
-    b.style.cssText = 'font-size:12px;padding:6px 14px;letter-spacing:.1em';
-    b.textContent = label;
+    b.className = 'pbtn'; b.id = id;
+    const t = document.createElement('span'); t.textContent = label; b.appendChild(t);
     b.addEventListener('click', fn);
     bar.appendChild(b);
     return b;
   };
-  mk('SETTINGS', openSettings);
-  if (desktop) mk('QUIT', () => desktop.quit());
-  menu.appendChild(bar);
+  mk('setBtn', 'Settings', openSettings);
+  if (desktop) mk('quitBtn', 'Quit', () => desktop.quit());
+  (document.getElementById('mActions') || menu).appendChild(bar);
 }
 
 if (isDesktop) document.documentElement.classList.add('desktop');
