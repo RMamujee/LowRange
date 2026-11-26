@@ -65,6 +65,8 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 - **Race Track** (`race`): the Dust Bowl Circuit, 1.3 km of dirt with jumps, whoops, a rock garden and a splash; laps, checkpoints and best laps.
 - **The Gauntlet** (`crawl`): a physics and driving test course. You spawn at the foot of one 783 m rock trail that climbs 54 m up a mountainside in 12 numbered stages, each harder than the last and each testing one skill: Warm-up, Articulation, Ledges I (0.2-0.3 m), Side-slope (up to 20°), Boulder Garden I, The Climb (20°/28°/35° slab, then loose gravel), Ledges II (0.4-0.55 m), Bog & Ford, Notches & Squeezes, Boulder Garden II, The Waterfall (stacked 0.5-0.58 m steps on a 28% pitch), and the Summit. Every stage has a gate and a signpost; the run is timed from the start gate to the summit, with a split per stage, and your best total and best splits are saved per rig. The HUD points to the next gate and shows "STAGE n/12". **Y** takes you back to the gate of the stage you're in. A graded bypass track runs alongside with a spur into every stage gate, for skipping a stage or getting out; a run that skips stages still records splits but doesn't count as a best. Tuning lives in the `STAGE_DEFS` table at the top of `src/maps/crawl.js`.
 
+**Spawn points** (BeamNG-style): press **J** (or pick *Spawn points* in the pause menu, or click a wooden "P" signpost on the big map) to jump to any named spot: the trailhead, either end of a trail (just outside its gate, facing in, so driving forward starts the run), every Gauntlet stage gate plus the summit and the bypass track, or the race grid, paddock and each checkpoint (a rolling start: the lap clock starts at the line). Arrow keys + Enter pick from the list, Enter again confirms. The truck arrives repaired, at rest, in neutral with the parking brake on, keeping your rig, garage build and driver settings; any run in progress is cancelled. The last point you used is remembered per map and offered as *Restart at ...* in the pause menu. Points are derived from the map data and footprint-checked at load (flat ground, no rock, tree or prop colliders); see `src/spawns.js`.
+
 ## Rigs
 
 | Rig | Style | Notes |
@@ -100,9 +102,10 @@ Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete
 | Z / X | zoom |
 | Mouse drag | orbit the camera |
 | M | map: click to set waypoints, right-click to remove, drag / wheel to pan / zoom |
+| J | spawn points: the map opens on the list (arrows + Enter, or click a signpost); J again closes |
 | N | mute |
 | H | help |
-| Esc | pause (RESUME returns to the same truck; "Restart at trailhead" repairs) |
+| Esc | pause (RESUME returns to the same truck; "Restart at trailhead" repairs; "Spawn points" and "Restart at <last spawn>") |
 
 A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch, A for the parking brake, R3 for the map.
 
@@ -119,9 +122,11 @@ Headless physics checks run in Node, for example:
 - `node test/crawl.mjs lc70,taco,wrx [fromStage] [toStage]`: autopilot on The Gauntlet, furthest stage and time per stage
 - `node test/crawlcheck.mjs`: The Gauntlet by the numbers (step heights against measured limits, clear lanes, grades); `node test/crawlcourse.mjs`: its run logic
 - `node test/stairgrade.mjs <ids> <grades> <rises>`: how tall a staircase each rig walks
+- `node test/spawns.mjs`: every spawn point on every map, each rig dropped and settled on it (upright, at rest, undamaged, wheels down, no colliders in the footprint)
 
 With the dev server running (`npx vite --port 5841`), browser checks use Playwright with a Chromium path in `CHROME`:
 
 - `PORT=5841 node test/crashshots.mjs <outdir>`: before/after crash shots per rig (barrier hits, drops, roof, tumble, tree, in-place repair); finals in `docs/previews/crash_*.png`
 - `PORT=5841 node test/hud.mjs`: the pixel HUD (stick shifter through every gear, parking brake on a slope, pause / resume, map waypoints + persistence, trail toasts, race laps)
+- `PORT=5841 node test/spawnsbrowser.mjs [park|race|crawl|all]`: spawn points through the map list, signposts, keyboard and the pause menu; runs start from the gate afterwards
 - `PORT=5841 node scripts/hud-mockup.mjs`: regenerates the HUD review sheets in `docs/previews/hud_*.png`

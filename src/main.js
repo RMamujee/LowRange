@@ -21,6 +21,7 @@ import { mountMenuChrome, rigRating, enableArrowNav } from './menu/menu.js';
 import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics props]
 import { CrawlCourse } from './crawl_course.js'; // [crawl] The Gauntlet's stages, splits and guidance
 import { buildCrawlView } from './crawl_view.js'; // [crawl]
+import { buildSpawnPoints, loadLastSpawn, saveLastSpawn, liftFor } from './spawns.js'; // [spawns] named spawn points
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -194,7 +195,7 @@ function updateCrawl(p, dt) {
     }
   }
   if (game.active) game.active.t = crawl.t;
-  game.guide = crawl.guide();
+  game.guide = crawlSpawnGuide(crawl.guide()); // [spawns] after a stage spawn: point at that gate
   game.crawl = crawl.snapshot();
 }
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
@@ -320,7 +321,7 @@ function raceUpdate(dt) {
     if (e.type === 'count') bigMsg(String(e.n), 1, 'count');
     else if (e.type === 'go') { bigMsg('GO!', 1.2, 'go'); raceView.setLights('go'); goLights = 2.5; }
     else if (e.type === 'lapstart') toast('Lap 1: the clock is running', 1.6);
-    else if (e.type === 'cp') toast(`Checkpoint ${e.cp}/${e.of} · ${fmtLap(e.split)}`, 1.4);
+    else if (e.type === 'cp') toast(race.started ? `Checkpoint ${e.cp}/${e.of} · ${fmtLap(e.split)}` : `Checkpoint ${e.cp}/${e.of}. The lap clock starts at the line`, 1.4); // [spawns] rolling start: no split yet
     else if (e.type === 'lap') { bigMsg(fmtLap(e.time), 2.5, e.best ? 'best' : ''); toast(`Lap ${e.lap}: ${fmtLap(e.time)}${e.best ? ' · NEW BEST' : ` (best ${fmtLap(race.best)})`}`, 3.5); }
     else if (e.type === 'missed') toast(`Missed checkpoint ${e.cp}! Go back through it`, 3);
   }
@@ -330,6 +331,65 @@ function raceUpdate(dt) {
   if (cp !== shownCp) { raceView.setNextCp(cp); shownCp = cp; }
   if (race.wrong) bigMsg('WRONG WAY', 0.3, 'warn');
 }
+
+// ---------------- [spawns] named spawn points (BeamNG-style) ----------------
+// src/spawns.js derives and footprint-checks the points (trailhead, both ends of every trail, Gauntlet
+// stage gates, race grid / checkpoints / paddock); the big map shows them (J opens the list) and the
+// pause menu offers the list and "Restart at <last spawn>". Loose physics props count as obstacles.
+const SPAWNS = buildSpawnPoints({ rocks, trees, extra: looseProps.items });
+let lastSpawn = loadLastSpawn(SPAWNS);   // validated: an unknown saved id falls back to the default
+let camSnap = false;                     // next camera update jumps behind the truck (no swoop)
+let crawlJoin = null;                    // Gauntlet: the stage gate a spawn faces, until a run starts
+function crawlSpawnGuide(gd) {
+  if (!crawlJoin || crawl.running || crawl.stage) { crawlJoin = null; return gd; }
+  return { ...gd, target: crawlJoin.gate, stage: 0, name: crawlJoin.name.toUpperCase(), next: `GATE ${crawlJoin.n}` };
+}
+
+// Teleport: a fresh, repaired truck at rest on the point (parking brake on, neutral, driver settings
+// kept by respawnFresh); any trail / stage / race run is cancelled so only driving through a gate
+// starts one, and nothing is credited for the jump.
+function spawnAt(sp) {
+  if (!car || !sp) return;
+  respawnFresh(sp.x, sp.z, sp.yaw, liftFor(sp, spec));
+  parkBrake = true;
+  keys.clear(); input.throttle = 0; input.brake = 0; input.steer = 0;
+  camState.yaw = 0; camState.spot = null; camTargetInit = false; camSnap = true;
+  game.active = null; game.finishGate = -1;
+  if (crawl) {
+    crawl.reset(); crawlView.resetAll();
+    crawlJoin = sp.kind === 'stage' && sp.stage > 1 ? TRAILS[0].stages[sp.stage - 1] : null;
+    game.guide = crawlSpawnGuide(crawl.guide()); game.crawl = crawl.snapshot();
+  }
+  if (isRace) {
+    const d = car.dt; d.range = 'high'; d.fourWD = true;
+    if (sp.kind === 'grid') { raceGearing(); race.teleported(); raceStart(); }   // as Y: lights and a countdown
+    else {
+      // rolling start: the next checkpoint is the one ahead, the lap clock starts at the line
+      race.reset(); race.state = 'racing'; race.next = sp.cp ?? 0; race.lastCp = sp.cp ? sp.cp - 1 : 0; race.teleported();
+      raceView.setLights(0); goLights = 0;
+    }
+    shownCp = null;
+  }
+  lastSpawn = sp; saveLastSpawn(sp);
+  hud.closeMap();
+  updateSpawnButtons();
+  toast(`${sp.name}: repaired, parking brake on.${sp.note ? ' ' + sp.note : ''}`, 3.5);
+}
+
+// pause menu: "Spawn points" (opens the list on the map) and "Restart at <last spawn>"
+const spawnBtn = document.createElement('button'), lastSpawnBtn = document.createElement('button');
+spawnBtn.id = 'spawnBtn'; lastSpawnBtn.id = 'lastSpawnBtn';
+spawnBtn.className = lastSpawnBtn.className = 'pbtn hidden';
+spawnBtn.innerHTML = `<span>Spawn points<small>Pick ${isRace ? 'a checkpoint' : isCrawl ? 'a stage' : 'a trailhead'} (J)</small></span>`;
+$('restartBtn').after(spawnBtn, lastSpawnBtn);
+function updateSpawnButtons() {
+  spawnBtn.classList.toggle('hidden', !paused || !SPAWNS.length);
+  lastSpawnBtn.classList.toggle('hidden', !paused || !lastSpawn || lastSpawn.default);
+  if (lastSpawn) lastSpawnBtn.innerHTML = `<span>Restart at last spawn<small>${lastSpawn.name}</small></span>`;
+}
+const resumeForSpawn = () => { if (selectedMap !== MAP_ID) selectMap(MAP_ID); startDrive(); return playing; };
+spawnBtn.addEventListener('click', () => { if (resumeForSpawn()) hud.openSpawns(); });
+lastSpawnBtn.addEventListener('click', () => { if (resumeForSpawn()) spawnAt(lastSpawn); });
 
 // ---------------- HUD ----------------
 // The HUD itself lives in src/hud/ (pixel canvases); main.js feeds it a snapshot each frame.
@@ -380,7 +440,7 @@ function updateCamera(dt) {
     const cp = Math.cos(camState.pitch), d = camState.dist;
     _v.set(target.x + Math.sin(yaw) * cp * d, target.y + Math.sin(camState.pitch) * d, target.z + Math.cos(yaw) * cp * d);
     _v.y = Math.max(_v.y, visualHeightAt(_v.x, _v.z) + 0.6);
-    camera.position.lerp(_v, damp(7, dt));
+    if (camSnap) camera.position.copy(_v); else camera.position.lerp(_v, damp(7, dt)); // [spawns] a teleport snaps the camera
     camera.lookAt(target);
   } else if (mode === 'Hood') {
     const [, ch] = spec.chassis.size;
@@ -407,6 +467,7 @@ function updateCamera(dt) {
   // shadow camera follows the truck
   sun.position.copy(target).addScaledVector(SUN_DIR, 80);
   sun.target.position.copy(target);
+  camSnap = false; // [spawns]
 }
 
 // ---------------- input ----------------
@@ -415,19 +476,20 @@ const CONTROLS = [
   ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
-  ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
+  ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ck"><kbd><span>${k}</span></kbd><span>${v}</span></div>`).join('');
 $('menuControls').innerHTML = controlsHtml;
 const hud = createHud({
   action: (n) => action(n), camera, isRace, mapId: MAP_ID, mapName: MAP_NAME, trees, scene, noOutline,
   controls: () => CONTROLS, onResume: () => resumeDrive(), onRestart: () => startDrive({ fresh: true }),
+  spawns: SPAWNS, onSpawn: (sp) => spawnAt(sp), lastSpawn: () => lastSpawn, // [spawns]
 });
 
 // keyboard key -> action
 const KEYMAP = {
   KeyR: 'range', KeyQ: 'lockF', KeyE: 'lockR', KeyF: '4wd', KeyG: 'rsteer', KeyT: 'tyres', KeyI: 'ignition',
-  KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyN: 'mute', KeyM: 'map', KeyH: 'help', KeyP: 'park',
+  KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyN: 'mute', KeyM: 'map', KeyJ: 'spawns', KeyH: 'help', KeyP: 'park',
   PageUp: 'up', PageDown: 'down',
 };
 
@@ -453,6 +515,7 @@ function action(name) {
     case 'mute': muted = !muted; audio.setMuted(muted); toast(audio.muted ? 'Muted' : 'Sound on', 1.2); break;
     case 'help': hud.toggleHelp(); break;
     case 'map': hud.toggleMap(); break;
+    case 'spawns': hud.toggleSpawns(); break; // [spawns]
     case 'park': parkBrake = !parkBrake; audio.clunk(); toast(parkBrake ? 'Parking brake ON' : 'Parking brake released', 1.4); break;
   }
   if (msg && (name === 'up' || name === 'down')) hud.nudgeShifter();
@@ -468,6 +531,7 @@ addEventListener('keydown', (e) => {
   }
   if (!playing) { if (e.code === 'Enter' && !e.target.closest?.('button, input, label, .card')) startDrive(); return; }
   if (['Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();
+  if (hud.mapKey(e)) { e.preventDefault(); return; } // [spawns] the map's spawn list takes arrows / Enter
   if (!e.repeat && KEYMAP[e.code]) action(KEYMAP[e.code]);
   keys.add(e.code);
 });
@@ -650,6 +714,7 @@ function updateGo() {
 function setPausedUi() {
   $('pauseSign').classList.toggle('hidden', !paused);
   $('restartBtn').classList.toggle('hidden', !paused);
+  updateSpawnButtons(); // [spawns]
   selectCard(selected);
 }
 function openMenu() {
@@ -805,4 +870,4 @@ openMenu();
 if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, gfx: { renderer, pixels, scene, camera, sun } };
+window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, spawns: SPAWNS, spawnAt, get lastSpawn() { return lastSpawn; }, get crawl() { return crawl?.snapshot() ?? null; }, gfx: { renderer, pixels, scene, camera, sun } };

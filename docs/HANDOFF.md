@@ -8,6 +8,7 @@ State of the project for the next working session, which will have the Blender M
 |---|---|
 | Physics | Custom tyre and drivetrain solver on Rapier. Solid axles and independent suspension, manual gearbox, high/low range, lockers, LSD and traction control, damage. Verified by the `test/*.mjs` suite. |
 | Maps | **Trail Park** (graded roads plus 5 rated trails) and **Race Track** ("Dust Bowl Circuit": laps, checkpoints, countdown, best laps). Select in the menu; the `?map=race` URL parameter loads the track directly. **The Gauntlet** (`?map=crawl`, `src/maps/crawl.js`): one 783 m, 12-stage test trail that keeps getting harder, with stage gates, splits, per-rig bests, a bypass track with spurs, and Y back to the current stage's gate (`src/crawl_course.js`, `src/crawl_view.js`). |
+| Spawn points | BeamNG-style teleport: J / pause menu / map signposts. `src/spawns.js` derives the points from map data (trailhead, both trail ends outside the gates, Gauntlet stage gates + summit + bypass, race grid / paddock / checkpoints) and footprint-checks them at load (grade, bumpiness, water/bog, rock/tree/prop/loose-prop discs; nudged along the path, skipped with a console warning if nothing is safe). Teleport = `spawnAt` in `src/main.js` (respawnFresh, park brake, neutral, cancels runs, camera snap, last point per map in localStorage). Tests: `node test/spawns.mjs`, `test/spawnsbrowser.mjs`. |
 | Garage | Tyres, tread, lift, springs, damping, travel, engine, gearing, diffs, armour and paint, saved per rig (`src/garage.js`, `src/garage_ui.js`). |
 | Loading screen | Pixel-art "LowRange" title scene with staged boot (`src/boot.js`, `src/ui/`). |
 | Desktop | Electron offline game. `npm run desktop` runs it; `npm run dist:win` builds the installer and portable exe into `release/`. The builds are unsigned. F10 opens settings. |
@@ -42,6 +43,7 @@ To-do, roughly in order:
 - The Rally Sedan's physics box is still taller than its 0.25 m sills; green rocks are capped at 0.20 m so the model never visibly scrapes.
 - Desktop builds are unsigned (SmartScreen warning).
 - The Gauntlet, crawl autopilot (`node test/crawl.mjs`): Cruiser finishes (722 s), Pickup stops in stage 10 (Boulder Garden II; from its gate it also fails the Waterfall), Rally Sedan clears stages 1-4 and stops at stage 5's 0.55 m gatekeeper ledges. The sim's sedan is stronger than the brief expected: it walks 0.45-0.5 m chamfered ledges on 0.33 m tyres and climbs a 35° slab, so it can't be stopped by stage 3 without putting taller obstacles out of order. This is worth a look in the tyre/step physics. Rigs walk staircases better than single ledges at speed; the Waterfall is tuned against `test/stairgrade.mjs` (Cruiser: 0.6 m OK up to a 28% tread, nothing at 33%).
+- Spawn points: the far ends of Pinyon Two-Track, Bog Run and Widowmaker Falls are skipped (console warning): the baked terrain drops 3-5 m in the last metres of those trails, so their far gates are not reachable from the road at all (a map issue: the trail end heights are pinned to the road but the carve does not meet it). Fix the junctions in `src/maps/trailpark.js` and the spawns appear on their own.
 
 ## Checks after any change
 
@@ -51,6 +53,7 @@ node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
 node test/race.mjs                              # race autopilot
 node test/crawlcheck.mjs && node test/crawlcourse.mjs   # The Gauntlet: numbers + run logic
+node test/spawns.mjs                            # spawn points: every rig settled at every point on all three maps
 node test/crawl.mjs lc70,taco,wrx               # The Gauntlet autopilot, per stage (slow)
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
 ```

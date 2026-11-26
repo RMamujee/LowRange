@@ -43,7 +43,7 @@ function guideArrow() {
   return spriteFrom(f.cv);
 }
 
-export function createHud({ action, camera, isRace, mapId, mapName, trees, scene, noOutline, controls, onResume, onRestart }) {
+export function createHud({ action, camera, isRace, mapId, mapName, trees, scene, noOutline, controls, onResume, onRestart, spawns = [], onSpawn, lastSpawn }) {
   const root = $('hud');
   const cluster = pixCanvas('hud-cluster', root);
   const chassis = pixCanvas('hud-chassis', root);
@@ -59,7 +59,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   const tach = new Dial(55), speedo = new Dial(55), shifter = new Shifter(), transfer = new TransferLever(), park = new ParkLever();
   const bases = new MapBases(trees);
   const waypoints = new Waypoints(mapId);
-  const big = new BigMap({ bases, waypoints, isRace, mapName });
+  const big = new BigMap({ bases, waypoints, isRace, mapName, spawns });
   const beacons = scene ? new Beacons(scene, heightAt, noOutline) : null;
   beacons?.sync(waypoints.list);
   waypoints.onChange = (l) => beacons?.sync(l);
@@ -341,6 +341,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   function setMapOpen(v, S) {
     mapOpen = v;
     mapWrap.classList.toggle('hidden', !v);
+    if (!v) { big.prompt = -1; big.hover = -1; big.rowHover = -1; big.tab = 'info'; mapC.cv.style.cursor = ''; } // [spawns]
     // whole-map zoom shows the whole map; zoomed in, it opens on the truck
     if (v && S) { const p = S.car.chassis.translation(); if (big.zi === 0) big.centreOn(0, 0); else { big.centreOn(p.x, p.z); big.clampView(); } }
   }
@@ -387,7 +388,14 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     mapC.cv.setPointerCapture(e.pointerId);
   });
   mapC.cv.addEventListener('pointermove', (e) => {
-    if (!drag) return;
+    if (!drag) { // [spawns] hover: signposts and list rows
+      const [x, y] = local(mapC, e), inBox = (q) => q && x >= q.x && y >= q.y && x < q.x + q.w && y < q.y + q.h;
+      const mk = big.inView(x, y) && !inBox(big.promptBox) ? big.markerHits.slice().reverse().find(inBox) : null;
+      const row = big.hits.find((q) => q.act === 'spawnrow' && inBox(q));
+      big.hover = mk ? mk.i : -1; big.rowHover = row ? row.i : -1;
+      mapC.cv.style.cursor = mk || row || big.promptHits.some(inBox) || big.hits.some(inBox) ? 'pointer' : '';
+      return;
+    }
     const [x, y] = local(mapC, e);
     if (!drag.moved && Math.hypot(x - drag.sx, y - drag.sy) > 3 && big.inView(drag.sx, drag.sy)) drag.moved = true;
     if (drag.moved) { big.pan(x - drag.x, y - drag.y); drag.x = x; drag.y = y; }
@@ -397,9 +405,22 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     const d = drag; drag = null;
     if (d.moved) return;
     const [x, y] = [d.sx, d.sy];
-    const h = big.hits.find((q) => x >= q.x && y >= q.y && x < q.x + q.w && y < q.y + q.h);
+    const inBox = (q) => q && x >= q.x && y >= q.y && x < q.x + q.w && y < q.y + q.h;
+    // [spawns] an open prompt takes the click: SPAWN / CANCEL, anything else just closes it
+    if (big.prompt >= 0) {
+      const ph = big.promptHits.find(inBox);
+      if (ph && d.button === 0) { if (ph.act === 'confirm') confirmSpawn(); else big.prompt = -1; return; }
+      if (inBox(big.promptBox)) return;
+      const again = big.markerHits.slice().reverse().find(inBox) || big.hits.find((q) => q.act === 'spawnrow' && inBox(q));
+      if (again && again.i === big.prompt && d.button === 0) { confirmSpawn(); return; } // a second click on the same point confirms
+      big.prompt = -1;
+      if (d.button === 0 && !again && big.inView(x, y)) return; // a click on the map only closes the prompt
+    }
+    const h = big.hits.find(inBox);
     if (h && d.button === 0) {
-      if (h.act === 'close') setMapOpen(false);
+      if (h.act === 'tab') { big.tab = h.tab; big.prompt = -1; if (h.tab === 'spawn') { big.lastId = lastSpawn?.()?.id ?? null; if (big.sel < 0) selectSpawn(currentSpawnIndex(), false); } }
+      else if (h.act === 'spawnrow') { selectSpawn(h.i, true); big.prompt = h.i; }
+      else if (h.act === 'close') setMapOpen(false);
       else if (h.act === 'zin') big.zoomAt(big.mx + big.VW / 2, big.my + big.VH / 2, 1);
       else if (h.act === 'zout') big.zoomAt(big.mx + big.VW / 2, big.my + big.VH / 2, -1);
       else if (h.act === 'clear') { waypoints.clear(); toast('Waypoints cleared', 1.4); }
@@ -407,6 +428,8 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
       return;
     }
     if (!big.inView(x, y)) return;
+    const mk = d.button === 0 ? big.markerHits.slice().reverse().find(inBox) : null; // [spawns] topmost signpost
+    if (mk) { selectSpawn(mk.i, false); big.prompt = mk.i; return; }
     const [wx, wz] = big.toWorld(x, y), r = 7 / big.z;
     const near = waypoints.nearest(wx, wz, r);
     if (d.button === 2) { if (near >= 0) { waypoints.remove(near); toast('Waypoint removed', 1.2); } return; }
@@ -419,14 +442,60 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   mapC.cv.addEventListener('wheel', (e) => {
     e.stopPropagation(); e.preventDefault();
     const [x, y] = local(mapC, e);
+    if (big.list && x >= big.mx + big.VW + 4) { big.scrollBy(e.deltaY > 0 ? 18 : -18); return; } // [spawns] scroll the list
     big.zoomAt(big.inView(x, y) ? x : big.mx + big.VW / 2, big.inView(x, y) ? y : big.my + big.VH / 2, e.deltaY < 0 ? 1 : -1);
   }, { passive: false });
   mapWrap.addEventListener('pointerdown', (e) => { if (e.target === mapWrap) setMapOpen(false); });
+
+  // ------------------------------------------------------------ [spawns] spawn point picker
+  // the row the list opens on: the last spawn point used, else the one nearest the truck
+  function currentSpawnIndex() {
+    const last = lastSpawn?.(), li = last ? spawns.findIndex((s) => s.id === last.id) : -1;
+    if (li >= 0 && !last.default) return li;
+    const p = lastS?.car?.chassis.translation();
+    if (!p) return Math.max(0, li);
+    let bi = 0, bd = Infinity;
+    spawns.forEach((s, i) => { const dd = Math.hypot(s.x - p.x, s.z - p.z); if (dd < bd) { bd = dd; bi = i; } });
+    return bi;
+  }
+  function selectSpawn(i, pan) {
+    if (!spawns.length) return;
+    big.sel = clamp(i, 0, spawns.length - 1);
+    big.revealSel();
+    if (pan && big.zi > 0) { const sp = spawns[big.sel]; big.centreOn(sp.x, sp.z); big.clampView(); }
+  }
+  function confirmSpawn() {
+    const sp = spawns[big.prompt];
+    big.prompt = -1;
+    if (sp) onSpawn?.(sp);
+  }
+  function openSpawns() {
+    if (!spawns.length) return;
+    if (!mapOpen) setMapOpen(true, lastS);
+    big.tab = 'spawn'; big.prompt = -1; big.lastId = lastSpawn?.()?.id ?? null;
+    if (lastS) big.draw(mapC.g, mapSnapshot(lastS)); // lay the list out now so the selection can scroll into view
+    selectSpawn(currentSpawnIndex(), true);
+  }
+  // Keys while the map shows the spawn list: arrows / PageUp / PageDown / Home / End select, Enter
+  // opens the prompt, Enter again spawns. Returns true when the key was used (main.js then skips it).
+  function mapKey(e) {
+    if (!mapOpen || big.tab !== 'spawn' || !spawns.length) return false;
+    const n = spawns.length, step = { ArrowUp: -1, ArrowDown: 1, PageUp: -8, PageDown: 8 }[e.code];
+    if (step !== undefined) { big.prompt = -1; selectSpawn(big.sel < 0 ? 0 : clamp(big.sel + step, 0, n - 1), true); return true; }
+    if (e.code === 'Home' || e.code === 'End') { big.prompt = -1; selectSpawn(e.code === 'Home' ? 0 : n - 1, true); return true; }
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+      if (e.repeat) return true;
+      if (big.prompt >= 0) confirmSpawn(); else { if (big.sel < 0) selectSpawn(0, true); big.prompt = big.sel; }
+      return true;
+    }
+    return false;
+  }
 
   addEventListener('resize', layout);
   layout();
 
   // ------------------------------------------------------------ per-frame
+  function mapSnapshot(S) { return { p: S.car.chassis.translation(), heading: S.car.attitude().heading, trails: S.game.trails, active: S.game.active, time: S.game.time, dist: S.game.dist, race: S.race, crawl: S.game.crawl }; }
   function update(dt, S) {
     lastS = S;
     clock += dt;
@@ -439,22 +508,22 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     drawCluster(S, step);
     drawChassis(S);
     drawMini(S);
-    if (mapOpen) {
-      const p = S.car.chassis.translation();
-      big.draw(mapC.g, { p, heading: S.car.attitude().heading, trails: S.game.trails, active: S.game.active, time: S.game.time, dist: S.game.dist, race: S.race, crawl: S.game.crawl });
-    }
+    if (mapOpen) big.draw(mapC.g, mapSnapshot(S));
   }
 
   return {
     update, setSpec, toast, bigMsg,
     nudgeShifter: () => shifter.nudge(),
     toggleMap: () => setMapOpen(!mapOpen, lastS),
+    // [spawns] J: the map straight on the spawn list (again: close it); main.js routes keys through mapKey
+    toggleSpawns() { if (mapOpen && big.tab === 'spawn') setMapOpen(false); else openSpawns(); },
+    openSpawns, mapKey, closeMap: () => setMapOpen(false),
     toggleHelp: () => setHelpOpen(!helpOpen),
     // Esc: close the top overlay; true if one was open
-    closeOverlay() { if (mapOpen) { setMapOpen(false); return true; } if (helpOpen) { setHelpOpen(false); return true; } return false; },
+    closeOverlay() { if (mapOpen && big.prompt >= 0) { big.prompt = -1; return true; } if (mapOpen) { setMapOpen(false); return true; } if (helpOpen) { setHelpOpen(false); return true; } return false; },
     get mapOpen() { return mapOpen; },
     waypoints,
     // for tests: stick position vs. the slot it should travel to, overlays, last toast, guidance angle
-    debug: () => ({ knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big }),
+    debug: () => ({ knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
   };
 }
