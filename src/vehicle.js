@@ -9,8 +9,11 @@
 
 import { Drivetrain } from './drivetrain.js';
 import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE } from './terrain.js';
+import { CrashModel } from './damage/crash.js';
 
 const G = 9.81;
+const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
+const WHEEL_V0 = 3.0, WHEEL_V1 = 5.0; // wheel closing speed (m/s): no wheel damage below V0, full above V1
 
 // ---- tiny vector/quaternion helpers (plain objects, no three.js) ----
 const v = (x, y, z) => ({ x, y, z });
@@ -44,12 +47,15 @@ export class Vehicle {
     // Damage: 1 = healthy, 0 = destroyed. Big impacts wear these down.
     this.health = { tire: [1, 1, 1, 1], susp: [1, 1, 1, 1], engine: 1, body: 1 };
     this.broken = [false, false, false, false];
-    this.dents = [];          // queued for the view: { p (chassis-local), n (local), amount }
+    this.dents = [];          // manual dents for the view: { p (chassis-local), n (local, into the body), amount }
     this.damageEvents = [];   // short messages for the HUD
-    this.build(pos, yaw);
+    this.GROUP_VEHICLE = GROUP_VEHICLE;
+    // crash model (src/damage/crash.js): impact energy, the body's deformation cage, mechanical damage
+    this.crash = new CrashModel(this);
     const t = spec.tire;
     this.wheelI = t.mass * t.radius * t.radius * 0.7;
     this.dt = new Drivetrain(spec, this.wheelI);
+    this.build(pos, yaw);
     this.wheelState = [0, 1, 2, 3].map(() => ({ grounded: false, mat: MAT.DIRT, hitDist: 0, spin: 0, angle: 0, depth: 0 }));
     // tread compound (garage build): [mu, rr] multipliers per surface, keyed by MAT name
     this.treadMul = [];
@@ -70,9 +76,14 @@ export class Vehicle {
         v(M / 12 * ((ch * 2.4) ** 2 + cl ** 2) * 0.8, M / 12 * (cw ** 2 + cl ** 2) * 0.8, M / 12 * ((ch * 2.4) ** 2 + cw ** 2) * 0.8),
         { x: 0, y: 0, z: 0, w: 1 })
       .setLinearDamping(0.02).setAngularDamping(0.05).setCanSleep(false));
-    const box = (hx, hy, hz, ox, oy, oz, fr = 0.5) => world.createCollider(
-      R.ColliderDesc.cuboid(hx, hy, hz).setTranslation(ox, oy, oz).setDensity(0).setFriction(fr)
-        .setCollisionGroups(GROUP_VEHICLE), cb);
+    const boxes = []; // remembered for the crash model (crushed ends / roof shrink these)
+    const box = (hx, hy, hz, ox, oy, oz, fr = 0.5) => {
+      const col = world.createCollider(
+        R.ColliderDesc.cuboid(hx, hy, hz).setTranslation(ox, oy, oz).setDensity(0).setFriction(fr)
+          .setCollisionGroups(GROUP_VEHICLE), cb);
+      boxes.push({ col, hx, hy, hz, ox, oy, oz, cur: { hy, hz } });
+      return col;
+    };
     // frame rails / skid plate
     box(cw * 0.42, ch / 2, cl / 2, 0, 0, 0);
     // body shell: cab / cage, so rollovers land on the roof
@@ -92,7 +103,7 @@ export class Vehicle {
     const c = 2 * s.zeta * Math.sqrt(k * sprung);
     const sag = (sprung * G) / k;
     const sp2 = (s.springSpacing / 2) ** 2;
-    this.suspK = k; this.sag = sag;
+    this.suspK = k; this.sag = sag; this.suspKC = { k, c, sp2 };
 
     this.axles = [];
     this.knuckles = [];
@@ -196,17 +207,85 @@ export class Vehicle {
     this.grace = 1.5; // no damage while a fresh spawn / recovery settles
     this.wheelHandles = this.wheelColliders.map((c) => c.handle);
     this.bodyHandles = [];
+    this.partOf = new Map(); // damage collider handle -> { part: 'body' | 'axle0' | 'axle1', body }
     for (let k2 = 0; k2 < cb.numColliders(); k2++) {
       const col = cb.collider(k2);
       col.setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS);
-      col.setContactForceEventThreshold(M * G * 3);
+      col.setContactForceEventThreshold(M * G * 1.5);
       this.bodyHandles.push(col.handle);
+      this.partOf.set(col.handle, { part: 'body', body: cb });
     }
-    for (const ax of this.axles) if (ax.body) for (let k2 = 0; k2 < ax.body.numColliders(); k2++) this.bodyHandles.push(ax.body.collider(k2).handle);
+    this.axles.forEach((ax, a) => {
+      if (!ax.body) return;
+      for (let k2 = 0; k2 < ax.body.numColliders(); k2++) {
+        const h2 = ax.body.collider(k2).handle;
+        this.bodyHandles.push(h2);
+        this.partOf.set(h2, { part: 'axle' + a, body: ax.body });
+      }
+    });
     this.events = this.events || new R.EventQueue(true);
     this.allBodies = [cb, ...this.axles.flatMap((a) => (a.independent ? a.carriers : [a.slider, a.body])), ...this.knuckles, ...this.wheels];
-    // a wheel torn off earlier stays off after a recovery
+    this.damageBodies = [cb, ...this.axles.map((a) => a.body).filter(Boolean)];
+    this.wheelF = [0, 0, 0, 0]; // low-passed wheel contact force (N), for wheel damage
+    this.wheelV = [0, 0, 0, 0]; // closing speed of each wheel's latest contacts (m/s), held ~60 ms
+    this.wheelPre = [null, null, null, null]; // pre-step wheel velocities
+    // the cab box is the tallest body box (it carries the roof)
+    let cab = null;
+    for (const b of boxes.slice(1)) if (!cab || b.oy + b.hy > cab.oy + cab.hy) cab = b;
+    if (cab) cab.cab = true;
+    this.crash.onBuild(boxes);
+    // a wheel torn off earlier stays off after a recovery; bent springs keep their sag
     if (this.broken) this.broken.forEach((b, i) => { if (b) { world.removeImpulseJoint(this.wheelJoints[i], true); } });
+    this.sagSig = null;
+    this.applySag();
+    this.syncDriveline();
+  }
+
+  // Badly bent springs / arms (health under 0.8): that corner sits lower (spring target raised),
+  // a solid axle leans. Light damage changes nothing (the handling stays exactly as it was).
+  applySag() {
+    const { k, c, sp2 } = this.suspKC, h = this.health.susp;
+    const bent = (i) => Math.max(0, 0.8 - h[i]) / 0.8;
+    const sig = this.axles.map((ax, a) => bent(a * 2).toFixed(3) + bent(a * 2 + 1).toFixed(3)).join();
+    if (sig === this.sagSig) return; // nothing changed: no joint calls
+    this.sagSig = sig;
+    this.axles.forEach((ax, a) => {
+      const bl = bent(a * 2), br = bent(a * 2 + 1);
+      if (ax.independent) {
+        ax.pjoints.forEach((pj, s) => pj.configureMotorPosition(-this.sag + 0.12 * (s ? br : bl), k / 2, c / 2));
+      } else {
+        ax.pjoint.configureMotorPosition(-this.sag + 0.06 * (bl + br), k, c);
+        ax.rjoint.configureMotorPosition(0.1 * (bl - br), k * sp2, c * sp2 * 1.4);
+      }
+    });
+  }
+
+  // which wheels the drivetrain can drive: torn off, or behind a snapped driveshaft / smashed diff
+  syncDriveline() {
+    const lost = this.crash.mech.driveLost;
+    this.dt.broken = this.broken.map((b, i) => b || lost[i >> 1]);
+  }
+
+  setEngineHealth(v, cause) {
+    const h = this.health, before = h.engine;
+    h.engine = Math.max(0, Math.min(h.engine, v));
+    if (before >= 0.5 && h.engine < 0.5) this.damageEvents.push(cause === 'oil' ? 'Engine starved of oil: losing power' : cause === 'heat' ? 'Engine cooking: losing power' : 'Engine damaged: losing power');
+    if (h.engine <= 0.08 && !this.dt.dead) {
+      this.dt.dead = true; this.dt.running = false;
+      this.damageEvents.push(cause === 'oil' ? 'Engine seized: no oil' : cause === 'heat' ? 'Engine seized: overheated' : 'Engine destroyed');
+    }
+    this.dt.powerScale = this.crash.powerScale();
+  }
+
+  // Full repair in place (no new bodies for the view): health, wheels back on, body cage, parts.
+  repair() {
+    const p = this.chassis.translation(), { heading } = this.attitude();
+    this.health = { tire: [1, 1, 1, 1], susp: [1, 1, 1, 1], engine: 1, body: 1 };
+    this.broken = [false, false, false, false];
+    this.dents.length = 0;
+    this.crash.repair();
+    this.dt.dead = false; this.dt.powerScale = 1;
+    this.reset({ x: p.x, y: p.y + 0.6, z: p.z }, heading);
   }
 
   // One physics substep for the whole vehicle.
@@ -218,6 +297,7 @@ export class Vehicle {
 
   destroy() {
     for (const b of this.allBodies) this.world.removeRigidBody(b);
+    this.crash.removeDebris(); // torn-off parts lying around go with the truck
   }
 
   // Rebuild at a new pose, keeping drivetrain state.
@@ -312,6 +392,19 @@ export class Vehicle {
     const [cw, ch] = spec.chassis.size;
     const dragK = 0.5 * 1.2 * 0.9 * cw * (ch + 1.2) * sp * h;
     this.chassis.applyImpulse(v(-lv.x * dragK, -lv.y * dragK, -lv.z * dragK), true);
+    // a bent driveshaft shakes the truck a little at speed (kept subtle on purpose)
+    const ds = this.crash.mech.driveshaft;
+    for (let a = 0; a < 2; a++) {
+      if (ds[a] >= 0.6 || this.crash.mech.driveLost[a]) continue;
+      const sw = (this.dt.w && this.dt.w[a === 0 ? 2 : 1]) || 0; // driveshaft speed (rad/s)
+      this.shaftAngle = (this.shaftAngle || 0) + sw * h;
+      const amp = (0.6 - ds[a]) * Math.min(1, Math.abs(sw) / 60) * this.spec.chassis.mass * 0.004 * h * 60;
+      this.chassis.applyTorqueImpulse(qrot(this.chassis.rotation(), v(Math.sin(this.shaftAngle) * amp, 0, 0)), true);
+    }
+    if (this.grace <= 0) {
+      this.crash.snapshot(this.damageBodies); // pre-step velocities for impact energy
+      for (let i = 0; i < 4; i++) this.wheelPre[i] = this.wheels[i].linvel();
+    }
   }
 
   wheelAxis(i) { return qrot(this.knuckles[i].rotation(), v(1, 0, 0)); }
@@ -359,13 +452,14 @@ export class Vehicle {
     // (normal force per wheel/obstacle pair; tyre friction is zero inside the engine)
     const patches = [];
     const byWheel = [[], [], [], []];
+    const hits = [];
     this.events.drainContactForceEvents((ev) => {
       const h1 = ev.collider1(), h2 = ev.collider2();
       let i = this.wheelHandles.indexOf(h1), other = h2, sign = -1;
       if (i < 0) { i = this.wheelHandles.indexOf(h2); other = h1; sign = 1; }
       if (i < 0) {
-        const mine = this.bodyHandles.includes(h1) ? h1 : this.bodyHandles.includes(h2) ? h2 : null;
-        if (mine !== null) this.bodyImpact(scale(ev.totalForce(), mine === h1 ? -1 : 1), ev.totalForceMagnitude());
+        const mine = this.partOf.has(h1) ? h1 : this.partOf.has(h2) ? h2 : null;
+        if (mine !== null && this.grace <= 0) hits.push({ mine, other: mine === h1 ? h2 : h1, F: scale(ev.totalForce(), mine === h1 ? -1 : 1) });
         return;
       }
       if (this.broken[i]) return;
@@ -410,15 +504,56 @@ export class Vehicle {
       }
     }
 
-    // hard hits on a wheel bend the suspension and can cut the tyre
+    // body / axle contacts -> impact energy, deformation, mechanical damage (src/damage/crash.js)
+    for (const hit of hits) {
+      const po = this.partOf.get(hit.mine);
+      this.crash.contact(po.part, po.body, world.getCollider(hit.mine), world.getCollider(hit.other), hit.F, h);
+    }
+    if (this.grace <= 0) this.crash.endStep(h);
+
+    // Hard hits on a wheel bend the suspension and can cut the tyre. Measured on the contact
+    // force low-passed over ~25 ms (the impulse of a short window): a one-substep bump-stop
+    // spike on whoops is not an 80 g hit, a 5 m landing still is. Side loads (along the axle:
+    // sliding sideways into a rock, a tree) bend arms and wheels far more easily than radial ones.
     const Wst = (this.mass * G) / 4;
     this.grace -= h;
+    // Gate: big contact forces at low closing speed are not impacts. A tyre wedged between
+    // two rocks with the drivetrain pushing, a wheel resting on its bump stop or travel limit
+    // under the truck's weight, a held loose stone: all can show 20-80 g of contact force with
+    // the wheel barely moving into the obstacle. Damage needs the wheel to have been closing on
+    // the contact at real speed: none below WHEEL_V0 (3 m/s, 11 km/h: a 0.45 m free fall; a
+    // ledge drop at crawl pace stays well under it), full weight from WHEEL_V1 (5 m/s).
     for (let i = 0; i < 4 && this.grace <= 0; i++) {
       if (this.broken[i]) continue;
-      let F = 0, rock = false;
-      for (const ev of byWheel[i]) { F += len(ev.F); if (this.terrain.rockHandles.has(ev.other.handle)) rock = true; }
-      const gi = F / Wst;
-      if (gi > 18) this.damageWheel(i, (gi - 18) * 0.0035, rock && gi > 24 ? (gi - 24) * 0.005 : 0);
+      let F = 0, Fl = 0, rock = false, vc = 0;
+      const ax = this.wheelAxis(i), pre = this.wheelPre[i], post = this.wheels[i].linvel();
+      // the sprung mass above this corner: the light wheel stops at first touch, the hard hit
+      // comes when the body lands on it through the bump stop, at the body's speed
+      const cs = this.crash.pre && this.crash.pre.get(this.chassis.handle), wp = this.wheels[i].translation();
+      const chv = cs ? add(cs.lv, cross(cs.av, sub(wp, cs.c))) : null;
+      for (const ev of byWheel[i]) {
+        const f = len(ev.F); F += f; Fl += Math.abs(dot(ev.F, ax));
+        if (this.terrain.rockHandles.has(ev.other.handle)) rock = true;
+        if (f > 1 && pre) { // closing speed along the contact push, relative to the obstacle
+          const n = scale(ev.F, 1 / f), ob = ev.other.parent();
+          let cv = Math.max(-(dot(pre, n) + dot(post, n)) / 2, chv ? -dot(chv, n) : 0);
+          if (ob && ob.isDynamic()) cv += dot(ob.linvel(), n);
+          vc = Math.max(vc, cv);
+        }
+      }
+      const wf = this.wheelF, k = Math.min(1, h / 0.025);
+      wf[i] += (F + Fl * 1.5 - wf[i]) * k;
+      const wv = this.wheelV;
+      wv[i] = Math.max(vc, wv[i] * Math.exp(-h / 0.06));
+      const gate = Math.min(1, Math.max(0, (wv[i] - WHEEL_V0) / (WHEEL_V1 - WHEEL_V0)));
+      const gi = (wf[i] / Wst) * gate;
+      if (gi > WHEEL_G) {
+        const violent = gi > WHEEL_G + 14 && wv[i] > 6.5; // only a genuinely violent hit takes a wheel off
+        this.damageWheel(i, (gi - WHEEL_G) * 0.0045, rock && gi > WHEEL_G + 6 && wv[i] > 5 ? (gi - WHEEL_G - 6) * 0.006 : 0, violent);
+      }
+      if (gi > WHEEL_G + 8) this.crash.archPunch(i, (gi - WHEEL_G - 8) * 0.0012);
+      if (gi > (this.peakG ? this.peakG[i] : 0)) (this.peakG ||= [0, 0, 0, 0])[i] = gi;
+      if (this.wheelLog) this.wheelLog(i, { F: F / Wst, filt: wf[i] / Wst, vc, wv: wv[i], gate, gi });
     }
     // 2. grip rows. Extra DOFs: chassis linear velocity (world, 3), chassis angular
     // velocity (body frame, 3), and each wheel's unsprung velocity along the suspension
@@ -510,8 +645,9 @@ export class Vehicle {
     }
 
     // 3. brakes + rolling resistance (N·m capacity per wheel)
+    const drag = this.crash.mech.wheelDrag; // a fender crushed onto the tyre rubs it
     const brakes = [0, 1, 2, 3].map((i) => {
-      let b = input.brake * spec.brakeT + rrs[i] * loads[i] * t.radius;
+      let b = input.brake * spec.brakeT + rrs[i] * loads[i] * t.radius + drag[i];
       if (input.handbrake && i >= 2) b += spec.brakeT * 1.5;
       return b;
     });
@@ -577,7 +713,9 @@ export class Vehicle {
     this.chassis.applyTorqueImpulse(scale(fwd, -this.dt.engineTorque * h * 0.8), true);
   }
 
-  damageWheel(i, susp, tire) {
+  // violent: this hit may take the wheel off. Without it a wrecked corner stops at 'bent wheel'
+  // (wobbling, still attached): accumulated small hits never snap a wheel on their own.
+  damageWheel(i, susp, tire, violent = false) {
     const h = this.health;
     if (this.spec.armour) susp *= this.spec.armour.wheel; // skid plates guard steering / arms
     const names = ['front-left', 'front-right', 'rear-left', 'rear-right'];
@@ -588,9 +726,14 @@ export class Vehicle {
     }
     if (susp > 0) {
       const before = h.susp[i];
-      h.susp[i] = Math.max(0, h.susp[i] - susp);
+      h.susp[i] = Math.max(violent ? 0 : Math.min(h.susp[i], 0.05), h.susp[i] - susp);
       if (before >= 0.75 && h.susp[i] < 0.75) this.damageEvents.push(`Bent suspension: ${names[i]}`);
+      // below 0.35 the hub / wheel itself is bent: it wobbles (view), then fails
+      const bend = Math.max(0, 1 - h.susp[i] / 0.35);
+      if (bend > 0 && this.crash.mech.bend[i] === 0) this.damageEvents.push(`Bent wheel: ${names[i]} is wobbling`);
+      this.crash.mech.bend[i] = Math.max(this.crash.mech.bend[i], bend);
       if (h.susp[i] <= 0 && !this.broken[i]) this.breakWheel(i);
+      this.applySag();
     }
   }
 
@@ -599,33 +742,8 @@ export class Vehicle {
     this.broken[i] = true;
     this.health.susp[i] = 0;
     this.world.removeImpulseJoint(this.wheelJoints[i], true);
-    this.dt.broken = this.broken;
+    this.syncDriveline();
     this.damageEvents.push(`Snapped! The ${names[i]} wheel tore off`);
-  }
-
-  // f: force on the chassis (world), mag: its magnitude
-  bodyImpact(f, mag) {
-    const M = this.mass;
-    const g = mag / (M * G);
-    if (g < 8 || this.grace > 0) return;
-    let amt = (g - 8) * 0.0025;
-    const cq = this.chassis.rotation();
-    const n = qrot(qconj(cq), scale(f, 1 / Math.max(1e-6, mag))); // push direction, chassis-local
-    const ar = this.spec.armour; // garage armour: skid plates (from below), sliders (sides), bumpers (ends)
-    if (ar) amt *= n.y > 0.6 ? ar.under : Math.abs(n.x) > Math.abs(n.z) ? ar.side : ar.end;
-    const [cw, ch, cl] = this.spec.chassis.size;
-    // dent where the hit came from: the body surface opposite the push direction
-    const p = v(-n.x * cw * 0.5, -n.y * (ch * 0.5 + 0.4) + 0.4, -n.z * cl * 0.5);
-    this.dents.push({ p, n, amount: Math.min(0.12, amt * 1.5) });
-    const h = this.health;
-    h.body = Math.max(0, h.body - amt * 0.5);
-    if (n.z > 0.5) { // hit from the front: radiator / engine
-      const before = h.engine;
-      h.engine = Math.max(0, h.engine - amt * 0.5);
-      if (before >= 0.5 && h.engine < 0.5) this.damageEvents.push('Engine damaged: losing power');
-      if (h.engine <= 0.08 && !this.dt.dead) { this.dt.dead = true; this.dt.running = false; this.damageEvents.push('Engine destroyed'); }
-    }
-    this.dt.powerScale = 0.3 + 0.7 * h.engine;
   }
 
   // Suspension compression per wheel (m, + = compressed) relative to ride height.

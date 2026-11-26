@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js';
 import { vehicleNode } from './art/assets.js';
+import { BodyDamage } from './damage/body_view.js';
 
 // No environment map in the scene, so keep metalness low or parts render near-black.
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.7, ...o });
@@ -28,11 +29,12 @@ function placeBetween(mesh, a, b) {
 }
 
 // Shared materials for lights so the view can make brake lights glow.
+// (names matter: the crash damage view breaks 'Lamp' / 'TailLight' and cracks 'Glass')
 function lightMats() {
   return {
-    head: std(0xfff4d0, { emissive: 0xfff0c0, emissiveIntensity: 0.6, roughness: 0.2 }),
-    tail: std(0x7a0c0c, { emissive: 0xff1a1a, emissiveIntensity: 0.15, roughness: 0.3 }),
-    amber: std(0xffa020, { emissive: 0x804000, emissiveIntensity: 0.4 }),
+    head: std(0xfff4d0, { emissive: 0xfff0c0, emissiveIntensity: 0.6, roughness: 0.2, name: 'Lamp' }),
+    tail: std(0x7a0c0c, { emissive: 0xff1a1a, emissiveIntensity: 0.15, roughness: 0.3, name: 'TailLight' }),
+    amber: std(0xffa020, { emissive: 0x804000, emissiveIntensity: 0.4, name: 'Lamp' }),
   };
 }
 
@@ -160,7 +162,7 @@ function buildTaco(g, S, spec, M) {
   const yB = spec.axleY + 0.15; // rocker line
   const A = arches(spec, 0.07, 0.07);
   const F = -2.62, gw = cw * 0.9;
-  const fog = std(0xffd040, { emissive: 0xffb020, emissiveIntensity: 0.7, roughness: 0.2 });
+  const fog = std(0xffd040, { emissive: 0xffb020, emissiveIntensity: 0.7, roughness: 0.2, name: 'Lamp' });
   // front clip + cab, below the beltline
   S.add(profile([...bottom(F + 0.14, 0.93, yB, [A[0]]), [0.93, 0.64], [-1.1, 0.66], [-2.4, 0.6], [-2.6, 0.5], [F - 0.03, 0.1], [F + 0.03, -0.1]], cw, paint, 0, true, RND));
   // greenhouse (narrower: tumblehome) + glass
@@ -297,7 +299,7 @@ function buildWRX(g, S, spec, M) {
   const A = arches(spec, 0.065, 0.045);
   const F = -2.2, Bk = 2.2, gw = cw * 0.84;
   const gold = std(0xd8b040, { roughness: 0.5 });
-  const lamp = std(0xfff6dc, { emissive: 0xfff0c0, emissiveIntensity: 0.7, roughness: 0.2 });
+  const lamp = std(0xfff6dc, { emissive: 0xfff0c0, emissiveIntensity: 0.7, roughness: 0.2, name: 'Lamp' });
   S.add(profile([...bottom(F + 0.08, Bk - 0.06, yB, A), [Bk, -0.1], [Bk + 0.02, 0.22], [Bk - 0.05, 0.38], [1.55, 0.41], [-1.05, 0.38], [-1.9, 0.26], [F, 0.12], [F - 0.02, -0.1]], cw, paint, 0, true, RND));
   S.add(profile([[-1.05, 0.36], [-0.3, 0.84], [0.7, 0.86], [1.55, 0.39]], gw, paint, 0, true, 0.12));
   S.add(profile([[-0.9, 0.44], [-0.32, 0.79], [0.12, 0.8], [0.12, 0.44]], gw + 0.02, glass, 0, false));
@@ -352,7 +354,7 @@ function buildBody(spec) {
   const dark = std(0x3a3c40, { roughness: 0.85 });
   const black = std(0x2a2b2e, { roughness: 0.8 });
   const trim = std(0x34363a, { roughness: 0.6 });
-  const glass = std(0x26323e, { roughness: 0.12, metalness: 0.2 });
+  const glass = std(0x26323e, { roughness: 0.12, metalness: 0.2, name: 'Glass' });
   const steel = std(0x9a9ea4, { metalness: 0.3, roughness: 0.4 });
   const chrome = std(0xd0d3d8, { metalness: 0.4, roughness: 0.25 });
   const rimMat = std(spec.rimColor ?? RIM[spec.body] ?? 0x9aa0a6, { metalness: 0.3, roughness: 0.4 });
@@ -849,48 +851,29 @@ export class VehicleView {
     this.body.add(hwMesh);
 
     this.tmp = { a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), d: new THREE.Vector3(), down: new THREE.Vector3() };
-    // geometry that dents: body boxes plus the extruded shell panels
-    this.dentable = [];
-    this.body.updateMatrix();
-    this.body.traverse((o) => {
-      if (!o.isMesh) return;
-      const inShell = o.parent === this.body.userData.shell && o.geometry.attributes.position.count > 60;
-      if (o.userData.noDent || !(inShell || o.userData.dentable || (o.geometry.type === 'BoxGeometry' && o.parent === this.body))) return;
-      o.updateMatrix();
-      const m = o.matrix.clone();
-      for (let p = o.parent; p && p !== this.body; p = p.parent) { p.updateMatrix(); m.premultiply(p.matrix); }
-      o.userData.toBody = m;
-      this.dentable.push(o);
-    });
+    // crash damage: the whole visible body follows the crash model's deformation cage, glass
+    // cracks / drops out, lamps break, torn-off parts become their own meshes (src/damage/body_view.js)
+    this.damage = new BodyDamage(this, vehicle);
     this.dentsApplied = 0;
     this.smoke = 0;
+    this.wobble = new THREE.Quaternion();
   }
 
   dispose() {
+    this.damage.dispose();
     this.scene.remove(this.root);
     this.root.traverse((o) => { if (o.geometry && o.geometry !== LEAF_GEO) o.geometry.dispose(); });
   }
 
+  // Back to factory fresh in place (pairs with vehicle.repair()).
+  repairDamage() {
+    this.dentsApplied = this.v.dents.length;
+    this.damage.repair();
+  }
+
+  // A manual dent (chassis-local point, direction into the body): pushed into the deformation cage.
   applyDent({ p, n, amount }) {
-    const P = new THREE.Vector3(p.x, p.y, p.z), N = new THREE.Vector3(n.x, n.y, n.z);
-    const radius = 0.55 + amount * 2;
-    const inv = new THREE.Matrix4(), lin = new THREE.Matrix3();
-    for (const m of this.dentable) {
-      inv.copy(m.userData.toBody).invert();
-      const lp = P.clone().applyMatrix4(inv);
-      const ln = N.clone().applyMatrix3(lin.setFromMatrix4(inv));
-      const pos = m.geometry.attributes.position;
-      let touched = false;
-      for (let i = 0; i < pos.count; i++) {
-        const dx = pos.getX(i) - lp.x, dy = pos.getY(i) - lp.y, dz = pos.getZ(i) - lp.z;
-        const d = Math.hypot(dx, dy, dz);
-        if (d > radius) continue;
-        const f = (1 - d / radius) ** 2 * amount;
-        pos.setXYZ(i, pos.getX(i) + ln.x * f, pos.getY(i) + ln.y * f, pos.getZ(i) + ln.z * f);
-        touched = true;
-      }
-      if (touched) { pos.needsUpdate = true; m.geometry.computeVertexNormals(); }
-    }
+    this.v.crash.lattice.intrude(p, n, amount, 0.3, 0.3 + amount);
   }
 
   update(input) {
@@ -912,9 +895,14 @@ export class VehicleView {
       // flat tyre sags
       const flat = v.health.tire[i] < 0.35 ? 0.9 : 1;
       this.wheels[i].scale.set(1, flat, flat);
+      // a bent wheel / hub: the wheel plane is tilted on its spin axis, so it wobbles as it turns
+      const bend = v.crash.mech.bend[i];
+      if (bend > 0) this.wheels[i].quaternion.multiply(this.wobble.setFromAxisAngle(UP, bend * 0.09 * (i % 2 ? 1 : -1)));
       copy(this.hubs[i], v.knuckles[i]);
     });
-    while (this.dentsApplied < v.dents.length) this.applyDent(v.dents[this.dentsApplied++]);
+    while (this.dentsApplied < v.dents.length) { const dn = v.dents[this.dentsApplied++]; if (!dn.applied) this.applyDent(dn); }
+    if (this.dentsApplied > v.dents.length) this.dentsApplied = v.dents.length; // the log was trimmed
+    this.damage.update();
 
     const { a, b, c, d, down } = this.tmp;
     const W = (obj, x, y, z, out) => out.set(x, y, z).applyQuaternion(obj.quaternion).add(obj.position);
