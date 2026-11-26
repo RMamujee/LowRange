@@ -51,6 +51,9 @@ export class Vehicle {
     this.wheelI = t.mass * t.radius * t.radius * 0.7;
     this.dt = new Drivetrain(spec, this.wheelI);
     this.wheelState = [0, 1, 2, 3].map(() => ({ grounded: false, mat: MAT.DIRT, hitDist: 0, spin: 0, angle: 0, depth: 0 }));
+    // tread compound (garage build): [mu, rr] multipliers per surface, keyed by MAT name
+    this.treadMul = [];
+    for (const [name, i] of Object.entries(MAT)) this.treadMul[i] = (t.grip && t.grip[name]) || [1, 1];
   }
 
   build(pos, yaw) {
@@ -324,7 +327,8 @@ export class Vehicle {
 
   tyreGrip(mat, slipping) {
     const info = MAT_INFO[mat];
-    let mu = info.mu, rr = info.rr;
+    const tm = this.treadMul[mat];
+    let mu = info.mu * tm[0], rr = info.rr * tm[1];
     if (this.airedDown) {
       if (mat === MAT.ROCK) mu *= 1.15;
       else if (mat === MAT.SAND) { mu *= 1.12; rr *= 0.55; }
@@ -488,6 +492,7 @@ export class Vehicle {
 
   damageWheel(i, susp, tire) {
     const h = this.health;
+    if (this.spec.armour) susp *= this.spec.armour.wheel; // skid plates guard steering / arms
     const names = ['front-left', 'front-right', 'rear-left', 'rear-right'];
     if (tire > 0 && h.tire[i] > 0) {
       const before = h.tire[i];
@@ -516,9 +521,11 @@ export class Vehicle {
     const M = this.mass;
     const g = mag / (M * G);
     if (g < 8 || this.grace > 0) return;
-    const amt = (g - 8) * 0.0025;
+    let amt = (g - 8) * 0.0025;
     const cq = this.chassis.rotation();
     const n = qrot(qconj(cq), scale(f, 1 / Math.max(1e-6, mag))); // push direction, chassis-local
+    const ar = this.spec.armour; // garage armour: skid plates (from below), sliders (sides), bumpers (ends)
+    if (ar) amt *= n.y > 0.6 ? ar.under : Math.abs(n.x) > Math.abs(n.z) ? ar.side : ar.end;
     const [cw, ch, cl] = this.spec.chassis.size;
     // dent where the hit came from: the body surface opposite the push direction
     const p = v(-n.x * cw * 0.5, -n.y * (ch * 0.5 + 0.4) + 0.4, -n.z * cl * 0.5);
