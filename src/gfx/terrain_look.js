@@ -193,7 +193,7 @@ float surfVote(vec2 gp, out float share) {
           // widening with distance so it never thins below about a pixel)
           if (layer < 0.5 && share < 1.0) {
             float rim = min(0.5 + 0.6 * max(0.25, 1.3 * length(fwidth(vWPos.xz))) / uGridInfo.y, 0.95);
-            if (share < rim) g *= vec3(0.62, 0.72, 0.64);
+            if (share < rim) g *= vec3(0.76, 0.83, 0.76); // (comfort: a softer rim than the first 0.62)
           }
           // worn trail tread one step darker; slow, stepped tone drift so big areas aren't flat
           g *= cell.g > 0.5 ? 0.86 : 1.0;

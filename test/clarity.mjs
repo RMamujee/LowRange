@@ -33,9 +33,14 @@ for (const [ci, cfg] of configs.entries()) {
   for (const [name, sc] of Object.entries(SCENES)) {
     const diag = await page.evaluate(async (sc) => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      const T = await import('/src/terrain.js');
-      const t = T.TRAILS[sc[0]], p = T.pathPoint(t, sc[1]), c = window.__game.car;
-      c.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.8, z: p.z }, Math.atan2(-p.tx, -p.tz));
+      const T = await import('/src/terrain.js'), c = window.__game.car;
+      if (sc[0] === 'track') { // race map: [ 'track', s along the track, ... ]
+        const M = await import('/src/maps/racetrack.js'), f = M.trackFrame(sc[1]);
+        c.reset({ x: f.x, y: M.heightAt(f.x, f.z) + 1.8, z: f.z }, Math.atan2(-f.tx, -f.tz)); window.__game.race?.teleported();
+      } else {
+        const t = T.TRAILS[sc[0]], p = T.pathPoint(t, sc[1]);
+        c.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.8, z: p.z }, Math.atan2(-p.tx, -p.tz));
+      }
       const cam = window.__game.cam; cam.yaw = sc[2]; cam.pitch = sc[3]; cam.dist = sc[4]; cam.lastDrag = 1e9;
       await sleep(2500);
       const { renderer, pixels } = window.__game.gfx, cv = renderer.domElement, cs = getComputedStyle(cv);
