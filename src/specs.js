@@ -8,7 +8,7 @@ export const VEHICLES = [
     name: 'Trail Pickup',
     blurb: 'Mid-size double-cab pickup in the Tacoma mould. Independent front, solid rear with an e-locker, 6-speed manual.',
     body: 'taco',
-    color: 0xb33a2b,
+    color: 0x7d7a4a, // olive, as in the reference art
     chassis: { mass: 1750, size: [1.85, 0.6, 5.35], comY: -0.08 },
     wheelbase: 3.24, track: 1.62,
     axleY: -0.36,
