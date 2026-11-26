@@ -71,7 +71,10 @@ function buildLoops(ctx, kind) {
 }
 
 export class EngineAudio {
-  constructor() { this.ctx = null; this.muted = false; this.loopKind = null; }
+  constructor() { this.ctx = null; this.muted = false; this.loopKind = null; this.volume = 1; }
+
+  // master volume 0..1 (settings); everything, one-shots included, goes through this.out
+  setVolume(v) { this.volume = v; if (this.out) this.out.gain.value = v; }
 
   start(kind) {
     if (this.ctx) { this.kind = kind; return; }
@@ -85,7 +88,8 @@ export class EngineAudio {
     this.master = ctx.createGain(); this.master.gain.value = 0.0;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.005; comp.release.value = 0.15;
-    this.master.connect(comp); comp.connect(ctx.destination);
+    this.out = ctx.createGain(); this.out.gain.value = this.volume; this.out.connect(ctx.destination);
+    this.master.connect(comp); comp.connect(this.out);
 
     // body path: soft saturation -> low shelf -> low-pass (opens with throttle/rpm)
     this.bodyIn = ctx.createGain(); this.bodyIn.gain.value = 1;
@@ -180,7 +184,7 @@ export class EngineAudio {
     src.buffer = this.noiseBuf;
     const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2400; f.Q.value = 4;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-    src.connect(f).connect(g).connect(ctx.destination);
+    src.connect(f).connect(g).connect(this.out);
     src.start(t); src.stop(t + 0.4);
   }
 
@@ -189,7 +193,7 @@ export class EngineAudio {
     const ctx = this.ctx, t = ctx.currentTime;
     const o = ctx.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.08);
     const g = ctx.createGain(); g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-    o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.15);
+    o.connect(g).connect(this.out); o.start(t); o.stop(t + 0.15);
   }
 
   starter() {
@@ -201,6 +205,6 @@ export class EngineAudio {
     lfo.connect(lg).connect(o.frequency);
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.15, t); g.gain.setValueAtTime(0.15, t + 0.6); g.gain.exponentialRampToValueAtTime(0.001, t + 0.75);
-    o.connect(f).connect(g).connect(ctx.destination); o.start(t); lfo.start(t); o.stop(t + 0.8); lfo.stop(t + 0.8);
+    o.connect(f).connect(g).connect(this.out); o.start(t); lfo.start(t); o.stop(t + 0.8); lfo.stop(t + 0.8);
   }
 }

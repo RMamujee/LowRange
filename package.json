@@ -1,15 +1,20 @@
 {
   "name": "lowrange",
-  "version": "1.0.0",
-  "description": "Low Range: a browser 4x4 rock-crawling sim with solid-axle physics, a manual drivetrain and rated trails (Three.js + Rapier)",
+  "productName": "LowRange",
+  "version": "0.1.0",
+  "description": "LowRange: a 4x4 rock-crawling sim with solid-axle physics, a manual drivetrain and rated trails (Three.js + Rapier). Runs in the browser or as an offline Windows desktop game.",
   "scripts": {
     "test": "node test/brake.mjs",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "desktop": "vite build && electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "dist:win": "vite build && electron-builder --win nsis portable --x64 --publish never",
+    "smoke:desktop": "node test/desktop-smoke.mjs"
   },
   "keywords": [],
-  "author": "",
+  "author": "rmamujee",
   "license": "ISC",
   "type": "module",
   "dependencies": {
@@ -17,8 +22,75 @@
     "three": "^0.187.0"
   },
   "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
     "playwright": "^1.65.1",
     "vite": "^8.3.8"
   },
-  "private": "true"
+  "private": "true",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.rmamujee.lowrange",
+    "productName": "LowRange",
+    "copyright": "Copyright (c) 2026 rmamujee",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "LowRange"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LowRange",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "LowRange",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "LowRange-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "LowRange-${version}-portable.${ext}"
+    }
+  }
 }

@@ -11,6 +11,8 @@ import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBas
 import { EngineAudio } from './audio.js';
 import { applyBuild, loadBuild, isStock, stats } from './garage.js';
 import { Garage } from './garage_ui.js';
+import { initSettings } from './settings.js';
+import './platform.js';
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -100,6 +102,7 @@ function updateParticles(dt) {
 
 // ---------------- game state ----------------
 const audio = new EngineAudio();
+initSettings({ renderer, scene, sun, camera, audio });
 let car = null, view = null, spec = null;
 let selected = 0;
 let playing = false;
