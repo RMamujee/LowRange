@@ -1,4 +1,4 @@
-﻿# Preview-only look for the lc70 build: stepped warm toon light, inverted-hull outlines, low-res render
+# Preview-only look for the lc70 build: stepped warm toon light, inverted-hull outlines, low-res render
 # upscaled with nearest neighbour. Runs AFTER the glb export, so nothing here reaches the game file.
 import os
 import math

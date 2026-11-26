@@ -1,4 +1,4 @@
-﻿# LowRange lc70 (cream 70-series-style wagon), v2.
+# LowRange lc70 (cream 70-series-style wagon), v2.
 # Run headless:
 #   "C:\Program Files\Blender Foundation\Blender 5.3\blender.exe" --background --python tools/blender/build_lc70_v2.py
 # Builds the model from lofted profiles, paints pixel textures in code (lc70_tex.py), exports
