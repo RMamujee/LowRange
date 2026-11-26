@@ -2,7 +2,7 @@
 // heightfield grid, the convex-rock kit and the Rapier terrain colliders.
 // No three.js here so maps can be built headless in Node for physics tests.
 
-export const MAT = { GRASS: 0, DIRT: 1, ROCK: 2, MUD: 3, SAND: 4, GRAVEL: 5, ROAD: 6, TARMAC: 7, WATER: 8 };
+export const MAT = { GRASS: 0, DIRT: 1, ROCK: 2, MUD: 3, SAND: 4, GRAVEL: 5, ROAD: 6, TARMAC: 7, WATER: 8, WOOD: 9 };
 export const MAT_INFO = [
   // mu: tyre friction, rr: rolling resistance (x wheel load), drag: viscous drag through the medium
   // color: sRGB 0..1 for the HUD, minimap and dust; the base tone of each ground ramp (src/gfx/palette.js)
@@ -15,6 +15,8 @@ export const MAT_INFO = [
   { name: 'Road',   mu: 0.80, rr: 0.015, drag: 0,   color: [0.91, 0.72, 0.37] },
   { name: 'Tarmac', mu: 0.95, rr: 0.012, drag: 0,   color: [0.31, 0.29, 0.26] },
   { name: 'Water',  mu: 0.60, rr: 0.050, drag: 90,  color: [0.36, 0.69, 0.80] },
+  // not a ground surface: loose logs and stumps (src/physics_props.js); bark is a bit slippery
+  { name: 'Wood',   mu: 0.60, rr: 0.015, drag: 0,   color: [0.55, 0.38, 0.22] },
 ];
 export const MUD_SINK = 0.38;
 export const DIFF = {
