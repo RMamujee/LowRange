@@ -1,0 +1,4 @@
+#lr-load { position: fixed; inset: 0; z-index: 50; overflow: hidden; background: #f3b562; cursor: default; user-select: none; }
+#lr-load canvas { position: absolute; image-rendering: crisp-edges; image-rendering: pixelated; }
+#lr-load.ready { cursor: pointer; }
+#lr-load .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

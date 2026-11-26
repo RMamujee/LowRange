@@ -18,11 +18,13 @@ await RAPIER.init();
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = H;
 world.numSolverIterations = 8;
+await window.__loadStage?.('Planting trees');
 const rocks = generateRocks();
 const trees = generateTrees(rocks);
 const terrain = buildTerrainPhysics(RAPIER, world, rocks, trees);
 
 // ---------------- rendering ----------------
+await window.__loadStage?.('Fuelling up');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
 renderer.setSize(innerWidth, innerHeight);
