@@ -26,6 +26,8 @@ export async function loadArtAssets(base = './models/') {
 }
 
 export const getAsset = (name) => ASSETS.get(name) || null;
+// headless tests register glTF scenes they parsed themselves (test/lib/glb.mjs)
+export const registerAsset = (name, scene) => { ASSETS.set(name, scene); };
 // every variant of a prop: 'tree_round' matches tree_round.glb and tree_round_a/_b/_c.glb
 export const assetVariants = (name) => [...ASSETS.keys()].filter((k) => k === name || new RegExp(`^${name}_[a-z]$`).test(k)).sort();
 

@@ -56,7 +56,7 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 - **Suspension:** solid axles on links (articulation, diff hang-ups, axle wrap) or independent double-wishbone style, with springs, dampers, bump stops and anti-roll bars.
 - **Drivetrain:** engine torque curve with an idle governor, a clutch you can slip or stall, a manual gearbox, a 2-speed transfer case (high/low), 2WD/4WD, open or locked front and rear diffs. Everything is solved as one exact constraint system each physics step, so 80:1 crawl ratios stay stable.
 - **Tyres:** a custom friction model on every contact patch, so a tyre pushing into a rock face can climb it. Grip and side force share one friction budget (spinning tyres lose sideways grip), and grip varies by surface: rock, dirt, gravel, sand, mud. You can air down for more grip.
-- **Damage:** hard landings and impacts bend suspension, flatten tyres, dent body panels, hurt the engine and can tear wheels off.
+- **Crash damage** (`src/damage/`): crawling, bumps and small drops are damage-free; only real impacts count. Each hit on the body or axles is measured as energy (contact impulse times closing speed over the whole contact, per kg of truck), so a resting or sliding contact, a light loose rock or a wedged tyre never damages anything, and nothing under about 11 km/h of closing speed does. Energy past an elastic share crumples the body through a deformation cage at the actual contact point: soft crumple zones front and rear, a stiff cabin, roofs that cave in on landings and tumbles, fenders folding onto tyres, buckling metal. Glass cracks, then drops out; lamps break; bumpers, mirrors, spare wheels, roof racks and wings tear off as loose parts. Where the hit lands decides the consequences: radiator holed (overheating, steam, power loss, then a seized engine), engine pushed back, a corner's suspension bent (pull to one side, sag, a wobbling bent wheel, only a violent hit takes a wheel off), a fender rubbing a tyre, a bent or snapped rear driveshaft, a cracked oil pan or diff. Backspace repairs on the spot, and so do Restart and Y.
 - **Terrain:** three maps, picked in the menu or with `?map=park|race|crawl` (see *Maps*).
 
 ## Maps
@@ -114,11 +114,14 @@ Headless physics checks run in Node, for example:
 - `node test/obstacle.mjs ledge`: ledge climbing
 - `node test/trails.mjs lc70,taco,wrx 240`: an autopilot drives each trail
 - `node test/damage.mjs`: drop and wall-impact damage
+- `node test/crash.mjs [ids] [scenario]`: crash scenarios on the real glTF bodies (drops, roof drop, walls at 10/30/60 km/h, tree, rollover, rear hit, belly, crawling, repair, respawn leaks) with damage / deformation numbers and tuning asserts
+- `node test/slowcrawl.mjs`: slow-speed abuse (ledge drop, full-throttle ledge climb, wedged tyre, rock under a wheel, loose stones) must do no damage; `node --import ./test/lib/damage_watch.mjs test/trails.mjs ...` (or `test/crawl.mjs`, `test/race.mjs` with the matching `MAP=`) adds a worst-damage summary to any autopilot
 - `node test/crawl.mjs lc70,taco,wrx [fromStage] [toStage]`: autopilot on The Gauntlet, furthest stage and time per stage
 - `node test/crawlcheck.mjs`: The Gauntlet by the numbers (step heights against measured limits, clear lanes, grades); `node test/crawlcourse.mjs`: its run logic
 - `node test/stairgrade.mjs <ids> <grades> <rises>`: how tall a staircase each rig walks
 
 With the dev server running (`npx vite --port 5841`), browser checks use Playwright with a Chromium path in `CHROME`:
 
+- `PORT=5841 node test/crashshots.mjs <outdir>`: before/after crash shots per rig (barrier hits, drops, roof, tumble, tree, in-place repair); finals in `docs/previews/crash_*.png`
 - `PORT=5841 node test/hud.mjs`: the pixel HUD (stick shifter through every gear, parking brake on a slope, pause / resume, map waypoints + persistence, trail toasts, race laps)
 - `PORT=5841 node scripts/hud-mockup.mjs`: regenerates the HUD review sheets in `docs/previews/hud_*.png`
