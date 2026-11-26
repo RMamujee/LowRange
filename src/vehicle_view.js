@@ -294,7 +294,7 @@ function buildBody(spec) {
   const glass = std(0x26323e, { roughness: 0.12, metalness: 0.2 });
   const steel = std(0x9a9ea4, { metalness: 0.3, roughness: 0.4 });
   const chrome = std(0xd0d3d8, { metalness: 0.4, roughness: 0.25 });
-  const rimMat = std(RIM[spec.body] ?? 0x9aa0a6, { metalness: 0.3, roughness: 0.4 });
+  const rimMat = std(spec.rimColor ?? RIM[spec.body] ?? 0x9aa0a6, { metalness: 0.3, roughness: 0.4 });
   if (spec.body === 'taco' || spec.body === 'lc70' || spec.body === 'wrx') {
     const S = new THREE.Group(); // extruded shell panels (a group so rig views can hide them)
     g.add(S); g.userData.shell = S;
@@ -389,11 +389,13 @@ function buildWheel(spec) {
   tire.rotation.z = Math.PI / 2; tire.castShadow = true;
   // tread lugs, wrapping slightly onto the shoulders
   const lugs = [];
-  const n = spec.body === 'wrx' ? 22 : 18;
+  // garage tread: mud-terrains get fewer, chunkier lugs; rock compound sits in between
+  const lug = { mt: [0.72, 1.35], rock: [0.85, 1.15] }[t.tread] || [1, 1];
+  const n = Math.round((spec.body === 'wrx' ? 22 : 18) * lug[0]);
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     for (const side of [-1, 1]) {
-      const l = new THREE.BoxGeometry(t.width * 0.5, t.radius * 0.09, t.radius * 0.2);
+      const l = new THREE.BoxGeometry(t.width * 0.5, t.radius * 0.09 * lug[1], t.radius * 0.2 * lug[1]);
       l.translate(side * t.width * 0.26, t.radius * 0.955, (i % 2 ? 0.03 : -0.03) * side);
       l.rotateX(a + (side > 0 ? 0.08 : 0));
       lugs.push(l);
@@ -401,7 +403,7 @@ function buildWheel(spec) {
   }
   const lugMesh = new THREE.Mesh(mergeGeometries(lugs), rubber);
   lugMesh.castShadow = true;
-  const rimMat = std(RIM[spec.body] ?? 0x9aa0a6, { metalness: 0.3, roughness: 0.4 });
+  const rimMat = std(spec.rimColor ?? RIM[spec.body] ?? 0x9aa0a6, { metalness: 0.3, roughness: 0.4 });
   const rimR = t.radius * (spec.body === 'wrx' ? 0.62 : 0.56);
   const rim = new THREE.Mesh(new THREE.CylinderGeometry(rimR, rimR, t.width * 1.02, 12), rimMat);
   rim.rotation.z = Math.PI / 2;
@@ -516,7 +518,8 @@ export class VehicleView {
     const [cw, ch, cl] = spec.chassis.size;
     this.root = new THREE.Group();
     scene.add(this.root);
-    this.body = buildBody(spec);
+    // a garage lift moves the axles down (spec.axleY); body panels keep their stock height
+    this.body = buildBody(spec.bodyAxleY !== undefined ? { ...spec, axleY: spec.bodyAxleY } : spec);
     this.root.add(this.body);
     this.wheels = [0, 1, 2, 3].map(() => { const w = buildWheel(spec); this.root.add(w); return w; });
 
