@@ -99,6 +99,25 @@ function emit(x, y, z, vx, vy, vz, col, life) {
   const p = parts[pNext]; pNext = (pNext + 1) % PMAX;
   Object.assign(p, { x, y, z, vx, vy, vz, life, r: col[0], g: col[1], b: col[2] });
 }
+// [crash] one crash effect (src/damage/crash.js fx): flakes of paint and grit plus a dust puff at
+// the hit, glass glitter when a pane drops out; a clunk / grind on the audio module's one-shots
+const _paint = new THREE.Color();
+function crashFx(f) {
+  const glass = f.kind === 'glass' || f.kind === 'crack';
+  const n = Math.min(26, Math.round((glass ? 6 : 3) + f.e * 0.5));
+  _paint.set(spec.color ?? 0x888888);
+  for (let i = 0; i < n; i++) {
+    const r = Math.random();
+    const col = glass ? [0.78, 0.86, 0.9] : r < 0.4 ? [_paint.r, _paint.g, _paint.b] : r < 0.65 ? [0.22, 0.22, 0.24] : [0.62, 0.55, 0.45];
+    const s = glass ? 1.2 : 1.6 + Math.min(2, f.e * 0.05);
+    emit(f.p.x + (Math.random() - 0.5) * 0.3, f.p.y + (Math.random() - 0.5) * 0.3, f.p.z + (Math.random() - 0.5) * 0.3,
+      (Math.random() - 0.5) * s - (f.n ? f.n.x : 0) * 0.8, Math.random() * s * 0.8 + 0.4, (Math.random() - 0.5) * s - (f.n ? f.n.z : 0) * 0.8, col, 0.6 + Math.random() * 0.6);
+  }
+  if (f.kind === 'crack' || clock - crashSoundAt < 0.15) return;
+  crashSoundAt = clock;
+  if (f.e > 6 || f.kind === 'detach') audio.clunk(); else if (f.kind === 'scrape') audio.grind();
+}
+let crashSoundAt = -1;
 function updateParticles(dt) {
   for (let i = 0; i < PMAX; i++) {
     const p = parts[i];
@@ -707,6 +726,9 @@ function frame(now) {
     looseProps.update(car.chassis.translation()); looseProps.sync(); // [physics props]
     view.update(playing ? input : null);
     updateCamera(dt);
+    // [crash] a brief, gentle camera shake proportional to the crash energy (smooth, not jitter)
+    const shk = car.crash.shake;
+    if (shk > 0.01) camera.position.add(_v.set(Math.sin(clock * 37), Math.sin(clock * 29 + 1) * 0.6, Math.sin(clock * 41 + 2)).multiplyScalar(shk * 0.06));
     if (playing) {
       game.dist += Math.abs(car.speed()) * dt;
       if (!game.done) game.time += dt;
@@ -720,6 +742,13 @@ function frame(now) {
       if (parkBrake && input.throttle > 0.6 && car.dt.gear !== 0 && Math.abs(car.speed()) < 1 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2);
       updateHud(dt);
       while (car.damageEvents.length) { toast(car.damageEvents.shift(), 3); audio.grind(); }
+      // [crash] crash effects from src/damage/crash.js: debris and dust at the hit, glass glitter, steam
+      for (const f of car.crash.fx.splice(0)) crashFx(f);
+      const mech = car.crash.mech;
+      if ((mech.temp > 0.7 || mech.radiator < 0.6) && car.dt.running && Math.random() < (mech.temp > 0.7 ? 0.6 : 0.25)) {
+        const hp = new THREE.Vector3((Math.random() - 0.5) * 0.6, spec.chassis.size[1] / 2 + 0.3, -spec.chassis.size[2] * 0.42).applyQuaternion(_q).add(car.chassis.translation());
+        emit(hp.x, hp.y, hp.z, (Math.random() - 0.5) * 0.5, 1.4 + Math.random(), (Math.random() - 0.5) * 0.5, [0.92, 0.93, 0.95], 1.1);
+      }
       if (car.health.engine < 0.5 && Math.random() < (0.5 - car.health.engine) * 1.5) {
         const hp = new THREE.Vector3(0, spec.chassis.size[1] / 2 + 0.6, -spec.chassis.size[2] * 0.35).applyQuaternion(_q).add(car.chassis.translation());
         const gsh = car.dt.dead ? 0.15 : 0.45;
