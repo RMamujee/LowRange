@@ -141,10 +141,10 @@ function spawn(i, opts) {
 }
 
 // Swap in a brand-new (fully repaired) truck at a pose, keeping the driver's settings.
-function respawnFresh(x, z, yaw) {
+function respawnFresh(x, z, yaw, lift = 0.3) {
   const old = car.dt, aired = car.airedDown, rsteer = car.rearSteerOn;
   car.destroy(); view.dispose();
-  const y = heightAt(x, z) + spec.tire.radius - spec.axleY + 0.3;
+  const y = heightAt(x, z) + spec.tire.radius - spec.axleY + lift;
   car = new Vehicle(RAPIER, world, spec, terrain, { x, y, z }, yaw);
   view = new VehicleView(scene, car);
   const d = car.dt;
@@ -162,10 +162,23 @@ function trailUnderTruck() {
   return id >= 0 && id < TRAILS.length ? { trail: id, from: 0 } : null;
 }
 
+// Backspace: right the truck and repair it on the spot (trail run keeps going).
 function recover() {
   if (!car) return;
+  const p = car.chassis.translation();
+  const { heading } = car.attitude();
+  const keep = game.active;
+  respawnFresh(p.x, p.z, heading, 1.0);
+  game.active = keep;
+  toast('Repaired and back on your wheels', 2);
+}
+
+// Y: restart the trail you're on from its start.
+function restartTrail() {
+  if (!car) return;
   const on = trailUnderTruck();
-  if (on) {
+  if (!on) { toast('You are not on a trail'); return; }
+  {
     // on a trail: back to the start you entered from, repaired, timer restarted
     const t = TRAILS[on.trail];
     const p = pathPoint(t, on.from === 0 ? 7 : t.length - 7);
@@ -173,13 +186,7 @@ function recover() {
     respawnFresh(p.x, p.z, yaw);
     game.active = { trail: on.trail, from: on.from, t: 0 };
     toast(`Back to the start of ${t.name}, fully repaired`, 2.5);
-    return;
   }
-  const p = car.chassis.translation();
-  const { heading } = car.attitude();
-  const y = Math.max(heightAt(p.x, p.z), p.y - 1) + spec.tire.radius - spec.axleY + 1.2;
-  car.reset({ x: p.x, y, z: p.z }, heading);
-  toast('Recovered');
 }
 
 // ---------------- HUD ----------------
@@ -350,7 +357,7 @@ const CONTROLS = [
   ['W / S', 'throttle / brake'], ['A / D', 'steer'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
   ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['B', 'handbrake'], ['I', 'start engine'],
-  ['C', 'auto-clutch on/off'], ['Backspace', 'recover (trail: back to start, repaired)'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
+  ['C', 'auto-clutch on/off'], ['Backspace', 'repair + right the truck, on the spot'], ['Y', 'restart current trail'],, ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch'], ['H / Esc', 'help / garage'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('');
@@ -360,7 +367,7 @@ $('menuControls').innerHTML = controlsHtml;
 // keyboard key -> action
 const KEYMAP = {
   KeyR: 'range', KeyQ: 'lockF', KeyE: 'lockR', KeyF: '4wd', KeyG: 'rsteer', KeyT: 'tyres', KeyI: 'ignition',
-  KeyC: 'autoclutch', Backspace: 'recover', KeyV: 'camera', KeyM: 'mute', KeyH: 'help',
+  KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyM: 'mute', KeyH: 'help',
   PageUp: 'up', PageDown: 'down',
 };
 
@@ -381,6 +388,7 @@ function action(name) {
     case 'ignition': if (d.running) msg = 'Engine already running'; else { msg = d.startEngine(); if (!msg) audio.starter(); } break;
     case 'autoclutch': d.autoClutch = !d.autoClutch; toast(d.autoClutch ? 'Auto-clutch ON' : 'Manual clutch: Space is your clutch pedal. Stalls are real now.'); break;
     case 'recover': recover(); break;
+    case 'restart': restartTrail(); break;
     case 'camera': camState.mode = (camState.mode + 1) % CAM_MODES.length; camState.spot = null; toast(CAM_MODES[camState.mode] + ' camera', 1.2); break;
     case 'mute': audio.setMuted(!audio.muted); toast(audio.muted ? 'Muted' : 'Sound on', 1.2); break;
     case 'help': $('help').classList.toggle('hidden'); break;

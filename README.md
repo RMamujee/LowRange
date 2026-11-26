@@ -50,7 +50,8 @@ npm run dev      # http://localhost:5199
 | B | handbrake |
 | I | start engine |
 | C | auto-clutch on/off |
-| Backspace | recover (on a trail: back to its start, repaired) |
+| Backspace | repair and right the truck where it is |
+| Y | restart the current trail |
 | V | camera |
 | Z / X | zoom |
 | Mouse drag | orbit the camera |

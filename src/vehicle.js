@@ -408,7 +408,7 @@ export class Vehicle {
       let F = 0, rock = false;
       for (const ev of byWheel[i]) { F += len(ev.F); if (this.terrain.rockHandles.has(ev.other.handle)) rock = true; }
       const gi = F / Wst;
-      if (gi > 13) this.damageWheel(i, (gi - 13) * 0.007, rock && gi > 16 ? (gi - 16) * 0.01 : 0);
+      if (gi > 18) this.damageWheel(i, (gi - 18) * 0.0035, rock && gi > 24 ? (gi - 24) * 0.005 : 0);
     }
     // 2. grip rows. Extra DOFs: chassis linear velocity (world, 3), chassis angular
     // velocity (body frame, 3), and each wheel's unsprung velocity along the suspension
@@ -515,8 +515,8 @@ export class Vehicle {
   bodyImpact(f, mag) {
     const M = this.mass;
     const g = mag / (M * G);
-    if (g < 5 || this.grace > 0) return;
-    const amt = (g - 5) * 0.004;
+    if (g < 8 || this.grace > 0) return;
+    const amt = (g - 8) * 0.0025;
     const cq = this.chassis.rotation();
     const n = qrot(qconj(cq), scale(f, 1 / Math.max(1e-6, mag))); // push direction, chassis-local
     const [cw, ch, cl] = this.spec.chassis.size;
@@ -527,7 +527,7 @@ export class Vehicle {
     h.body = Math.max(0, h.body - amt * 0.5);
     if (n.z > 0.5) { // hit from the front: radiator / engine
       const before = h.engine;
-      h.engine = Math.max(0, h.engine - amt * 0.8);
+      h.engine = Math.max(0, h.engine - amt * 0.5);
       if (before >= 0.5 && h.engine < 0.5) this.damageEvents.push('Engine damaged: losing power');
       if (h.engine <= 0.08 && !this.dt.dead) { this.dt.dead = true; this.dt.running = false; this.damageEvents.push('Engine destroyed'); }
     }
