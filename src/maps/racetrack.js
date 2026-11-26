@@ -198,15 +198,16 @@ function bake() {
           // a firmer swept line (dirt) runs through the bends towards the inside; off it the
           // surface is loose gravel marbles, a little less grip
           const lineLat = -clamp(c.bank * 8, -1, 1) * (HW - 3), offLine = Math.abs(c.lat - lineLat) > 4.0;
-          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : (offLine ? tn > 0.15 : tn > 0.55) ? MAT.GRAVEL : MAT.DIRT;
+          mat = inR(c.s, F.tarmac) ? MAT.TARMAC : F.gravel.some((g) => inR(c.s, g)) ? (tn > 0.45 ? MAT.DIRT : MAT.GRAVEL) : (offLine ? tn > 0.15 : tn > 0.4) ? MAT.GRAVEL : MAT.DIRT;
           if (inRocks) mat = MAT.ROCK;
-          // the splash's surrounds churn to mud along the track edges (the line stays firm)
-          if (water && c.s > water.s0 - 12 && c.s < water.s1 + 12 && c.d > HW - 2.6 && !inRocks) {
-            const ruts = 0.05 * (0.6 + 0.8 * clamp(fbm(x * 0.2, z * 0.2, 2) + 0.5, 0, 1));
-            mat = MAT.MUD; h -= 0.06 + ruts; vis = h + 0.06 + ruts * 0.4; GRID.tone[idx] = Math.min(255, Math.round(120 + ruts * 1500));
-          }
           GRID.path[idx] = 0; // worn, darker racing surface
         } else if (c.d < HW + 1.6 && !inR(c.s, F.tarmac)) mat = MAT.GRAVEL; // loose verge, then the field
+        // the splash's surrounds churn to mud: the outer metre of the track and the verge (the
+        // racing line stays firm; a wheel dropped in drags, sinks and sprays)
+        if (water && c.s > water.s0 - 12 && c.s < water.s1 + 12 && c.d > HW - 1.0 && c.d < HW + 3 && !inRocks) {
+          const ruts = 0.05 * (0.6 + 0.8 * clamp(fbm(x * 0.2, z * 0.2, 2) + 0.5, 0, 1));
+          mat = MAT.MUD; h -= 0.06 + ruts; vis = h + 0.06 + ruts * 0.4; GRID.tone[idx] = Math.min(255, Math.round(120 + ruts * 1500));
+        }
         if (water && c.s > water.s0 && c.s < water.s1 && h < water.y && c.d < HW + 3) mat = MAT.WATER;
       }
       GRID.h[idx] = h; GRID.vis[idx] = vis ?? h; GRID.mat[idx] = mat;
