@@ -321,6 +321,8 @@ export class Vehicle {
 
   matOf(collider, p) {
     if (this.terrain.rockHandles.has(collider.handle)) return MAT.ROCK;
+    const prop = this.terrain.propInfo && this.terrain.propInfo.get(collider.handle); // loose rocks / logs (physics_props.js)
+    if (prop) return prop.mat;
     if (collider.handle === this.terrain.ground.handle) return materialAt(p.x, p.z);
     return MAT.DIRT;
   }
@@ -399,7 +401,10 @@ export class Vehicle {
         }
         const e = cross(n, d);
         const vp = add(lv, cross(kv, r));
-        patches.push({ wheel: i, p, n, d, e, k, vp, N: len0, mat: this.matOf(ev.other, p) });
+        // a loose prop under the tyre (physics_props.js): see step 2
+        const ob = ev.other.parent();
+        const dyn = ob && ob.isDynamic() && this.terrain.propInfo && this.terrain.propInfo.get(ev.other.handle);
+        patches.push({ wheel: i, p, n, d, e, k, vp, N: len0, mat: this.matOf(ev.other, p), ob: dyn ? ob : null, prop: dyn || null });
         this.wheelState[i].contact = true;
       }
     }
@@ -425,11 +430,69 @@ export class Vehicle {
       const tq = qrot(inv, cross(sub(pt.p, com), dh));
       const pairs = [7, dh.x, 8, dh.y, 9, dh.z, 10, tq.x, 11, tq.y, 12, tq.z, 13 + pt.wheel, dot(dir, up)];
       if (dir === pt.d && pt.k) pairs.push(3 + pt.wheel, pt.k);
+      if (pt.pr) { // the prop's surface velocity at the patch moves the other way
+        const b = pt.pr.base, tp = qrot(pt.pr.inv, cross(sub(pt.p, pt.pr.com), dir));
+        pairs.push(b, -dir.x, b + 1, -dir.y, b + 2, -dir.z, b + 3, -tp.x, b + 4, -tp.y, b + 5, -tp.z);
+      }
       const row = { pairs, v0, lo: -cap, hi: cap };
       extra.rows.push(row);
       return row;
     };
     for (let k = patches.length - 1; k >= 0; k--) if (this.broken[patches[k].wheel]) patches.splice(k, 1);
+    // Loose props under a tyre (physics_props.js). Two modes per prop:
+    //  - loose (rolling, sliding, kicked, airborne): it joins the solve as a body of 6 DOFs
+    //    (linear in world axes, angular in its principal frame), so a grip row's effective
+    //    mass includes the prop's mass and inertia at the contact point: a pebble can't react
+    //    like the planet, and the solve can't over-correct against it. Slip is measured
+    //    relative to its surface, and it gets the equal and opposite impulse at the patch, so
+    //    tyres spit stones back and logs roll under a climbing tyre. Ground-hold rows predict
+    //    what the ground will do to it next step (not applied: the engine's contacts do that):
+    //    friction at its resting point (mu x load), its footprint against tipping (load x
+    //    arm; a log has almost none about its long axis, so it rolls) and twisting.
+    //  - held: once it has rested with the tyres on it standing still (not rolling, not
+    //    spinning) for 0.1 s, i.e. a parked or held truck pins it, it is treated as static
+    //    ground and the reaction goes straight into the ground, until the tyres on it roll or
+    //    spin again for 0.1 s, or their total force on it (normal + grip) beats mu_ground x
+    //    its pressed-down load for 50 ms. (The single-point ground model can't match the
+    //    engine's multi-point contact under a parked tyre; solved as a body there, a pinned
+    //    stone rattles.)
+    const props = [];
+    for (const pt of patches) {
+      if (!pt.ob) continue;
+      let pr = props.find((q) => q.body === pt.ob);
+      if (!pr) props.push(pr = { body: pt.ob, info: pt.prop, load: pt.ob.mass() * G, anchors: [] });
+      pr.load += Math.max(0, pt.n.y) * pt.N; // the tyre pressing the prop into the ground
+      pt.pr0 = pr;
+      // the tyre standing still on it (neither rolling nor spinning): it must be pinned
+      if (len(pt.vp) > 0.15 || Math.abs(dot(pt.vp, pt.d) + pt.k * spins[pt.wheel]) > 0.15) pr.moving = true;
+    }
+    for (const pr of props) {
+      const c = pr.body.collider(0);
+      world.contactPairsWith(c, (o) => {
+        if (pr.rest || o.collisionGroups() === GROUP_VEHICLE) return;
+        world.contactPair(c, o, (mf) => { if (mf.numContacts() > 0) pr.rest = true; });
+      });
+      if (!pr.rest) pr.info.held = false;
+      pr.held = !!pr.info.held;
+      if (pr.held) continue;
+      const b = pr.body, m = b.mass(), ip = b.principalInertia();
+      pr.base = 7 + extra.I.length; pr.com = b.worldCom();
+      pr.inv = qconj(qmul(b.rotation(), b.principalInertiaLocalFrame()));
+      extra.I.push(m, m, m, Math.max(1e-3, ip.x), Math.max(1e-3, ip.y), Math.max(1e-3, ip.z));
+      if (!pr.rest) continue;
+      const q = pr.info.lowest(), rq = sub(q, pr.com), wv = b.angvel(), vq = b.velocityAtPoint(q), k = pr.base;
+      for (const ax of [v(1, 0, 0), v(0, 0, 1)]) {
+        const tl = qrot(pr.inv, cross(rq, ax)), capF = 0.8 * pr.load * h;
+        const row = { pairs: [k, ax.x, k + 1, ax.y, k + 2, ax.z, k + 3, tl.x, k + 4, tl.y, k + 5, tl.z], v0: dot(vq, ax), lo: -capF, hi: capF };
+        extra.rows.push(row); pr.anchors.push(row);
+        const ta = qrot(pr.inv, ax), capT = pr.load * pr.info.arm(ax) * h;
+        const rowT = { pairs: [k + 3, ta.x, k + 4, ta.y, k + 5, ta.z], v0: dot(wv, ax), lo: -capT, hi: capT };
+        extra.rows.push(rowT); pr.anchors.push(rowT);
+      }
+      const ty = qrot(pr.inv, v(0, 1, 0)), capY = 0.8 * pr.load * pr.info.arm(v(0, 1, 0)) * h;
+      extra.rows.push({ pairs: [k + 3, ty.x, k + 4, ty.y, k + 5, ty.z], v0: wv.y, lo: -capY, hi: capY });
+    }
+    for (const pt of patches) if (pt.pr0 && !pt.pr0.held) { pt.pr = pt.pr0; pt.vp = sub(pt.vp, pt.ob.velocityAtPoint(pt.p)); }
     for (const pt of patches) {
       const s = spins[pt.wheel];
       const slipL = dot(pt.vp, pt.d) + pt.k * s;
@@ -465,7 +528,30 @@ export class Vehicle {
       const Pu = scale(up, dot(P, up));
       this.wheels[pt.wheel].applyImpulse(Pu, true);
       this.chassis.applyImpulseAtPoint(sub(P, Pu), pt.p, true);
+      if (pt.pr) pt.ob.applyImpulseAtPoint(scale(P, -1), pt.p, true); // equal and opposite on a loose prop
+      else if (pt.pr0) { // held: sum what the tyre puts on it (force), for the hold check below
+        const R = pt.pr0.R ||= v(0, 0, 0), F = add(scale(pt.n, pt.N), scale(P, 1 / h));
+        R.x -= F.x; R.y -= F.y; R.z -= F.z;
+      }
       pt.imp = L; pt.lat = A;
+    }
+    for (const pr of props) {
+      const inf = pr.info;
+      if (pr.held) { // can the ground still hold it?
+        const R = pr.R || v(0, 0, 0);
+        inf.over = Math.hypot(R.x, R.z) > 0.8 * 1.15 * (pr.body.mass() * G + Math.max(0, -R.y)) ? (inf.over || 0) + 1 : 0;
+        inf.movT = pr.moving ? (inf.movT || 0) + h : 0;
+        if (inf.over >= 10) { // overloaded for 50 ms: breaks loose, and takes this step's push
+          inf.held = false; inf.holdT = 0;
+          for (const pt of patches) if (pt.pr0 === pr) pt.ob.applyImpulseAtPoint(scale(add(scale(pt.d, pt.imp), scale(pt.e, pt.lat)), -1), pt.p, true);
+        } else if (inf.movT >= 0.1) { inf.held = false; inf.holdT = 0; } // driven on again
+      } else { // resting under a standing tyre for 0.1 s: held
+        inf.holdT = pr.rest && !pr.moving ? (inf.holdT || 0) + h : 0;
+        if (inf.holdT >= 0.1) { // pinned: drop the jiggle left over from being solved as loose
+          inf.held = true; inf.over = 0;
+          pr.body.setLinvel(v(0, 0, 0), true); pr.body.setAngvel(v(0, 0, 0), true);
+        }
+      }
     }
     for (let i = 0; i < 4; i++) {
       if (this.broken[i]) { this.wheelState[i].grounded = false; continue; }

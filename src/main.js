@@ -16,6 +16,7 @@ import { PixelPipeline, noOutline } from './gfx/pipeline.js';
 import { SKY as SKY_COL, FOG as FOG_COL, SKY_BANDS } from './gfx/palette.js';
 import { createHud } from './hud/hud.js';
 import './platform.js';
+import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics props]
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -62,6 +63,10 @@ const SUN_DIR = new THREE.Vector3(-0.45, 0.8, 0.35).normalize();
 scene.add(buildTerrainMesh());
 scene.add(buildRocks(rocks));
 scene.add(buildTrees(trees));
+// [physics props] loose stones and logs near the truck become real bodies (src/physics_props.js)
+const looseProps = new PropPhysics(RAPIER, world, terrain, { heightAt });
+adoptDressing(scene.getObjectByName('dressing'), looseProps);
+window.__props = looseProps;
 // grass tufts are too small for outlines: draw them on the pipeline's no-outline layer
 scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutline(o); });
 const isRace = MAP_KIND === 'race';
@@ -590,6 +595,7 @@ function frame(now) {
       acc -= H; n++;
     }
     if (n === MAX_STEPS) acc = 0;
+    looseProps.update(car.chassis.translation()); looseProps.sync(); // [physics props]
     view.update(playing ? input : null);
     updateCamera(dt);
     if (playing) {
