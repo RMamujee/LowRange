@@ -18,8 +18,17 @@
 import * as THREE from 'three';
 import { OUTLINE, SKY_BANDS } from './palette.js';
 import { installToon, setToonSun, OUTLINE_ID } from './toon.js';
+import { TEX_BIAS } from './pixeltex.js';
 
 export const NO_OUTLINE_ORDER = 10; // renderOrder for noOutline() objects: after other opaques
+// outline colour: surface colour x LINE[0], LINE[1] of the way to the outline brown, LINE[2] strength
+// (was 0.3 / 0.7 / 1: a near-black line on everything, the main source of edge density)
+export const LINE = [0.38, 0.5, 1.0];
+
+// Display grade shared by every pipeline (game and garage preview), set by settings.js (COMFORT
+// presets and the Brightness / Contrast / Saturation sliders): see the end of FRAG.
+const GRADE = { brightness: 1, contrast: 1, saturation: 1, knee: 1, lift: 0, vignette: 0 };
+export function setDisplayGrade(g) { Object.assign(GRADE, g); }
 
 const VERT = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const FRAG = /* glsl */ `
@@ -30,7 +39,10 @@ uniform vec2 uNearFar;
 uniform vec2 uFog;        // fog near, far (view distance)
 uniform vec3 uOutline;
 uniform float uEdge;      // outline threshold (relative 1/z error); <= 0 disables outlines
-uniform float uThick;     // closer than this (m), outlines are two pixels thick (0: never)
+uniform vec2 uThick;     // closer than x (m), outlines are two pixels thick (0: never); y: strength of that inner pixel
+uniform vec3 uLine;       // outline: own-colour factor, share of outline brown, strength
+uniform vec3 uGrade;      // display grade: brightness (gain), contrast, saturation
+uniform vec3 uKnee;       // shoulder knee (1 = off), black lift, vignette strength
 uniform bool uSkyOn;
 uniform vec3 uSky[5];     // stepped sky bands, horizon .. zenith (linear)
 uniform mat4 uProjInv, uCamWorld;
@@ -80,7 +92,9 @@ void main() {
     edge = max(edge, max(max(idEdge(id, w, ip + ivec2(-1, 0)), idEdge(id, w, ip + ivec2(1, 0))),
                          max(idEdge(id, w, ip + ivec2(0, -1)), idEdge(id, w, ip + ivec2(0, 1)))));
     float dist = 1.0 / w;
-    if (edge < 0.5 && dist < uThick) {
+    bool edge2 = false;
+    if (edge < 0.5 && dist < uThick.x) {
+      edge2 = true;
       // near the camera at fine pixel sizes: a second pixel of line inside the silhouette, so the
       // truck and close props keep the bold outline of the Blender previews (the same tests two
       // pixels out; a little stricter, as curved surfaces drift further from flat over two pixels)
@@ -91,16 +105,33 @@ void main() {
     float fogF = smoothstep(uFog.x, uFog.y, dist);
     // fade with distance (far silhouettes are a pixel or two wide and would only flicker); ground
     // against ground (a ridge over the valley behind it) only outlines close by
-    float fade = id == 1.0 ? 1.0 - smoothstep(25.0, 70.0, dist) : 1.0 - smoothstep(70.0, 180.0, dist);
+    float fade = id == 1.0 ? 1.0 - smoothstep(18.0, 55.0, dist) : 1.0 - smoothstep(40.0, 140.0, dist);
     // a feature one pixel thin (rack bar, rail, post, far branch: farther on both opposite sides)
     // is all outline; at this resolution it pops in and out from frame to frame, so it only gets
     // a light darkening and the flicker is a small tone change instead of a dark line blinking
     bool thin = (w > wl * 1.01 && w > wr * 1.01) || (w > wu * 1.01 && w > wd * 1.01);
-    // near the camera: a firm, full-strength dark line like the Blender previews
-    float a = edge * (1.0 - fogF * 0.7) * fade * (thin ? 0.45 : 1.0);
-    c = mix(c, mix(c * 0.3, uOutline, 0.7), a);
+    // (comfort) a coloured line: the surface's own colour taken well down and nudged towards the
+    // warm outline brown, rather than near-black; firm near the camera, lighter on ground ridges,
+    // and the second (inner) pixel of the bold near line is half strength so it tapers
+    float a = edge * (1.0 - fogF * 0.7) * fade * (thin ? 0.45 : 1.0) * (id == 1.0 ? 0.6 : 1.0) * (edge2 ? uThick.y : 1.0);
+    c = mix(c, mix(c * uLine.x, uOutline, uLine.y), a * uLine.z);
   }
-  gl_FragColor = sRGBTransferOETF(vec4(c, 1.0)); // stored display-ready in an 8-bit target
+  c = sRGBTransferOETF(vec4(c, 1.0)).rgb; // graded and stored display-ready in an 8-bit target
+  // comfort grade (settings: Brightness / Contrast / Saturation, Soft / Standard / Vivid):
+  // contrast pivots on a mid value so neither end clips; a soft shoulder rolls the brightest
+  // values off instead of clipping them; a lift keeps the deepest shades from going inky
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, uGrade.z);
+  c = (c - 0.45) * uGrade.y + 0.45;
+  c *= uGrade.x;
+  c = mix(c, 1.0 - (1.0 - uKnee.x) * exp(-(c - uKnee.x) / max(1.0 - uKnee.x, 1e-3)), step(uKnee.x, c)); // soft shoulder above the knee
+  c = uKnee.y + c * (1.0 - uKnee.y);
+  // vignette: a gentle darkening into the corners keeps the eye on the middle of the frame
+  // (r: 0 at the centre, 1 in the corners)
+  vec2 asp = vec2(uSize.x / uSize.y, 1.0);
+  float r = length(((vec2(ip) + 0.5) / uSize - 0.5) * asp) / (0.5 * length(asp));
+  c *= 1.0 - uKnee.z * smoothstep(0.55, 1.0, r);
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 // final blit: each internal pixel becomes an exact uScale x uScale block on the canvas
 const BLIT = /* glsl */ `
@@ -150,7 +181,8 @@ export class PixelPipeline {
       uniforms: {
         tColor: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture },
         uSize: { value: new THREE.Vector2() }, uNearFar: { value: new THREE.Vector2() },
-        uFog: { value: new THREE.Vector2(1e6, 1e6) }, uOutline: { value: new THREE.Color(OUTLINE) }, uEdge: { value: 0.1 }, uThick: { value: 0 },
+        uFog: { value: new THREE.Vector2(1e6, 1e6) }, uOutline: { value: new THREE.Color(OUTLINE) }, uEdge: { value: 0.1 }, uThick: { value: new THREE.Vector2() },
+        uLine: { value: new THREE.Vector3(...LINE) }, uGrade: { value: new THREE.Vector3(1, 1, 1) }, uKnee: { value: new THREE.Vector3(1, 0, 0) },
         uSkyOn: { value: !!sky }, uSky: { value: (sky || SKY_BANDS).map((h) => new THREE.Color(h)) },
         uProjInv: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
       },
@@ -185,6 +217,13 @@ export class PixelPipeline {
     else r.setViewport(0, 0, dw, dh);
     this.scale = this.pixelSize ? Math.max(1, Math.round((dh * this.pixelSize) / 1080)) : Math.max(1, Math.round(dh / this.pixelHeight));
     this.w = Math.ceil(dw / this.scale); this.h = Math.ceil(dh / this.scale);
+    // HD at Sharp 1x: the scene is drawn at native resolution, so geometry edges get 4x
+    // multisampling (as HD-2D does: silhouettes anti-aliased, textures still crisp nearest-sampled
+    // pixel art, since MSAA only resolves coverage at triangle edges). At coarser pixel sizes every
+    // pixel stays one hard colour.
+    const samples = this.scale === 1 && this.msaa !== false ? 4 : 0;
+    if (this.rt.samples !== samples) { this.rt.samples = samples; this.rt.dispose(); }
+    this.texBias = Math.max(0, Math.log2(2 / this.scale));
     this.rt.setSize(this.w, this.h);
     this.rtPost.setSize(this.w, this.h);
     this.post.uniforms.uSize.value.set(this.w, this.h);
@@ -196,6 +235,7 @@ export class PixelPipeline {
     if (!this.w) this.setSize(innerWidth, innerHeight);
     applyCull(camera);
     setToonSun(sun);
+    TEX_BIAS.value = this.texBias || 0; // (per pipeline: the garage preview has its own scale)
     if (sun && sun.castShadow) snapShadow(sun);
     r.setRenderTarget(this.rt);
     r.render(scene, camera);
@@ -205,8 +245,13 @@ export class PixelPipeline {
     u.uProjInv.value.copy(camera.projectionMatrixInverse); u.uCamWorld.value.copy(camera.matrixWorld);
     if (scene.fog && scene.fog.isFog) u.uFog.value.set(scene.fog.near, scene.fog.far); else u.uFog.value.set(1e6, 1e6);
     u.uEdge.value = this.outline ? this.edge ?? 0.1 : 0;
-    // bold near outlines only when game pixels are fine (over 400 rows); chunky pixels are bold enough
-    u.uThick.value = this.h > 400 ? 24 : 0;
+    // bold near outlines only when game pixels are fine (over 400 rows); chunky pixels are bold enough.
+    // At HD 1x a one-pixel line is half the width it is at Fine 2x, so the two-pixel line reaches
+    // much further out and its inner pixel is firmer: about the same weight of line on screen
+    if (this.scale === 1 && this.h > 700) u.uThick.value.set(90, 0.8);
+    else u.uThick.value.set(this.h > 400 ? 24 : 0, 0.5);
+    u.uGrade.value.set(GRADE.brightness, GRADE.contrast, GRADE.saturation);
+    u.uKnee.value.set(GRADE.knee, GRADE.lift, this.vignette ?? GRADE.vignette);
     this.quad.material = this.post;
     r.setRenderTarget(this.rtPost);
     r.render(this.postScene, this.postCam);

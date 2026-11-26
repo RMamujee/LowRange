@@ -13,6 +13,7 @@ import { applyBuild, loadBuild, isStock, stats } from './garage.js';
 import { Garage } from './garage_ui.js';
 import { initSettings } from './settings.js';
 import { PixelPipeline, noOutline } from './gfx/pipeline.js';
+import { markWorld } from './gfx/toon.js'; // [gfx comfort]
 import { SKY as SKY_COL, FOG as FOG_COL, SKY_BANDS } from './gfx/palette.js';
 import { createHud } from './hud/hud.js';
 import './platform.js';
@@ -80,6 +81,9 @@ const gates = isRace ? [] : isCrawl ? crawlView.gates : buildMarkers(scene); // 
 const raceView = isRace ? buildRaceDressing(scene) : null;
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
 scene.add(buildBackdrop());
+// [gfx comfort] everything built so far is world: graded a step back so the vehicle (added
+// later, unmarked) stays the most saturated thing on screen (gfx/toon.js markWorld)
+markWorld(scene);
 
 // ---------------- particles (dust, mud, sand) ----------------
 const PMAX = 700;

@@ -11,7 +11,7 @@
 // surface, then snap that to 3 bands (warm hue-shifted shade, lit, highlight). Undersides get a
 // slightly deeper shade so forms read as light tops / dark bases. Specular is dropped (flat paint).
 import * as THREE from 'three';
-import { GROUND_GLSL, groundUniforms, LAYER_BOULDER } from './pixeltex.js';
+import { GROUND_GLSL, groundUniforms, LAYER_BOULDER, TEX_BIAS } from './pixeltex.js';
 import { FOG_MAX } from './palette.js';
 
 const col = (hex) => new THREE.Color(hex); // stored linear (ColorManagement converts from sRGB hex)
@@ -25,11 +25,20 @@ export const TOON = {
   uToonUnder: { value: 0.82 },                      // extra shade factor for down-facing surfaces
   uToonBands: { value: new THREE.Vector2(0.22, 0.86) }, // lit thresholds: shade|lit, lit|highlight
   uFogMax: { value: FOG_MAX },                      // fog never takes more than this share of a surface
+  uFogDesat: { value: 0.35 },                       // far surfaces lose this share of their saturation (atmospheric perspective)
+  // World grade (comfort): the big world surfaces (ground, rocks, trees, props: materials marked
+  // userData.world, see markWorld) sit back a step in saturation and value, so the vehicles, lamps
+  // and flowers, which are not marked, stay the most saturated things on screen.
+  uWorldGrade: { value: new THREE.Vector2(0.96, 0.98) }, // saturation, value
+  uTexCalm: { value: new THREE.Vector2(0.12, 0.3) },      // world prop texture contrast cut: near, extra far
 };
 
 const FRAG = /* glsl */ `
 #ifndef TOON_OFF
 {
+  #ifdef TOON_WORLD
+    diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), diffuseColor.rgb, uWorldGrade.x) * uWorldGrade.y;
+  #endif
   vec3 toonRef = material.diffuseColor * RECIPROCAL_PI * uSunRad;
   float toonDen = max(toonRef.r + toonRef.g + toonRef.b, 1e-5);
   vec3 dd = reflectedLight.directDiffuse;
@@ -51,7 +60,12 @@ if (uOutlineId >= 0.0) gl_FragColor.a = uOutlineId;`;
 // fog as light aerial perspective: capped, so far hills lean towards the haze but keep their colour
 const FOG_FRAG = /* glsl */ `
 #ifdef USE_FOG
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, smoothstep(fogNear, fogFar, vFogDepth) * uFogMax);
+{
+  float fogF = smoothstep(fogNear, fogFar, vFogDepth);
+  // colour first drains towards grey with distance, then leans towards the haze (capped)
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722))), fogF * uFogDesat);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogF * uFogMax);
+}
 #endif`;
 
 // Outline ids. Opaque surfaces write an integer id into the (otherwise unused) alpha of the
@@ -69,8 +83,28 @@ export function toonPatch(shader, material) {
   Object.assign(shader.uniforms, TOON);
   shader.uniforms.uOutlineId = { value: outlineId(material) }; // per material
   if (material.userData.fade) fadePatch(shader, material.userData.fade);
+  if (material.userData.world) {
+    shader.fragmentShader = '#define TOON_WORLD\n' + shader.fragmentShader;
+    // calmer textures on world props (canopies, bushes, stones): each texel keeps its own crisp
+    // pixel but moves part way towards the average of its neighbourhood (a coarser mip), so the
+    // hand-pixelled pattern stays while its speckle contrast drops; a little more with distance
+    // (uTexBias: at Sharp 1x the textures keep the Fine 2x texel density, pixeltex.js TEX_BIAS)
+    if (material.map) {
+      shader.uniforms.uTexBias = TEX_BIAS;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uTexBias;').replace('#include <map_fragment>', /* glsl */ `
+      #ifdef USE_MAP
+      {
+        vec4 sdc = texture(map, vMapUv, uTexBias);
+        vec3 avg = texture(map, vMapUv, 2.5 + uTexBias).rgb;
+        float calm = uTexCalm.x + uTexCalm.y * smoothstep(15.0, 80.0, -vViewPosition.z);
+        sdc.rgb = mix(sdc.rgb, avg, calm);
+        diffuseColor *= sdc;
+      }
+      #endif`);
+    }
+  }
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform vec3 uSunRad, uToonShade, uToonLit, uToonHi;\nuniform float uToonUnder, uOutlineId, uFogMax;\nuniform vec2 uToonBands;')
+    .replace('#include <common>', '#include <common>\nuniform vec3 uSunRad, uToonShade, uToonLit, uToonHi;\nuniform float uToonUnder, uOutlineId, uFogMax, uFogDesat;\nuniform vec2 uToonBands, uWorldGrade, uTexCalm;')
     .replace('#include <opaque_fragment>', FRAG)
     .replace('#include <fog_fragment>', FOG_FRAG);
 }
@@ -126,7 +160,7 @@ ${GROUND_GLSL}`)
         float layer = diffuseColor.g > diffuseColor.r * 1.15 ? 0.0 : ${LAYER_BOULDER.toFixed(1)};
         const vec3 LUM = vec3(0.3, 0.59, 0.11);
         float k = dot(groundTex(p, layer), LUM) / max(dot(groundFlat(layer), LUM), 1e-3);
-        diffuseColor.rgb *= clamp(mix(1.0, k, 0.85), 0.5, 1.5);
+        diffuseColor.rgb *= clamp(mix(1.0, k, 0.55), 0.7, 1.3); // (comfort: softer than the ground's own marks)
       }`);
 }
 
@@ -154,8 +188,20 @@ export function installToon() {
   proto.onBeforeCompile = function (shader) { toonPatch(shader, this); if (wantsDetail(this)) detailPatch(shader); };
   proto.customProgramCacheKey = function () {
     crispMaps(this);
-    return (wantsDetail(this) ? 'toon+detail' : 'toon') + (this.userData.fade ? '+fade' : '');
+    return (wantsDetail(this) ? 'toon+detail' : 'toon') + (this.userData.fade ? '+fade' : '') + (this.userData.world ? '+world' : '');
   };
+}
+
+// Mark every standard material under `root` as world (graded back, TOON.uWorldGrade). Materials
+// left unmarked (vehicles, lamps, the garage preview) keep their full colour; objects whose name,
+// or whose parent's name, matches `keep` (flowers) are skipped so the small accents stay bright.
+export function markWorld(root, keep = /flower/i) {
+  root.traverse((o) => {
+    if (!o.material || keep.test(o.name || '') || (o.parent && keep.test(o.parent.name || ''))) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.isMeshStandardMaterial && !m.userData.world) { m.userData.world = true; m.needsUpdate = true; }
+    }
+  });
 }
 
 // Call before rendering a scene lit by `sun` (a DirectionalLight).

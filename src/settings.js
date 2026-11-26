@@ -1,10 +1,13 @@
-// Settings: graphics preset, pixel size, master volume, fullscreen, FPS counter.
+// Settings: graphics preset, pixel size, picture look (Soft / Standard / Vivid) with brightness,
+// contrast and saturation sliders, master volume, fullscreen, FPS counter.
 // Self-contained: persists to localStorage, owns a small overlay (F10, or openSettings()),
 // and applies itself through initSettings({ renderer, scene, sun, camera, audio, pipeline }).
 //
 // main.js needs only:
 //   import { initSettings } from './settings.js';
 //   initSettings({ renderer, scene, sun, camera, audio });   // after those exist
+
+import { setDisplayGrade } from './gfx/pipeline.js';
 
 const KEY = 'lowrange.settings.v1';
 
@@ -17,21 +20,45 @@ export const PRESETS = {
   high:   { label: 'High',   pixelRatio: 1.75, shadowMap: 2048, fogScale: 1.0,  farScale: 1.0 },
 };
 // Pixel size of the pixel-art frame (src/gfx/pipeline.js): device pixels per game pixel on a
-// 1080-tall screen, scaled in proportion on others. Separate from the quality preset.
-export const PIXEL_SIZES = { 4: 'CHUNKY 4x', 3: '3x', 2: 'FINE 2x', 1: 'SHARP 1x' };
+// 1080-tall screen, scaled in proportion on others. Separate from the quality preset. HD 1x (the
+// default) draws the scene at native resolution with anti-aliased geometry edges while the
+// pixel-art textures keep the Fine 2x texel size (HD-2D style); the others are hard-pixel upscales.
+export const PIXEL_SIZES = { 4: 'CHUNKY 4x', 3: '3x', 2: 'FINE 2x', 1: 'HD 1x' };
 
-const DEFAULTS = { quality: 'high', pixelSize: 2, volume: 0.8, showFps: false };
+// Picture comfort (src/gfx/pipeline.js display grade). A look sets the three sliders plus a soft
+// shoulder on the brightest values (knee), a small black lift and a vignette; moving a slider keeps
+// the look's extras. Soft is tuned for long sessions: calmer peaks, gentler contrast, a step less
+// saturation (the world materials are graded back further still, gfx/toon.js uWorldGrade).
+export const LOOKS = {
+  soft:     { label: 'SOFT',     brightness: 0.98, contrast: 0.95, saturation: 1.0, knee: 0.8, lift: 0.01, vignette: 0.07 },
+  standard: { label: 'STANDARD', brightness: 1.0,  contrast: 1.0, saturation: 1.0,  knee: 0.9,  lift: 0.01,  vignette: 0.06 },
+  vivid:    { label: 'VIVID',    brightness: 1.02, contrast: 1.08, saturation: 1.14, knee: 0.92, lift: 0,     vignette: 0.06 },
+};
+export const SLIDER = { min: 0.7, max: 1.3 }; // brightness / contrast / saturation range
+
+const DEFAULTS = { quality: 'high', pixelSize: 1, volume: 0.8, showFps: false, look: 'soft',
+  brightness: LOOKS.soft.brightness, contrast: LOOKS.soft.contrast, saturation: LOOKS.soft.saturation };
+const GRADE_KEYS = ['brightness', 'contrast', 'saturation'];
+const slider = (v, d) => (Number.isFinite(v) ? Math.min(SLIDER.max, Math.max(SLIDER.min, v)) : d);
 
 const desktop = () => (typeof window !== 'undefined' && window.lowrange && window.lowrange.isDesktop) ? window.lowrange : null;
 
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+    const L = LOOKS[Object.hasOwn(LOOKS, s.look) ? s.look : DEFAULTS.look];
+    // a full save from before the picture settings (every save then stored all keys) holding the
+    // old Fine 2x default moves to the new HD 1x default; any other choice is kept
+    if (!('look' in s) && 'volume' in s && +s.pixelSize === 2) delete s.pixelSize;
     return {
       quality: Object.hasOwn(PRESETS, s.quality) ? s.quality : DEFAULTS.quality,
       pixelSize: Object.hasOwn(PIXEL_SIZES, s.pixelSize) ? +s.pixelSize : DEFAULTS.pixelSize,
       volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : DEFAULTS.volume,
       showFps: typeof s.showFps === 'boolean' ? s.showFps : DEFAULTS.showFps,
+      look: Object.hasOwn(LOOKS, s.look) ? s.look : DEFAULTS.look,
+      brightness: slider(s.brightness, L.brightness),
+      contrast: slider(s.contrast, L.contrast),
+      saturation: slider(s.saturation, L.saturation),
     };
   } catch {
     return { ...DEFAULTS };
@@ -51,6 +78,8 @@ export function setSetting(key, value) {
   if (key === 'pixelSize') { if (!Object.hasOwn(PIXEL_SIZES, value)) return; value = +value; }
   if (key === 'volume') value = Math.min(1, Math.max(0, Number(value) || 0));
   if (key === 'showFps') value = !!value;
+  if (key === 'look') { if (!Object.hasOwn(LOOKS, value)) return; for (const k of GRADE_KEYS) state[k] = LOOKS[value][k]; }
+  if (GRADE_KEYS.includes(key)) value = slider(Number(value), state[key]);
   state[key] = value;
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage full/blocked: keep in memory */ }
   apply();
@@ -63,6 +92,8 @@ export function onSettingsChange(fn) { listeners.add(fn); return () => listeners
 // ---- hooks: each can be called on its own ----
 export function applyGraphics({ renderer, scene, sun, camera, pipeline } = ctx || {}) {
   const p = Object.hasOwn(PRESETS, state.quality) ? PRESETS[state.quality] : PRESETS.high;
+  const L = LOOKS[state.look] || LOOKS.soft;
+  setDisplayGrade({ brightness: state.brightness, contrast: state.contrast, saturation: state.saturation, knee: L.knee, lift: L.lift, vignette: L.vignette });
   if (pipeline) pipeline.setPixelSize(state.pixelSize); // owns pixel ratio and canvas size
   else if (renderer) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelRatio));
@@ -140,6 +171,10 @@ function mount() {
       <div class="row"><span>Pixel size</span><span class="seg" data-k="pixelSize">
         ${Object.entries(PIXEL_SIZES).map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}
       </span></div>
+      <div class="row"><span>Picture</span><span class="seg" data-k="look">
+        ${Object.entries(LOOKS).map(([k, l]) => `<button data-v="${k}">${l.label}</button>`).join('')}
+      </span></div>
+      ${GRADE_KEYS.map((k) => `<div class="row"><span>${k[0].toUpperCase() + k.slice(1)} <b data-gv="${k}"></b></span><input type="range" min="${SLIDER.min * 100}" max="${SLIDER.max * 100}" step="1" data-k="${k}"></div>`).join('')}
       <div class="row"><span>Master volume <b data-vol></b></span><input type="range" min="0" max="100" step="1" data-k="volume"></div>
       <div class="row"><span>Fullscreen</span><button data-fs>TOGGLE</button></div>
       <div class="row"><span>Show FPS</span><input type="checkbox" data-k="showFps"></div>
@@ -151,6 +186,8 @@ function mount() {
 
   root.querySelectorAll('[data-k=quality] button').forEach((b) => b.addEventListener('click', () => setSetting('quality', b.dataset.v)));
   root.querySelectorAll('[data-k=pixelSize] button').forEach((b) => b.addEventListener('click', () => setSetting('pixelSize', +b.dataset.v)));
+  root.querySelectorAll('[data-k=look] button').forEach((b) => b.addEventListener('click', () => setSetting('look', b.dataset.v)));
+  for (const k of GRADE_KEYS) root.querySelector(`[data-k=${k}]`).addEventListener('input', (e) => setSetting(k, e.target.value / 100));
   root.querySelector('[data-k=volume]').addEventListener('input', (e) => setSetting('volume', e.target.value / 100));
   root.querySelector('[data-k=showFps]').addEventListener('change', (e) => setSetting('showFps', e.target.checked));
   fsBtn.addEventListener('click', () => toggleFullscreen());
@@ -185,6 +222,14 @@ async function syncUi() {
   if (!root) return;
   root.querySelectorAll('[data-k=quality] button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.quality));
   root.querySelectorAll('[data-k=pixelSize] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === state.pixelSize));
+  // a look button is lit while the sliders still match it (moving a slider makes it custom)
+  const L = LOOKS[state.look];
+  const pure = L && GRADE_KEYS.every((k) => Math.abs(state[k] - L[k]) < 0.005);
+  root.querySelectorAll('[data-k=look] button').forEach((b) => b.classList.toggle('on', pure && b.dataset.v === state.look));
+  for (const k of GRADE_KEYS) {
+    root.querySelector(`[data-k=${k}]`).value = Math.round(state[k] * 100);
+    root.querySelector(`[data-gv=${k}]`).textContent = Math.round(state[k] * 100) + '%';
+  }
   root.querySelector('[data-k=volume]').value = Math.round(state.volume * 100);
   volLbl.textContent = Math.round(state.volume * 100) + '%';
   root.querySelector('[data-k=showFps]').checked = state.showFps;

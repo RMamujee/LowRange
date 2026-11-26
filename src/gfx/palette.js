@@ -1,8 +1,8 @@
 // The ART_STYLE.md palette (sRGB hex), each ramp ordered highlight, base, shade, deep shade.
 // Single source for the renderer's generated textures, light tints and sky.
 export const RAMP = {
-  dirt:   [0xf0bf72, 0xdfa24a, 0xbe8340, 0x8f6134], // between the first contract ramp and the softened one: warm, not chalky
-  grass:  [0x92cc56, 0x64a93b, 0x468c32, 0x2f6b2b], // a touch less lime than the canopies
+  dirt:   [0xdcb074, 0xca9757, 0xab7b45, 0x815d36], // comfort: the reference's golden ochre kept warm but a step darker and calmer (S .67 -> .57, V .87 -> .79), the screen's biggest area
+  grass:  [0x9fc865, 0x77a846, 0x588d39, 0x3d6c30], // comfort: warmer, less lime meadow green (S .65 -> .57)
   leaf:   [0x7cc843, 0x4fa032, 0x2f7d2c, 0x1f5a27],
   pine:   [0x4f9f4a, 0x2f7f3f, 0x1f6236, 0x164a2e],
   bark:   [0xc98a4e, 0xa5683a, 0x7d4a2a, 0x55301f],
@@ -12,7 +12,7 @@ export const RAMP = {
   // not in the contract table; derived from it (dirt pushed darker / paler, glass pushed teal)
   mud:    [0x9a6a3c, 0x7a4f2c, 0x5c3a22, 0x402818],
   sand:   [0xf8e2a4, 0xeecb7e, 0xd8ac5e, 0xb88a44],
-  road:   [0xf2ce86, 0xe4b464, 0xc8944e, 0x9c723f],
+  road:   [0xe2c48c, 0xd2ac6e, 0xb69058, 0x8e6f45], // comfort: a step down from the first f2ce86 ramp, still the palest path
   tarmac: [0x6a645a, 0x4f4a43, 0x3b3732, 0x2a2724],
   water:  [0x9fdcec, 0x5bb0cc, 0x3c88aa, 0x2a6488],
 };
@@ -22,7 +22,7 @@ export const OUTLINE = 0x2a1a14;
 // sky, the fog and the far hills all in the ground's own ochre, which read as one washed-out
 // beige; the cool sky gives the warm ground and greens something to stand against.)
 export const SKY = 0x9fcfe8;
-export const FOG = 0xece3c2;   // horizon haze: the far ground leans towards it, never all the way
+export const FOG = 0xe4dcc0;   // horizon haze: the far ground leans towards it, never all the way
 export const FOG_MAX = 0.45;   // the most fog any surface takes (aerial perspective, not a wash)
 // sky bands drawn by the pixel pipeline where nothing was rendered, horizon (= fog) to zenith
 export const SKY_BANDS = [FOG, 0xd2e4d8, 0xb6d9e6, SKY, 0x88c2e6];

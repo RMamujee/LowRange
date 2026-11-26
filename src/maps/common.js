@@ -6,13 +6,13 @@ export const MAT = { GRASS: 0, DIRT: 1, ROCK: 2, MUD: 3, SAND: 4, GRAVEL: 5, ROA
 export const MAT_INFO = [
   // mu: tyre friction, rr: rolling resistance (x wheel load), drag: viscous drag through the medium
   // color: sRGB 0..1 for the HUD, minimap and dust; the base tone of each ground ramp (src/gfx/palette.js)
-  { name: 'Grass',  mu: 0.72, rr: 0.020, drag: 0,   color: [0.37, 0.68, 0.21] },
-  { name: 'Dirt',   mu: 0.85, rr: 0.020, drag: 0,   color: [0.88, 0.64, 0.25] },
+  { name: 'Grass',  mu: 0.72, rr: 0.020, drag: 0,   color: [0.45, 0.64, 0.28] },
+  { name: 'Dirt',   mu: 0.85, rr: 0.020, drag: 0,   color: [0.79, 0.59, 0.34] },
   { name: 'Rock',   mu: 1.10, rr: 0.010, drag: 0,   color: [0.58, 0.53, 0.46] },
   { name: 'Mud',    mu: 0.42, rr: 0.120, drag: 260, color: [0.48, 0.31, 0.17] },
   { name: 'Sand',   mu: 0.62, rr: 0.080, drag: 60,  color: [0.93, 0.80, 0.49] },
   { name: 'Gravel', mu: 0.68, rr: 0.030, drag: 0,   color: [0.66, 0.58, 0.46] },
-  { name: 'Road',   mu: 0.80, rr: 0.015, drag: 0,   color: [0.91, 0.72, 0.37] },
+  { name: 'Road',   mu: 0.80, rr: 0.015, drag: 0,   color: [0.82, 0.67, 0.43] },
   { name: 'Tarmac', mu: 0.95, rr: 0.012, drag: 0,   color: [0.31, 0.29, 0.26] },
   { name: 'Water',  mu: 0.60, rr: 0.050, drag: 90,  color: [0.36, 0.69, 0.80] },
   // not a ground surface: loose logs and stumps (src/physics_props.js); bark is a bit slippery

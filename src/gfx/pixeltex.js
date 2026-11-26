@@ -172,13 +172,14 @@ export const LEVELS = 5;
 export const GROUND_GLSL = /* glsl */ `
 uniform highp sampler2DArray uGround;
 uniform vec3 uGroundFlat[${LAYERS.length}];
+uniform float uTexBias;
 vec3 groundFlat(float layer) { return uGroundFlat[int(layer + 0.5)]; }
 vec3 groundTex(vec2 wp, float layer) {
   vec2 uv = wp / ${TILE_M.toFixed(1)};
   vec2 d = fwidth(uv * ${TILE.toFixed(1)});
   // texels per screen pixel along the most squashed axis (ground is strongly foreshortened under
-  // a chase camera)
-  float lod = log2(max(max(d.x, d.y), 1e-6));
+  // a chase camera); uTexBias (TEX_BIAS) keeps texels at least two device pixels at Sharp 1x
+  float lod = log2(max(max(d.x, d.y), 1e-6)) + uTexBias;
   float k = max(floor(lod + 1.2), 0.0);
   if (k >= ${LEVELS.toFixed(1)}) return groundFlat(layer);
   return textureLod(uGround, vec3(uv, layer * ${LEVELS.toFixed(1)} + k), 0.0).rgb;
@@ -222,8 +223,13 @@ function dominant(px) {
 }
 
 let cached = null, flat = null;
+// Texture detail bias in mip levels, shared by every ground sampler and world prop texture
+// (toon.js): the pipeline sets log2(2 / pixel scale) at Sharp 1x, so the scene is drawn at native
+// resolution while its pixel-art textures keep the Fine 2x density (the HD-2D recipe: crisp HD
+// geometry, chunky texels), 0 at coarser sizes.
+export const TEX_BIAS = { value: 0 };
 // uniforms for GROUND_GLSL
-export function groundUniforms() { groundTextureArray(); return { uGround: { value: cached }, uGroundFlat: { value: flat } }; }
+export function groundUniforms() { groundTextureArray(); return { uGround: { value: cached }, uGroundFlat: { value: flat }, uTexBias: TEX_BIAS }; }
 // All ground tiles as one sRGB texture array: layer = MAT index * LEVELS + detail level,
 // nearest-sampled, no mipmaps (the levels are hand-made mips, see LEVELS).
 export function groundTextureArray() {
