@@ -1,6 +1,6 @@
 // Settings: graphics preset, master volume, fullscreen, FPS counter.
 // Self-contained: persists to localStorage, owns a small overlay (F10, or openSettings()),
-// and applies itself through initSettings({ renderer, scene, sun, camera, audio }).
+// and applies itself through initSettings({ renderer, scene, sun, camera, audio, pipeline }).
 //
 // main.js needs only:
 //   import { initSettings } from './settings.js';
@@ -10,10 +10,12 @@ const KEY = 'lowrange.settings.v1';
 
 // fogScale / farScale multiply whatever fog and camera far the scene was built with,
 // so retuning the world's look elsewhere doesn't fight these presets.
+// pixelHeight: internal render height of the pixel-art pipeline (src/gfx/pipeline.js); the canvas
+// is that, scaled up by a whole number. pixelRatio is only used when there is no pipeline.
 export const PRESETS = {
-  low:    { label: 'Low',    pixelRatio: 1.0,  shadowMap: 1024, fogScale: 0.7,  farScale: 0.6 },
-  medium: { label: 'Medium', pixelRatio: 1.25, shadowMap: 2048, fogScale: 0.85, farScale: 0.8 },
-  high:   { label: 'High',   pixelRatio: 1.75, shadowMap: 2048, fogScale: 1.0,  farScale: 1.0 },
+  low:    { label: 'Low',    pixelRatio: 1.0,  pixelHeight: 225, shadowMap: 1024, fogScale: 0.7,  farScale: 0.6 },
+  medium: { label: 'Medium', pixelRatio: 1.25, pixelHeight: 300, shadowMap: 2048, fogScale: 0.85, farScale: 0.8 },
+  high:   { label: 'High',   pixelRatio: 1.75, pixelHeight: 360, shadowMap: 2048, fogScale: 1.0,  farScale: 1.0 },
 };
 
 const DEFAULTS = { quality: 'high', volume: 0.8, showFps: false };
@@ -55,9 +57,10 @@ export function setSetting(key, value) {
 export function onSettingsChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
 // ---- hooks: each can be called on its own ----
-export function applyGraphics({ renderer, scene, sun, camera } = ctx || {}) {
+export function applyGraphics({ renderer, scene, sun, camera, pipeline } = ctx || {}) {
   const p = PRESETS[state.quality];
-  if (renderer) {
+  if (pipeline) pipeline.setPixelHeight(p.pixelHeight); // owns pixel ratio and canvas size
+  else if (renderer) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelRatio));
     renderer.setSize(window.innerWidth, window.innerHeight);
   }

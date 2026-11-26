@@ -9,3 +9,4 @@ test/audio-samples/
 release/
 tools/blender/out/
 __pycache__/
+tools/blender/__pycache__/

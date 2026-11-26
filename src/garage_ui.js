@@ -6,6 +6,7 @@ import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
 import { GROUP_WORLD } from './terrain.js';
 import { applyBuild, buildOptions, defaultBuild, loadBuild, saveBuild, stats } from './garage.js';
+import { PixelPipeline } from './gfx/pipeline.js';
 
 const $ = (id) => document.getElementById(id);
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
@@ -41,10 +42,10 @@ export class Garage {
 
   initPreview() {
     const cv = $('gPreview');
-    const r = this.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
-    r.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    const r = this.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
     r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap;
-    r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.25;
+    // same pixel-art look as the game (src/gfx/pipeline.js): low-res, toon, outlines
+    this.pixels = new PixelPipeline(r, { pixelHeight: 200 });
     const sc = this.scene = new THREE.Scene();
     sc.background = new THREE.Color(0x1c1915);
     sc.fog = new THREE.Fog(0x1c1915, 14, 30);
@@ -53,7 +54,7 @@ export class Garage {
     sun.position.set(-5, 9, 4); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
     Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
     sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
-    sc.add(sun);
+    sc.add(sun); this.sun = sun;
     const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x2a251f, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; sc.add(floor);
     const table = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.3, 0.04, 64), new THREE.MeshStandardMaterial({ color: 0x3b342b, roughness: 0.8 }));
@@ -90,7 +91,7 @@ export class Garage {
   resize() {
     const cv = $('gPreview');
     const w = cv.clientWidth || 560, h = cv.clientHeight || 340;
-    this.renderer.setSize(w, h, false);
+    this.pixels.setSize(w, h, false);
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
   }
 
@@ -157,7 +158,7 @@ export class Garage {
     const d = Math.max(7, L * 1.6 + 2), cy = this.car.chassis.translation().y;
     this.camera.position.set(Math.sin(this.angle) * d, cy + 1.4 + L * 0.1, Math.cos(this.angle) * d);
     this.camera.lookAt(0, cy + 0.3, 0);
-    this.renderer.render(this.scene, this.camera);
+    this.pixels.render(this.scene, this.camera, this.sun);
     requestAnimationFrame((t) => this.frame(t));
   }
 }

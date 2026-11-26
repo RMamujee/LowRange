@@ -38,3 +38,12 @@ in-game renderer follow this file so separately built pieces match.
 - Roughness 1, metallic 0, except glass (roughness 0.2) and lamps (emission). Brake lights use a material named `TailLight`.
 - One small atlas or a few small textures per asset (64 to 256 px). UVs laid out so texels stay square at about 32 px/m.
 - Blender previews of an asset should use the toon + outline + low-res look so it can be judged against the reference.
+
+## In-game renderer (`src/gfx/`)
+
+- `pipeline.js`: the scene renders at about 300 px tall (settings `pixelHeight`: low 225, medium 300, high 360), is outlined at that resolution and blown up by a whole number with hard pixels. Sky is drawn there too (stepped, dithered golden bands).
+- `toon.js`: every `MeshStandardMaterial` (glTF included) is patched once, globally: three warm bands from the real light and shadow, undersides a touch darker, specular dropped, emissive kept. Nothing to do per asset.
+- Outlines come from depth breaks and from **material changes**: each opaque material gets its own outline id, so separate materials on one model (body / glass / tyre) get a dark line where they meet. Use separate materials where you want a line, one material where you don't. A material can opt out with `material.userData.outlineId = 0`.
+- Metallic must stay 0 (the toon pass reads diffuse light; a fully metallic surface would sit in the shade band).
+- Untextured vertex-coloured props can opt into a world-space pixel texture with `material.userData.pixelDetail = true` (the procedural dressing does); textured materials never get it.
+- Ground tiles are generated in `pixeltex.js` from the ramps above (one per surface material, 32 px/m).

@@ -12,6 +12,8 @@ import { EngineAudio } from './audio.js';
 import { applyBuild, loadBuild, isStock, stats } from './garage.js';
 import { Garage } from './garage_ui.js';
 import { initSettings } from './settings.js';
+import { PixelPipeline, noOutline } from './gfx/pipeline.js';
+import { SKY as SKY_COL, FOG as FOG_COL, SKY_BANDS } from './gfx/palette.js';
 import './platform.js';
 
 const H = 1 / 200;           // physics step
@@ -32,23 +34,22 @@ const terrain = buildTerrainPhysics(RAPIER, world, rocks, trees);
 
 // ---------------- rendering ----------------
 await window.__loadStage?.('Fuelling up');
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
-renderer.setSize(innerWidth, innerHeight);
+// no MSAA: the scene is drawn into the pixel pipeline's low-res target (src/gfx/pipeline.js),
+// which also owns pixel ratio, sizing and tone mapping
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+const pixels = new PixelPipeline(renderer, { sky: SKY_BANDS }); // dithered golden sky where nothing is drawn
+pixels.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const SKY = 0xc9b79a;
-scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 90, 330);
+scene.background = new THREE.Color(SKY_COL); // warm golden haze (gfx/palette.js)
+scene.fog = new THREE.Fog(FOG_COL, 90, 330);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 900);
 
 scene.add(new THREE.HemisphereLight(0xfff1dc, 0x5a4a38, 1.25));
-const sun = new THREE.DirectionalLight(0xffe2b8, 2.4);
+const sun = new THREE.DirectionalLight(0xfff0d4, 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera;
@@ -60,12 +61,14 @@ const SUN_DIR = new THREE.Vector3(-0.45, 0.8, 0.35).normalize();
 scene.add(buildTerrainMesh());
 scene.add(buildRocks(rocks));
 scene.add(buildTrees(trees));
+// grass tufts are too small for outlines: draw them on the pipeline's no-outline layer
+scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutline(o); });
 const isRace = MAP_KIND === 'race';
 const gates = isRace ? [] : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
 const minimap = buildMinimapBase(220);
 // distant ground beyond the map edge
-const outer = new THREE.Mesh(new THREE.RingGeometry(SIZE * 0.68, 900, 32), new THREE.MeshStandardMaterial({ color: 0x6f6250, flatShading: true }));
+const outer = new THREE.Mesh(new THREE.RingGeometry(SIZE * 0.68, 900, 32), new THREE.MeshStandardMaterial({ color: 0xc89a48, flatShading: true }));
 outer.rotation.x = -Math.PI / 2; outer.position.y = 18;
 scene.add(outer);
 
@@ -78,6 +81,7 @@ pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
 const pMat = new THREE.PointsMaterial({ size: 0.2, vertexColors: true, transparent: true, opacity: 0.32, depthWrite: false });
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
+noOutline(points);
 scene.add(points);
 const parts = Array.from({ length: PMAX }, () => ({ life: 0, x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, r: 0, g: 0, b: 0 }));
 let pNext = 0;
@@ -102,7 +106,7 @@ function updateParticles(dt) {
 
 // ---------------- game state ----------------
 const audio = new EngineAudio();
-initSettings({ renderer, scene, sun, camera, audio });
+initSettings({ renderer, scene, sun, camera, audio, pipeline: pixels });
 let car = null, view = null, spec = null;
 let selected = 0;
 let playing = false;
@@ -721,13 +725,13 @@ function frame(now) {
     updateParticles(dt);
     audio.update(car.dt.rpm, car.dt.throttleEff, car.dt.running, car.wheelState[2].spin);
   }
-  renderer.render(scene, camera);
+  pixels.render(scene, camera, sun);
   requestAnimationFrame(frame);
 }
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  pixels.setSize(innerWidth, innerHeight);
 });
 
 // show the world behind the garage menu
@@ -743,4 +747,4 @@ openMenu();
 if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage };
+window.__game = { get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, gfx: { renderer, pixels, scene, camera, sun } };

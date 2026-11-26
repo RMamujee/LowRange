@@ -6,6 +6,7 @@ import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from './terrain.js';
 import { buildSetDressing, gridClearance } from './art/dressing.js';
+import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals } from './gfx/terrain_look.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -29,15 +30,16 @@ export function buildTerrainMesh() {
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }));
+  softenTerrainNormals(geo, { GRID, RES, SIZE });
+  // pixel-art ground (src/gfx/terrain_look.js): textured per GRID.mat in the shader, softened normals
+  // so the toon bands follow the hills; the vertex colours above are kept for anything that reads them
+  const mesh = new THREE.Mesh(geo, terrainMaterial({ GRID, RES, SIZE, NROADS, MAT }));
   mesh.receiveShadow = true;
   return mesh;
 }
 
 export function buildRocks(rocks) {
   const geos = [];
-  const col = new THREE.Color();
   for (const r of rocks) {
     const pts = [];
     for (let i = 0; i < r.pts.length; i += 3) pts.push(new THREE.Vector3(r.pts[i], r.pts[i + 1], r.pts[i + 2]));
@@ -45,14 +47,10 @@ export function buildRocks(rocks) {
     try { g = new ConvexGeometry(pts); } catch { continue; }
     g.rotateY(r.rotY);
     g.translate(r.x, r.y, r.z);
-    const shade = r.ledge ? 0.5 + Math.random() * 0.08 : 0.42 + Math.random() * 0.16;
-    col.setRGB(shade * 1.04, shade, shade * 0.93);
-    const cols = new Float32Array(g.attributes.position.count * 3);
-    for (let i = 0; i < cols.length; i += 3) { cols[i] = col.r; cols[i + 1] = col.g; cols[i + 2] = col.b; }
-    g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    geos.push(g);
+    // same hull, pixel-art skin: welded smooth normals + lit-top/dark-base tone (src/gfx/terrain_look.js)
+    geos.push(shapeRockGeometry(g, r.ledge, geos.length));
   }
-  const mesh = new THREE.Mesh(mergeGeometries(geos), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+  const mesh = new THREE.Mesh(mergeGeometries(geos), rockMaterial());
   mesh.castShadow = true; mesh.receiveShadow = true;
   return mesh;
 }
