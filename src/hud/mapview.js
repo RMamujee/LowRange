@@ -66,9 +66,13 @@ function bakeBase(ppm, trees) {
     for (let k = -hw; k <= hw; k += 0.5 / ppm) { const X = P2(c0.x + c0.tz * k), Z = P2(c0.z - c0.tx * k); px(g, Math.round(X), Math.round(Z), ((Math.round(k * ppm) & 1) ? P.cream : P.ol)); }
   }
   for (const r of ROADS) { const w = Math.max(2, (r.width || 8) * ppm * 0.7); stamp(r, w + 2, P.w2); stamp(r, w, '#f4dfa8'); }
+  const coreOf = (diff) => (diff === 'green' ? P.green : diff === 'blue' ? P.blue : P.m1);
   for (const t of TRAILS) {
-    const w = Math.max(1, (t.width || 5) * ppm * 0.55), core = t.diff === 'green' ? P.green : t.diff === 'blue' ? P.blue : P.m1;
-    stamp(t, w + 2, P.cream); stamp(t, w, core);
+    const w = Math.max(1, (t.width || 5) * ppm * 0.55);
+    stamp(t, w + 2, P.cream);
+    // [crawl] a staged trail is stamped stage by stage in each stage's colour
+    if (t.stages) for (const st of t.stages) stamp({ pts: t.pts.filter((p) => p.s >= st.s0 - 0.5 && p.s <= st.s1 + 0.5) }, w, coreOf(st.diff));
+    else stamp(t, w, coreOf(t.diff));
   }
   return f.cv;
 }
@@ -208,7 +212,14 @@ export class BigMap {
     const placed = [];
     TRAILS.forEach((t, i) => {
       const s = st.trails[i], act = st.active && st.active.trail === i;
-      for (const end of [3, t.length - 3]) { const e = pathPoint(t, end); const [ex, ey] = V(e.x, e.z); diffSym(g, t.diff, ex, ey); }
+      if (t.stages) { // [crawl] numbered stage gates, the next one highlighted
+        const cur = st.crawl ? st.crawl.stage : 0;
+        for (const q of t.stages) {
+          const [gx, gy] = V(q.gate.x, q.gate.z), next = q.n === cur + 1, done = q.n <= cur;
+          rect(g, gx - 4, gy - 4, 9, 9, P.ol); rect(g, gx - 3, gy - 3, 7, 7, next ? P.amber : done ? P.green : P.paper);
+          tiny(g, String(q.n), gx + 1, gy - 2, P.ink, { align: 'center' });
+        }
+      } else for (const end of [3, t.length - 3]) { const e = pathPoint(t, end); const [ex, ey] = V(e.x, e.z); diffSym(g, t.diff, ex, ey); }
       const m = pathPoint(t, t.length / 2), [lx, ly] = V(m.x, m.z);
       let label = t.name.toUpperCase();
       if (act) label += ' ' + fmtT(st.active.t);
@@ -248,7 +259,23 @@ export class BigMap {
     paper(g, sx0, sy0, sw, sh, 7);
     let y = sy0 + 4;
     const head = (txt) => { tiny(g, txt, sx0 + 5, y, P.redDark); for (let i = sx0 + 5; i < sx0 + sw - 5; i += 2) px(g, i, y + 7, P.inkSoft); y += 10; };
-    if (!this.isRace) {
+    if (!this.isRace && TRAILS.length === 1 && TRAILS[0].stages) {
+      // [crawl] stage list: symbol, number + name, this run's split (or the rig's best split)
+      const c = st.crawl || { stage: 0, splits: [], bestSplits: [] };
+      head('STAGES');
+      TRAILS[0].stages.forEach((q, k) => {
+        const cur = q.n === c.stage, split = c.splits[k], best = c.bestSplits[k];
+        diffSym(g, q.diff, sx0 + (q.diff === 'dblack' ? 10 : 9), y + 2);
+        let label = `${q.n} ${q.name.toUpperCase()}`; const maxW = sw - 46;
+        while (tinyMeasure(label) > maxW && label.length > 3) label = label.slice(0, -1);
+        tiny(g, label, sx0 + 18, y, cur ? P.redDark : split != null ? P.greenDark : P.ink);
+        const right = split != null ? fmtT(split) : best != null ? fmtT(best) : '';
+        if (right) tiny(g, right, sx0 + sw - 5, y, split != null ? P.ink : P.inkSoft, { align: 'right' });
+        y += 9;
+      });
+      y += 1;
+      tiny(g, c.running ? 'RUN' : 'BEST', sx0 + 5, y, P.ink); tiny(g, c.running ? fmtT(c.t) : c.best != null ? fmtT(c.best) : '-:--', sx0 + sw - 5, y, c.running ? P.redDark : P.inkSoft, { align: 'right' }); y += 10;
+    } else if (!this.isRace) {
       head('TRAILS');
       TRAILS.forEach((t, i) => {
         const s = st.trails[i], act = st.active && st.active.trail === i;

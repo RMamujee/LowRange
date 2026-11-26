@@ -8,12 +8,13 @@ export { MAT, MAT_INFO, MUD_SINK, DIFF, fbm, rng, pathPoint, GROUP_WORLD, GROUP_
 export const MAPS = [
   { id: 'park', name: 'Trail Park' },
   { id: 'race', name: 'Race Track' },
+  { id: 'crawl', name: 'The Gauntlet' },
 ];
 const want = (globalThis.location && new URLSearchParams(globalThis.location.search).get('map')) || globalThis.process?.env?.MAP || 'park';
 // only known ids map to fixed module paths; if the chosen map fails to load, fall back to the park
 let M;
 try {
-  M = want === 'race' ? await import('./maps/racetrack.js') : await import('./maps/trailpark.js');
+  M = want === 'race' ? await import('./maps/racetrack.js') : want === 'crawl' ? await import('./maps/crawl.js') : await import('./maps/trailpark.js');
 } catch (e) {
   console.warn(`Map "${want}" failed to load, falling back to the Trail Park`, e);
   M = await import('./maps/trailpark.js');

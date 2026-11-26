@@ -57,7 +57,13 @@ The desktop shell is in `electron/`. `main.cjs` serves `dist/` over a private `a
 - **Drivetrain:** engine torque curve with an idle governor, a clutch you can slip or stall, a manual gearbox, a 2-speed transfer case (high/low), 2WD/4WD, open or locked front and rear diffs. Everything is solved as one exact constraint system each physics step, so 80:1 crawl ratios stay stable.
 - **Tyres:** a custom friction model on every contact patch, so a tyre pushing into a rock face can climb it. Grip and side force share one friction budget (spinning tyres lose sideways grip), and grip varies by surface: rock, dirt, gravel, sand, mud. You can air down for more grip.
 - **Damage:** hard landings and impacts bend suspension, flatten tyres, dent body panels, hurt the engine and can tear wheels off.
-- **Terrain:** a trail park with graded roads and five rated trails: green Pinyon Two-Track, blue Granite Steps and Bog Run, black Boulder Alley, and double-black Widowmaker Falls.
+- **Terrain:** three maps, picked in the menu or with `?map=park|race|crawl` (see *Maps*).
+
+## Maps
+
+- **Trail Park** (`park`): graded roads and five rated trails: green Pinyon Two-Track, blue Granite Steps and Bog Run, black Boulder Alley, and double-black Widowmaker Falls.
+- **Race Track** (`race`): the Dust Bowl Circuit, 1.3 km of dirt with jumps, whoops, a rock garden and a splash; laps, checkpoints and best laps.
+- **The Gauntlet** (`crawl`): a physics and driving test course. You spawn at the foot of one 783 m rock trail that climbs 54 m up a mountainside in 12 numbered stages, each harder than the last and each testing one skill: Warm-up, Articulation, Ledges I (0.2-0.3 m), Side-slope (up to 20°), Boulder Garden I, The Climb (20°/28°/35° slab, then loose gravel), Ledges II (0.4-0.55 m), Bog & Ford, Notches & Squeezes, Boulder Garden II, The Waterfall (stacked 0.5-0.58 m steps on a 28% pitch), and the Summit. Every stage has a gate and a signpost; the run is timed from the start gate to the summit, with a split per stage, and your best total and best splits are saved per rig. The HUD points to the next gate and shows "STAGE n/12". **Y** takes you back to the gate of the stage you're in. A graded bypass track runs alongside with a spur into every stage gate, for skipping a stage or getting out; a run that skips stages still records splits but doesn't count as a best. Tuning lives in the `STAGE_DEFS` table at the top of `src/maps/crawl.js`.
 
 ## Rigs
 
@@ -89,7 +95,7 @@ Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete
 | I | start engine |
 | C | auto-clutch on/off |
 | Backspace | repair and right the truck where it is |
-| Y | restart the current trail |
+| Y | restart the current trail (The Gauntlet: the stage you're in) |
 | V | camera |
 | Z / X | zoom |
 | Mouse drag | orbit the camera |
@@ -108,6 +114,9 @@ Headless physics checks run in Node, for example:
 - `node test/obstacle.mjs ledge`: ledge climbing
 - `node test/trails.mjs lc70,taco,wrx 240`: an autopilot drives each trail
 - `node test/damage.mjs`: drop and wall-impact damage
+- `node test/crawl.mjs lc70,taco,wrx [fromStage] [toStage]`: autopilot on The Gauntlet, furthest stage and time per stage
+- `node test/crawlcheck.mjs`: The Gauntlet by the numbers (step heights against measured limits, clear lanes, grades); `node test/crawlcourse.mjs`: its run logic
+- `node test/stairgrade.mjs <ids> <grades> <rises>`: how tall a staircase each rig walks
 
 With the dev server running (`npx vite --port 5841`), browser checks use Playwright with a Chromium path in `CHROME`:
 

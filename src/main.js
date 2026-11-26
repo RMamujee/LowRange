@@ -18,6 +18,8 @@ import { createHud } from './hud/hud.js';
 import './platform.js';
 import { mountMenuChrome, rigRating, enableArrowNav } from './menu/menu.js';
 import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics props]
+import { CrawlCourse } from './crawl_course.js'; // [crawl] The Gauntlet's stages, splits and guidance
+import { buildCrawlView } from './crawl_view.js'; // [crawl]
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -72,7 +74,9 @@ window.__props = looseProps;
 // grass tufts are too small for outlines: draw them on the pipeline's no-outline layer
 scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutline(o); });
 const isRace = MAP_KIND === 'race';
-const gates = isRace ? [] : buildMarkers(scene); // [start0, end0, start1, end1, ...]
+const isCrawl = MAP_ID === 'crawl'; // [crawl] The Gauntlet brings its own stage gates and signs
+const crawlView = isCrawl ? buildCrawlView(scene, looseProps) : null;
+const gates = isRace ? [] : isCrawl ? crawlView.gates : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
 scene.add(buildBackdrop());
@@ -144,6 +148,32 @@ function updateTrails(p) {
     });
   });
 }
+// [crawl] The Gauntlet: one timed run from the start gate to the summit, split at every stage
+// gate (src/crawl_course.js). game.active mirrors the run so the HUD's run clock works;
+// game.guide points the HUD arrow at the next gate; game.crawl feeds the big map's sidebar.
+const crawl = isCrawl ? new CrawlCourse(TRAILS[0], TRAILS[0].stages) : null;
+function updateCrawl(p, dt) {
+  if (crawl.running && !game.active) { crawl.reset(); crawlView.resetAll(); } // respawned at the trailhead
+  crawl.setRig(spec.id);
+  for (const e of crawl.update(p, dt)) {
+    if (e.type === 'start') { crawlView.resetAll(); game.active = { trail: 0, from: 0, t: 0 }; toast(`${TRAILS[0].name}: the clock is running. Stage 1 · ${e.stage.name}`, 3); }
+    else if (e.type === 'split') { crawlView.setDone(e.stage.n); toast(`Stage ${e.stage.n} ${e.stage.name}: ${fmtT(e.split)}${e.best ? (e.prevBest != null ? ' · NEW BEST' : '') : ` (best ${fmtT(e.prevBest)})`}`, 2.5); }
+    else if (e.type === 'stage') {
+      if (!game.active) game.active = { trail: 0, from: 0, t: crawl.t };
+      const st = e.stage, d = DIFF[st.diff].label;
+      setTimeout(() => toast(`${e.retry ? 'Retry: ' : ''}Stage ${st.n}/${TRAILS[0].stages.length} · ${st.name} (${d}). ${st.blurb}`, 4), e.retry ? 0 : 1200);
+    } else if (e.type === 'finish') {
+      crawlView.setDone(TRAILS[0].stages.length - 1); crawlView.setDone(TRAILS[0].stages.length);
+      const st = game.trails[0];
+      if (e.clean) { st.done = true; st.best = st.best === null ? e.time : Math.min(st.best, e.time); }
+      game.active = null;
+      setTimeout(() => toast(e.clean ? `Summit! ${TRAILS[0].name} in ${fmtT(e.time)}${e.best ? ' · NEW BEST for the ' + spec.name : ` (best ${fmtT(e.prevBest)})`}` : `Summit in ${fmtT(e.time)}. Stages were skipped, so it doesn't count as a best`, 6), 1500);
+    }
+  }
+  if (game.active) game.active.t = crawl.t;
+  game.guide = crawl.guide();
+  game.crawl = crawl.snapshot();
+}
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 const keys = new Set();
 let crawlLimit = false;
@@ -210,6 +240,13 @@ function recover() {
 function restartTrail() {
   if (!car) return;
   if (isRace) { raceRestart(); return; }
+  if (crawl) { // [crawl] back to the gate of the stage you're in (the start before stage 2)
+    const r = crawl.restartPose();
+    respawnFresh(r.x, r.z, r.yaw);
+    if (r.stage.n === 1) { game.active = null; crawlView.resetAll(); }
+    toast(r.stage.n === 1 ? `Back at the start of ${TRAILS[0].name}, fully repaired` : `Back at stage ${r.stage.n} · ${r.stage.name}, repaired. The run clock keeps going`, 2.5);
+    return;
+  }
   const on = trailUnderTruck();
   if (!on) { toast('You are not on a trail'); return; }
   {
@@ -354,7 +391,7 @@ const CONTROLS = [
   ['W / S', 'throttle / brake'], ['A / D', 'steer'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
   ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
-  ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
+  ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ck"><kbd><span>${k}</span></kbd><span>${v}</span></div>`).join('');
@@ -549,6 +586,7 @@ $('ctrlBtn').addEventListener('click', () => showTab('controls'));
 const MAP_TAGS = {
   park: 'Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.',
   race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
+  crawl: 'The Gauntlet: one 780 m rock trail in 12 stages that only gets harder, from a gentle two-track to the Waterfall. A physics and driving test course, with a bypass track and split times.', // [crawl]
 };
 let selectedMap = MAP_ID;
 const mapName = (id) => MAPS.find((m) => m.id === id).name;
@@ -674,7 +712,7 @@ function frame(now) {
       if (!game.done) game.time += dt;
       const p = car.chassis.translation();
       if (game.active) game.active.t += dt;
-      if (isRace) raceUpdate(dt); else updateTrails(p);
+      if (isRace) raceUpdate(dt); else if (crawl) updateCrawl(p, dt); else updateTrails(p); // [crawl]
       // stopped, holding the brake, in a forward gear: hint how to reverse
       if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: scroll the wheel down through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
       if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press Backspace to recover', 1.5); }
