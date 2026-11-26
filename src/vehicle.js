@@ -75,7 +75,7 @@ export class Vehicle {
     // body shell: cab / cage, so rollovers land on the roof
     if (spec.body === 'buggy') box(cw * 0.5, 0.55, 0.95, 0, ch / 2 + 0.55, 0.1, 0.4);
     if (spec.body === 'pickup') { box(cw * 0.5, 0.5, 0.95, 0, ch / 2 + 0.5, -0.35, 0.4); box(cw * 0.5, 0.22, cl * 0.2, 0, ch / 2 + 0.22, cl * 0.3, 0.4); }
-    if (spec.body === 'taco') { box(cw * 0.5, 0.48, 0.95, 0, ch / 2 + 0.48, -0.25, 0.4); box(cw * 0.5, 0.3, cl * 0.31, 0, ch / 2 + 0.2, -cl * 0.33, 0.4); box(cw * 0.5, 0.25, cl * 0.17, 0, ch / 2 + 0.25, cl * 0.3, 0.4); }
+    if (spec.body === 'taco') { box(cw * 0.5, 0.48, 0.95, 0, ch / 2 + 0.48, -0.25, 0.4); box(cw * 0.5, 0.3, cl * 0.17, 0, ch / 2 + 0.2, -cl * 0.33, 0.4); box(cw * 0.5, 0.25, cl * 0.17, 0, ch / 2 + 0.25, cl * 0.3, 0.4); }
     if (spec.body === 'lc70') { box(cw * 0.5, 0.62, 1.55, 0, ch / 2 + 0.62, 0.55, 0.4); box(cw * 0.48, 0.3, 0.6, 0, ch / 2 + 0.3, -cl * 0.36, 0.4); }
     if (spec.body === 'wrx') { box(cw * 0.5, 0.3, cl * 0.48, 0, ch / 2 + 0.2, 0, 0.4); box(cw * 0.44, 0.28, 1.15, 0, ch / 2 + 0.62, 0.15, 0.4); }
     if (spec.body === 'truck') { box(cw * 0.5, 0.65, 0.9, 0, ch / 2 + 0.65, -cl * 0.35, 0.4); box(cw * 0.5, 0.55, cl * 0.3, 0, ch / 2 + 0.55, cl * 0.17, 0.4); }
