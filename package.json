@@ -1,5 +1,5 @@
 {
-  "name": "rockcrawler",
+  "name": "lowrange",
   "version": "1.0.0",
   "description": "Low Range: a browser 4x4 rock-crawling sim with solid-axle physics, a manual drivetrain and rated trails (Three.js + Rapier)",
   "scripts": {

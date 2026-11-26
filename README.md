@@ -1,4 +1,4 @@
-# Low Range: a 4x4 rock-crawling sim
+# LowRange: a 4x4 rock-crawling sim
 
 A browser off-road game with simple low-poly graphics and serious physics. Pick a rig, drop it into 4-Low,
 lock the diffs and pick your line up rated rock trails.
