@@ -15,7 +15,7 @@ export class RaceLaps {
   constructor(track, checkpoints, vehicleId) {
     this.track = track; this.cps = checkpoints; this.vid = vehicleId;
     const b = parseFloat(store.get(KEY(vehicleId)));
-    this.best = Number.isFinite(b) ? b : null;
+    this.best = Number.isFinite(b) && b > 0 ? b : null; // a corrupted "-5" / "0" would be unbeatable
     this.reset();
   }
 

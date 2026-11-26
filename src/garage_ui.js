@@ -38,6 +38,8 @@ export class Garage {
     cv.addEventListener('pointerdown', (e) => { drag = e.clientX; cv.setPointerCapture(e.pointerId); });
     cv.addEventListener('pointermove', (e) => { if (drag === null) return; this.angle -= (e.clientX - drag) * 0.01; drag = e.clientX; this.lastDrag = performance.now(); });
     cv.addEventListener('pointerup', () => { drag = null; });
+    // keep the preview's buffer and aspect matched to its box, or it stretches after a window resize
+    addEventListener('resize', () => { if (this.isOpen) this.resize(); });
   }
 
   initPreview() {
@@ -74,12 +76,12 @@ export class Garage {
     $('gName').textContent = this.base.name;
     this.stock = stats(applyBuild(this.base, defaultBuild(this.base)));
     $('garage').classList.remove('hidden');
-    const wasOpen = this.isOpen;
     this.isOpen = true;
     this.resize();
     this.changed(false);
     this.last = performance.now();
-    if (!wasOpen) requestAnimationFrame((t) => this.frame(t));
+    // one loop only: a close() + open() before the next frame must not start a second one
+    if (!this.looping) { this.looping = true; requestAnimationFrame((t) => this.frame(t)); }
   }
 
   close() {
@@ -149,7 +151,7 @@ export class Garage {
   }
 
   frame(now) {
-    if (!this.isOpen) return;
+    if (!this.isOpen) { this.looping = false; return; }
     const dt = Math.min(0.05, (now - this.last) / 1000); this.last = now;
     if (!this.lastDrag || now - this.lastDrag > 1500) this.angle += dt * 0.35;
     for (let k = 0; k < Math.round(dt / H); k++) this.car.step(IDLE, H);
