@@ -17,8 +17,8 @@ in-game renderer follow this file so separately built pieces match.
 
 | Material | Ramp |
 |---|---|
-| Dirt / trail | `#f2c25a` `#e0a440` `#c4832e` `#9a5f24` |
-| Grass | `#8fd14a` `#5fae36` `#3f8a2e` `#2a6628` |
+| Dirt / trail | `#ecc77e` `#d9aa5e` `#bd8c4e` `#91693f` (softened from `#e0a440` base: less glare) |
+| Grass | `#94c95c` `#67a641` `#488a36` `#316a2e` (a touch less lime than the canopies) |
 | Leaf canopy | `#7cc843` `#4fa032` `#2f7d2c` `#1f5a27` |
 | Pine | `#4f9f4a` `#2f7f3f` `#1f6236` `#164a2e` |
 | Bark / wood | `#c98a4e` `#a5683a` `#7d4a2a` `#55301f` |
@@ -46,4 +46,6 @@ in-game renderer follow this file so separately built pieces match.
 - Outlines come from depth breaks and from **material changes**: each opaque material gets its own outline id, so separate materials on one model (body / glass / tyre) get a dark line where they meet. Use separate materials where you want a line, one material where you don't. A material can opt out with `material.userData.outlineId = 0`.
 - Metallic must stay 0 (the toon pass reads diffuse light; a fully metallic surface would sit in the shade band).
 - Untextured vertex-coloured props can opt into a world-space pixel texture with `material.userData.pixelDetail = true` (the procedural dressing does); textured materials never get it.
-- Ground tiles are generated in `pixeltex.js` from the ramps above (one per surface material, 32 px/m).
+- Ground tiles are generated in `pixeltex.js` from the ramps above (one per surface material, 32 px/m). Eye comfort first: like the Blender props, a tile is mostly one flat ramp colour with broad half-step tone areas and sparse deliberate marks; no salt-and-pepper speckle. Texels never get smaller than about 1.5 screen pixels (whole mip steps), so the ground never crawls.
+- `terrain_look.js`: on roads, trails and the race track the ground shows the gameplay material grid exactly (what the tyres grip); off the paths it shows a calm visual surface (large grass / dirt areas, rock only as outcrops and cliff bands on the steepest ground). Borders are wobbly, pixel-stepped on a fixed world lattice, and grass gets a darker painted rim. Terrain lighting uses softened normals and a soft 3-step ramp so bands follow the big shape of hills.
+- Outlines fade out with distance (terrain ridges sooner than objects), and 1-pixel-thin features (racks, rails, posts) get only a light darkening so their frame-to-frame popping stays a small tone change. The shadow camera is snapped to whole shadow texels so shadow edges hold still while driving.
