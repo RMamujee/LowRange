@@ -10,8 +10,15 @@ export const MAPS = [
   { id: 'race', name: 'Race Track' },
 ];
 const want = (globalThis.location && new URLSearchParams(globalThis.location.search).get('map')) || globalThis.process?.env?.MAP || 'park';
-export const MAP_ID = MAPS.some((m) => m.id === want) ? want : 'park';
-const M = MAP_ID === 'race' ? await import('./maps/racetrack.js') : await import('./maps/trailpark.js');
+// only known ids map to fixed module paths; if the chosen map fails to load, fall back to the park
+let M;
+try {
+  M = want === 'race' ? await import('./maps/racetrack.js') : await import('./maps/trailpark.js');
+} catch (e) {
+  console.warn(`Map "${want}" failed to load, falling back to the Trail Park`, e);
+  M = await import('./maps/trailpark.js');
+}
+export const MAP_ID = M.ID;
 
 export const MAP = M;
 export const MAP_NAME = M.NAME;

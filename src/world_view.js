@@ -1,9 +1,10 @@
-// Low-poly rendering of the trail park: terrain, rocks, trees, road/trail markers,
-// signposts, start/finish gates and the minimap.
+// Low-poly rendering of the active map: terrain, rocks, trees and the minimap, plus the
+// trail park's road/trail markers, signposts and start/finish gates. The race track's
+// dressing lives in race_view.js.
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, ROADS, TRAILS, DIFF, TRAILHEAD, pathPoint } from './terrain.js';
+import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from './terrain.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -21,7 +22,7 @@ export function buildTerrainMesh() {
     const m = GRID.mat[g];
     const base = MAT_INFO[m].color;
     let v = 0.86 + fbm(x * 0.35, z * 0.35, 2) * 0.12 + (Math.random() - 0.5) * 0.05;
-    if (m === MAT.ROAD) v = 0.92 + fbm(x * 0.6, z * 0.6, 2) * 0.06; // smoother graded surface
+    if (m === MAT.ROAD || m === MAT.TARMAC) v =0.92 + fbm(x * 0.6, z * 0.6, 2) * 0.06; // smoother graded surface
     if (GRID.path[g] >= NROADS && m !== MAT.MUD) v *= 0.8; // worn, darker trail tread
     c.setRGB(base[0] * v, base[1] * v, base[2] * v);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
@@ -219,7 +220,19 @@ export function buildMinimapBase(size = 220) {
   for (const r of ROADS) { stroke(r, 'rgba(0,0,0,.5)', 5); stroke(r, '#f4ead2', 3); }
   for (const t of TRAILS) { stroke(t, '#fff', 4); stroke(t, t.diff === 'dblack' || t.diff === 'black' ? '#111' : DIFF[t.diff].color, 2.5); }
   for (const t of TRAILS) { const p = t.pts[0]; drawDiffSymbol(ctx, t.diff, toPx(p.x), toPx(p.z), 5); }
-  ctx.fillStyle = '#ffb340'; ctx.beginPath(); ctx.arc(toPx(TRAILHEAD.x), toPx(TRAILHEAD.z), 5, 0, Math.PI * 2); ctx.fill();
+  if (TRAILHEAD) { ctx.fillStyle = '#ffb340'; ctx.beginPath(); ctx.arc(toPx(TRAILHEAD.x), toPx(TRAILHEAD.z), 5, 0, Math.PI * 2); ctx.fill(); }
+  if (TRACK) {
+    stroke(TRACK, 'rgba(0,0,0,.55)', 8); stroke(TRACK, '#d9c7a6', 5);
+    // start / finish line and numbered checkpoints
+    const c0 = CHECKPOINTS[0], hw = TRACK.width / 2 + 3;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath();
+    ctx.moveTo(toPx(c0.x + c0.tz * hw), toPx(c0.z - c0.tx * hw)); ctx.lineTo(toPx(c0.x - c0.tz * hw), toPx(c0.z + c0.tx * hw)); ctx.stroke();
+    ctx.font = 'bold 9px Bahnschrift, Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const c of CHECKPOINTS.slice(1)) {
+      ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.beginPath(); ctx.arc(toPx(c.x), toPx(c.z), 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(String(c.i), toPx(c.x), toPx(c.z) + 0.5);
+    }
+  }
   return { canvas: cv, toPx };
 }
 
