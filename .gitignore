@@ -5,3 +5,4 @@ dist/
 Claude outputs/
 test/shots/
 test/audio-samples/
+.claude/
