@@ -68,12 +68,13 @@ const pGeo = new THREE.BufferGeometry();
 const pPos = new Float32Array(PMAX * 3), pCol = new Float32Array(PMAX * 3);
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
 pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
-const pMat = new THREE.PointsMaterial({ size: 0.32, vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false });
+const pMat = new THREE.PointsMaterial({ size: 0.2, vertexColors: true, transparent: true, opacity: 0.32, depthWrite: false });
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 scene.add(points);
 const parts = Array.from({ length: PMAX }, () => ({ life: 0, x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, r: 0, g: 0, b: 0 }));
 let pNext = 0;
+const dustAcc = [0, 0, 0, 0];
 function emit(x, y, z, vx, vy, vz, col, life) {
   const p = parts[pNext]; pNext = (pNext + 1) % PMAX;
   Object.assign(p, { x, y, z, vx, vy, vz, life, r: col[0], g: col[1], b: col[2] });
@@ -82,7 +83,7 @@ function updateParticles(dt) {
   for (let i = 0; i < PMAX; i++) {
     const p = parts[i];
     if (p.life > 0) {
-      p.life -= dt; p.vy -= 6 * dt; p.vx *= 0.97; p.vz *= 0.97;
+      p.life -= dt; p.vy -= 1.5 * dt; const drag = Math.exp(-2.5 * dt); p.vx *= drag; p.vz *= drag; p.vy *= drag;
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
       if (p.life <= 0) p.y = -999;
     }
@@ -319,29 +320,41 @@ addEventListener('pointermove', (e) => {
 });
 
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _t = new THREE.Vector3();
+// frame-rate independent exponential smoothing factor
+const damp = (k, dt) => 1 - Math.exp(-k * dt);
+const camTarget = new THREE.Vector3();
+let camTargetInit = false;
 function updateCamera(dt) {
   const p = car.chassis.translation(), q = car.chassis.rotation();
   _q.set(q.x, q.y, q.z, q.w);
-  const target = _t.set(p.x, p.y + 0.9, p.z);
+  // smoothed look-at point: follows the truck closely sideways, but soaks up the
+  // vertical bounce of crawling over rocks so the picture doesn't shake
+  if (!camTargetInit || camTarget.distanceTo(_t.set(p.x, p.y + 0.9, p.z)) > 15) { camTarget.set(p.x, p.y + 0.9, p.z); camTargetInit = true; }
+  camTarget.x += (p.x - camTarget.x) * damp(14, dt);
+  camTarget.z += (p.z - camTarget.z) * damp(14, dt);
+  camTarget.y += (p.y + 0.9 - camTarget.y) * damp(4, dt);
+  const target = _t.copy(camTarget);
   const mode = CAM_MODES[camState.mode];
   if (mode === 'Chase') {
     const { heading } = car.attitude();
     let dh = heading - camState.heading;
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    camState.heading += dh * Math.min(1, dt * 2.5);
+    camState.heading += dh * damp(2.2, dt);
     if (clock - camState.lastDrag > 2.5 && !camState.dragging) camState.yaw *= Math.max(0, 1 - dt * 1.5);
     const yaw = camState.heading + camState.yaw;
     const cp = Math.cos(camState.pitch), d = camState.dist;
-    _v.set(p.x + Math.sin(yaw) * cp * d, p.y + 0.9 + Math.sin(camState.pitch) * d, p.z + Math.cos(yaw) * cp * d);
+    _v.set(target.x + Math.sin(yaw) * cp * d, target.y + Math.sin(camState.pitch) * d, target.z + Math.cos(yaw) * cp * d);
     _v.y = Math.max(_v.y, visualHeightAt(_v.x, _v.z) + 0.6);
-    camera.position.lerp(_v, Math.min(1, dt * 10));
+    camera.position.lerp(_v, damp(7, dt));
     camera.lookAt(target);
   } else if (mode === 'Hood') {
     const [, ch] = spec.chassis.size;
     const seat = spec.body === 'buggy' ? 0.95 : spec.body === 'pickup' ? 1.2 : 1.5;
     const zz = spec.body === 'truck' ? -spec.chassis.size[2] * 0.36 : spec.body === 'pickup' ? -0.3 : 0.25;
     camera.position.set(-0.3, ch / 2 + seat, zz).applyQuaternion(_q).add(p);
-    camera.quaternion.copy(_q).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12 + camState.pitch * 0.2 - 0.064, camState.yaw, 0, 'YXZ')));
+    // seat-mounted view: filter the cab's rattle out of the rotation
+    const want = _q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12 + camState.pitch * 0.2 - 0.064, camState.yaw, 0, 'YXZ')));
+    camera.quaternion.slerp(want, damp(9, dt));
   } else if (mode === 'Spotter') {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(_q); fwd.y = 0; fwd.normalize();
     if (!camState.spot || camState.spot.distanceTo(target) > 22 || camState.spot.distanceTo(target) < 3) {
@@ -574,19 +587,27 @@ function frame(now) {
         const gsh = car.dt.dead ? 0.15 : 0.45;
         emit(hp.x, hp.y, hp.z, (Math.random() - 0.5) * 0.6, 1.2 + Math.random(), (Math.random() - 0.5) * 0.6, [gsh, gsh, gsh], 1.5);
       }
-      // tyre spray
-      const sp = car.speed();
+      // tyre spray: a gentle, rate-limited trickle (easy on the eyes)
+      const sp = Math.abs(car.speed());
       car.wheelState.forEach((ws, i) => {
         if (!ws.grounded) return;
         const mat = ws.mat;
-        const spray = ws.slip > 0.8 || ((mat === MAT.MUD || mat === MAT.SAND || mat === MAT.DIRT) && Math.abs(sp) > 3);
-        if (!spray || Math.random() > 0.55) return;
-        const w = car.wheels[i].translation();
-        const c = MAT_INFO[mat].color.map((x) => x * (0.8 + Math.random() * 0.3));
-        const back = new THREE.Vector3(0, 0, Math.sign(ws.spin || 1)).applyQuaternion(_q);
-        const s = 1.2 + Math.min(4, ws.slip);
-        emit(w.x + (Math.random() - 0.5) * 0.3, w.y - spec.tire.radius * 0.7, w.z + (Math.random() - 0.5) * 0.3,
-          back.x * s + (Math.random() - 0.5), 1.2 + Math.random() * 2, back.z * s + (Math.random() - 0.5), c, 0.6 + Math.random() * 0.8);
+        const loose = mat === MAT.MUD || mat === MAT.SAND || mat === MAT.DIRT || mat === MAT.GRAVEL;
+        let rate = 0; // particles per second for this wheel
+        if (ws.slip > 1.0) rate = Math.min(14, 3 + ws.slip * 2.5);
+        else if (loose && sp > 5) rate = Math.min(8, (sp - 5) * 0.6);
+        dustAcc[i] += rate * dt;
+        while (dustAcc[i] >= 1) {
+          dustAcc[i] -= 1;
+          const w = car.wheels[i].translation();
+          const base = MAT_INFO[mat].color;
+          // soft, slightly lightened colour so puffs read as haze, not confetti
+          const c = base.map((x) => Math.min(1, x * 0.85 + 0.12 + (Math.random() - 0.5) * 0.04));
+          const back = new THREE.Vector3(0, 0, Math.sign(ws.spin || 1)).applyQuaternion(_q);
+          const sv = 0.5 + Math.min(1.5, ws.slip * 0.3);
+          emit(w.x + (Math.random() - 0.5) * 0.25, w.y - spec.tire.radius * 0.75, w.z + (Math.random() - 0.5) * 0.25,
+            back.x * sv + (Math.random() - 0.5) * 0.3, 0.4 + Math.random() * 0.5, back.z * sv + (Math.random() - 0.5) * 0.3, c, 0.5 + Math.random() * 0.5);
+        }
       });
     }
     updateParticles(dt);
