@@ -28,6 +28,7 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+import blend_save  # noqa: E402
 import render_loading  # noqa: E402
 
 VEH_DIR = os.path.join(REPO, 'public', 'models', 'vehicles')
@@ -705,7 +706,7 @@ def main():
             except RuntimeError as e:
                 print('[loading] pack failed', img.name, e)
     os.makedirs(os.path.dirname(BLEND), exist_ok=True)
-    bpy.ops.wm.save_as_mainfile(filepath=BLEND, compress=True)
+    blend_save.save(BLEND, log=lambda *a: print('[loading]', *a))   # no local paths / file-browser state
     print('[loading] saved', BLEND, os.path.getsize(BLEND) // 1024, 'KB')
     render_loading.render_all(only or None)
 

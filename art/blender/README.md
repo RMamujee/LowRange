@@ -53,7 +53,10 @@ Outputs:
   (frames 1-8, keys on the Rig's `settle_z`/`settle_roll`); the game plays it as a loop
 - `docs/previews/loading_<id>.png` - the still at 3x for review
 
-Save the .blend after editing (packed textures; `File > External Data > Pack Resources` if you add images).
+Save the .blend after editing (packed textures; `File > External Data > Pack Resources` if you add images), then
+strip the local paths Blender stores in it (File Browser folder, packed-from paths) before committing:
+`blender --background --factory-startup art/blender/loading_screen.blend --python tools/blender/blend_save.py`,
+checked by `node test/blend_paths.mjs`.
 
 ## Rebuilding from scratch
 

@@ -1074,8 +1074,9 @@ try:
     bpy.ops.file.pack_all()
 except Exception as e:
     log('pack_all:', e)
-bpy.context.preferences.filepaths.save_version = 0   # no .blend1 backups next to the output
-bpy.ops.wm.save_as_mainfile(filepath=OUT, compress=True)
+sys.path.insert(0, os.path.dirname(HERE))
+import blend_save  # noqa: E402
+blend_save.save(OUT, log=log)   # compressed, no .blend1, no local paths / file-browser state
 log(f'saved {OUT} ({os.path.getsize(OUT) / 1e6:.1f} MB)')
 
 
