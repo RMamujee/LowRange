@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { GROUND_GLSL, groundUniforms, LAYER_BOULDER, TEX_BIAS } from './pixeltex.js';
 import { FOG_MAX } from './palette.js';
+import { mudCoatPatch } from '../fx/mud_coat.js'; // [tyre fx] mud caked on the truck
 
 const col = (hex) => new THREE.Color(hex); // stored linear (ColorManagement converts from sRGB hex)
 
@@ -83,6 +84,7 @@ export function toonPatch(shader, material) {
   Object.assign(shader.uniforms, TOON);
   shader.uniforms.uOutlineId = { value: outlineId(material) }; // per material
   if (material.userData.fade) fadePatch(shader, material.userData.fade);
+  if (material.userData.mudCoat) mudCoatPatch(shader, material.userData.mudCoat); // [tyre fx]
   if (material.userData.world) {
     shader.fragmentShader = '#define TOON_WORLD\n' + shader.fragmentShader;
     // calmer textures on world props (canopies, bushes, stones): each texel keeps its own crisp
@@ -188,7 +190,7 @@ export function installToon() {
   proto.onBeforeCompile = function (shader) { toonPatch(shader, this); if (wantsDetail(this)) detailPatch(shader); };
   proto.customProgramCacheKey = function () {
     crispMaps(this);
-    return (wantsDetail(this) ? 'toon+detail' : 'toon') + (this.userData.fade ? '+fade' : '') + (this.userData.world ? '+world' : '');
+    return (wantsDetail(this) ? 'toon+detail' : 'toon') + (this.userData.fade ? '+fade' : '') + (this.userData.world ? '+world' : '') + (this.userData.mudCoat ? '+mud' + this.userData.mudCoat : '');
   };
 }
 

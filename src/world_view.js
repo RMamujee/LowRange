@@ -10,6 +10,7 @@ import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals,
 import { BACKDROP } from './gfx/palette.js';
 import { cullBeyond } from './gfx/pipeline.js';
 import { fitFace, signpost, bannerBoard, faceYaw, signMaterial } from './art/signs.js';
+import { baseVertexHeight } from './fx/mud_view.js'; // [tyre fx]
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -23,7 +24,7 @@ export function buildTerrainMesh() {
     const x = pos.getX(i), z = pos.getZ(i);
     const ix = Math.round((x + SIZE / 2) / (SIZE / n)), iz = Math.round((z + SIZE / 2) / (SIZE / n));
     const g = ix * N1 + iz;
-    pos.setY(i, GRID.vis[g]);
+    pos.setY(i, baseVertexHeight(GRID, N1, ix, iz)); // [tyre fx] inside the bogs: the firm floor (fx/mud_view.js draws the mud)
     const m = GRID.mat[g];
     const base = MAT_INFO[m].color;
     let v = 0.86 + fbm(x * 0.35, z * 0.35, 2) * 0.12 + (Math.random() - 0.5) * 0.05;
