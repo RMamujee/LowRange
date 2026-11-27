@@ -3,6 +3,7 @@ canvas.px { image-rendering: pixelated; image-rendering: crisp-edges; display: b
 #hud canvas.px { pointer-events: auto; }
 #hud .hud-cluster { left: 10px; bottom: 10px; cursor: pointer; }
 #hud .hud-chassis { right: 10px; bottom: 10px; pointer-events: none; }
+#hud .hud-engine { left: 10px; pointer-events: none; } /* bottom: set by hud.js layout, above the cluster */
 #hud .hud-mini { right: 10px; top: 10px; cursor: pointer; }
 #hud .hud-toast { left: 50%; top: 15%; transform: translateX(-50%); opacity: 0; transition: opacity .18s steps(3); pointer-events: none; }
 #hud .hud-toast.show { opacity: 1; }
