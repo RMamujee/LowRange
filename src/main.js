@@ -181,7 +181,10 @@ function updateCrawl(p, dt) {
     if (e.type === 'start') { c.view.resetAll(); game.active = { trail: 0, from: 0, t: 0, course: c === crawl ? null : c.id }; toast(`${name}: the clock is running. ${U} 1 · ${e.stage.name}`, 3); }
     else if (e.type === 'split') { c.view.setDone(e.stage.n); toast(`${U} ${e.stage.n} ${e.stage.name}: ${fmtT(e.split)}${e.best ? (e.prevBest != null ? ' · NEW BEST' : '') : ` (best ${fmtT(e.prevBest)})`}`, 2.5); }
     else if (e.type === 'stage') {
-      if (!game.active) game.active = { trail: 0, from: 0, t: c.t, course: c === crawl ? null : c.id }; // (course: a side course run, not The Gauntlet)
+      // (course: a side course run, not The Gauntlet). Joining a course at a later gate while another
+      // course's run is active: that run is cancelled (its 'cancel' event follows), so take over game.active
+      const id = c === crawl ? null : c.id;
+      if (!game.active || game.active.course !== id) game.active = { trail: 0, from: 0, t: c.t, course: id };
       const st = e.stage, d = DIFF[st.diff].label;
       setTimeout(() => toast(`${e.retry ? 'Retry: ' : ''}${U} ${st.n}/${N} · ${st.name} (${d}). ${st.blurb}`, 4), e.retry ? 0 : 1200);
     } else if (e.type === 'finish') {

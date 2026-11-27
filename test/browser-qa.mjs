@@ -186,6 +186,22 @@ await page.close();
   await page.evaluate(() => window.__game.hud.toggleMap()); await page.waitForTimeout(500);
   const r = await page.evaluate(() => { const m = window.__game.hud.debug().map, c = m.hits.find((h) => h.act === 'clear'); return { tab: m.tab, clearBottom: c ? c.y + c.h : null, hintsTop: m.hintsTop }; });
   check(r.clearBottom !== null && r.hintsTop >= r.clearBottom, `Gauntlet map hints clear of CLEAR ALL (${JSON.stringify(r)})`);
+  // 11. a Gauntlet run, then into a side course through a later section gate: the side course's run takes
+  // over game.active (it kept the Gauntlet's, so the big map showed The Gauntlet running on its clock)
+  {
+    await page.evaluate(() => window.__game.hud.toggleMap());
+    const walk = (which, s0, s1) => page.evaluate(async ([which, s0, s1]) => {
+      const T = await import('/src/terrain.js'), path = which < 0 ? T.TRAILS[0] : T.COURSES[which];
+      for (let s = s0; s <= s1; s += 0.5) { const p = T.pathPoint(path, s); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.0, z: p.z }, Math.atan2(-p.tx, -p.tz)); await new Promise((r) => requestAnimationFrame(r)); }
+    }, [which, s0, s1]);
+    const [g0, s2, id] = await page.evaluate(async () => { const T = await import('/src/terrain.js'); return [T.TRAILS[0].stages[0].gateS, T.COURSES[0].stages[1].gateS, T.COURSES[0].id]; });
+    await walk(-1, g0 - 4, g0 + 4);
+    const a0 = await page.evaluate(() => window.__game.activeTrail);
+    await walk(0, s2 - 4, s2 + 4);
+    const a1 = await page.evaluate(() => window.__game.activeTrail);
+    if (!a0 || a0.course !== null) { notRun++; console.log('  NOT RUN', `side course join: the Gauntlet run did not start (${JSON.stringify(a0)})`); }
+    else check(a1?.course === id, `joining ${id} at section 2 during a Gauntlet run: the run is the side course's (${JSON.stringify(a1)})`);
+  }
   check(errors.length === 0, `no console errors on the Gauntlet map${errors.length ? ': ' + errors[0] : ''}`);
 }
 await browser.close();
