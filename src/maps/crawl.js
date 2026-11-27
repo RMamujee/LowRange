@@ -3,6 +3,8 @@
 // harder, stage by stage, from a gentle two-track to the Waterfall, then tops out on a summit
 // pad. A graded bypass track runs alongside with a spur into every stage gate, so a stage can
 // be skipped, retried or escaped. Everything is seeded: the same course every load.
+// Three separate side courses share the map (Broken Slab, Camber Ridge, Cobble Gully): they live in
+// src/maps/crawl_courses.js and are added after The Gauntlet is baked, without touching it.
 //
 // Tuning lives in STAGE_DEFS below. Climbing limits for the 0.455-0.51 m radius crawler tyres
 // (test/ledgegrade.mjs and the Trail Park notes): about 0.6 m steps on up to 25% grade, 0.45 m
@@ -10,6 +12,7 @@
 // slab with the ground filled in behind it), so a staircase really climbs and no pit forms
 // between two steps.
 import { MAT, MUD_SINK, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
+import { buildCourses, sculptCourses, courseRocks, nearCourses } from './crawl_courses.js'; // the side courses
 
 export const ID = 'crawl';
 export const NAME = 'The Gauntlet';
@@ -216,7 +219,8 @@ export const ROADS = [];
     st.spur = ROADS.length - 1;
   }
 }
-const PATHS = [...ROADS, ...TRAILS];
+const G_ROADS = ROADS.slice();      // The Gauntlet's own roads (bypass + spurs), before the courses' tracks
+const PATHS = [...ROADS, ...TRAILS]; // The Gauntlet's paths (rock / tree placement keys on these)
 
 // ---------------------------------------------------------------- base landscape
 // A coarse grid (8 m) interpolates the course heights by inverse distance, so the mountainside
@@ -248,6 +252,19 @@ function baseHeight(x, z) {
   h += smooth(150, 198, Math.max(Math.abs(x), Math.abs(z))) * 30;
   return h;
 }
+
+// ---------------------------------------------------------------- side courses (src/maps/crawl_courses.js)
+// Broken Slab, Camber Ridge and Cobble Gully: separate timed courses with their access tracks.
+// The Gauntlet is baked exactly as without them; then its grid is snapshotted, the tracks are
+// carved and the courses sculpted, and everything within 10 m of a Gauntlet path cell is put back
+// from the snapshot (eased over 4 m more). The Gauntlet's rocks and trees are generated on the
+// snapshot and only filtered where the courses changed the ground, so they stay where they were.
+// LOWRANGE_NO_COURSES=1 (Node) builds the map without them, for test/coursecheck.mjs's comparison.
+const WITH_COURSES = !globalThis.process?.env?.LOWRANGE_NO_COURSES;
+const COURSE_BUILD = WITH_COURSES ? buildCourses({ makeRoad, baseHeight, roads: ROADS, pads: { summit: SUMMIT, trailhead: { h: H0 } } }) : { courses: [], roads: [] };
+export const COURSES = COURSE_BUILD.courses;
+export const ACCESS = COURSE_BUILD.roads;
+const BAKE_PATHS = PATHS; // The Gauntlet's own bake; the tracks join ROADS after it
 
 // ---------------------------------------------------------------- tread shaping per stage
 const bump = (d, r) => (d >= r ? 0 : (1 - (d / r) ** 2) ** 2);
@@ -318,7 +335,7 @@ export const WATER = { y: 0, stage: 8 }; // ford surface height, set in bake()
 function bake() {
   const B = 16, nb = Math.ceil(SIZE / B);
   const bins = Array.from({ length: nb * nb }, () => []);
-  PATHS.forEach((p, pi) => {
+  BAKE_PATHS.forEach((p, pi) => {
     for (let i = 1; i < p.pts.length; i++) {
       const a = p.pts[i - 1], b = p.pts[i];
       const reach = Math.max(a.w ?? p.width, p.width) / 2 + p.shoulder + 1;
@@ -345,7 +362,7 @@ function bake() {
       const bin = bins[Math.floor((x + SIZE / 2) / B) * nb + Math.floor((z + SIZE / 2) / B)] || [];
       const perPath = new Map();
       for (const [pi, i] of bin) {
-        const p = PATHS[pi], a = p.pts[i - 1], b = p.pts[i];
+        const p = BAKE_PATHS[pi], a = p.pts[i - 1], b = p.pts[i];
         const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
         const t = clamp(((x - a.x) * ex + (z - a.z) * ez) / L2, 0, 1);
         const d = Math.hypot(x - (a.x + ex * t), z - (a.z + ez * t));
@@ -363,7 +380,7 @@ function bake() {
       if (best) {
         let num = 0, den = 0, W = 0;
         for (const c of perPath.values()) {
-          const q = PATHS[c.pi];
+          const q = BAKE_PATHS[c.pi];
           const w = 1 - smooth(c.hw, c.hw + q.shoulder, c.d);
           if (w <= 0) continue;
           let surf = c.ph;
@@ -374,7 +391,7 @@ function bake() {
           num += surf * ww; den += ww; W = Math.max(W, w);
         }
         if (den > 0) h = lerp(h, num / den, W);
-        const p = PATHS[best.pi];
+        const p = BAKE_PATHS[best.pi];
         if (best.d < best.hw + 0.5) {
           pathId = best.pi;
           if (p.kind === 'road') mat = MAT.ROAD;
@@ -422,6 +439,26 @@ function bake() {
   }
 }
 bake();
+// The Gauntlet as baked: what its rocks and trees are placed on, and what the courses restore near it
+const G0 = makeGrid(SIZE, RES);
+for (const k of ['h', 'vis', 'mat', 'path', 'tone']) G0.GRID[k].set(GRID[k]);
+// the side courses: tracks join the road list (the trail's path id moves up past them, as the views
+// expect road ids first), then tracks, course ground, and the Gauntlet's surroundings put back
+if (WITH_COURSES) {
+  const oldTrail = G_ROADS.length;
+  for (const r of ACCESS) ROADS.push(r);
+  const trailId = ROADS.length;
+  for (const P of [GRID.path, G0.GRID.path]) for (let i = 0; i < P.length; i++) if (P[i] === oldTrail) P[i] = trailId;
+  sculptCourses(COURSES, ACCESS, grid, G0.GRID, (id) => id < G_ROADS.length || id === trailId, G_ROADS.length, trailId + 1);
+}
+// where the courses changed the ground (cells), for filtering the Gauntlet's boulders and trees
+const changedNear = (x, z, r) => {
+  const i0 = clamp(Math.floor((x - r + SIZE / 2) / CELL), 0, RES), i1 = clamp(Math.ceil((x + r + SIZE / 2) / CELL), 0, RES);
+  const j0 = clamp(Math.floor((z - r + SIZE / 2) / CELL), 0, RES), j1 = clamp(Math.ceil((z + r + SIZE / 2) / CELL), 0, RES);
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = i * N1 + j; if (GRID.h[k] !== G0.GRID.h[k] || GRID.mat[k] !== G0.GRID.mat[k]) return true; }
+  return false;
+};
+const reachOf = (r) => { let m = 0; for (let i = 0; i < r.pts.length; i += 3) m = Math.max(m, Math.hypot(r.pts[i], r.pts[i + 2])); return m; };
 
 function onAnyPath(x, z, margin) {
   for (const p of PATHS) for (let i = 0; i < p.pts.length; i += 4) {
@@ -454,7 +491,7 @@ function stepSlab(st, u, rise, depth, R, tilt = 0) {
 
 export function generateRocks() {
   const R = rng(31337);
-  const { rocks, shape, put, boulder, reach, ledge } = rockKit(R, heightAt);
+  const { rocks, shape, put, boulder, reach, ledge } = rockKit(R, G0.heightAt); // (on The Gauntlet as baked)
   const at = (s, lat) => { const p = pathPoint(TRAIL, s); return { p, x: p.x - p.tz * lat, z: p.z + p.tx * lat, nx: -p.tz, nz: p.tx }; };
   // spur junctions (right side, the 20 m before each gate) stay free of edge rocks
   const nearSpur = (s, lat) => lat > 0 && STAGES.some((st) => st.spur !== undefined && s > st.s0 - 21 && s < st.s0 + 1);
@@ -529,16 +566,19 @@ export function generateRocks() {
     }
   }
 
-  // scattered boulders off the paths
+  // scattered boulders off the paths (then dropped where the side courses and their tracks run:
+  // filtered afterwards, so the random stream and every other boulder stay as they were)
+  const n0 = rocks.length;
   for (let i = 0; i < 240; i++) {
     const x = (R() * 2 - 1) * 172, z = (R() * 2 - 1) * 172;
     if (onAnyPath(x, z, 3)) continue;
     boulder(x, z, 0.5 + Math.pow(R(), 2) * 2.4, 0.8);
   }
+  for (let i = rocks.length - 1; i >= n0; i--) { const r = rocks[i]; if (nearCourses(COURSES, ACCESS, r.x, r.z, 4.5) || changedNear(r.x, r.z, reachOf(r) + 1)) rocks.splice(i, 1); }
 
   // ---- ground relief: embedded rocks in the tread, on the step tops and beside the trail ----
   // (own random stream, so the obstacle layout above is unchanged by relief tuning)
-  const E = rockKit(rng(4711), heightAt), R2 = rng(4712);
+  const E = rockKit(rng(4711), G0.heightAt), R2 = rng(4712);
   for (const st of STAGES) {
     const rl = st.relief, hw = st.width / 2;
     if (!rl) continue;
@@ -576,11 +616,13 @@ export function generateRocks() {
     }
   }
   for (const r of E.rocks) rocks.push(r);
+  // the side courses' rocks: ledges, cobbles, kickers, ribs, banks (own random streams)
+  for (const r of courseRocks(COURSES, heightAt)) rocks.push(r);
   return rocks;
 }
 // near the bypass track or a spur?
 function onRoad(x, z, margin) {
-  for (const p of ROADS) for (let i = 0; i < p.pts.length; i += 2) if (Math.hypot(p.pts[i].x - x, p.pts[i].z - z) < p.width / 2 + margin) return true;
+  for (const p of G_ROADS) for (let i = 0; i < p.pts.length; i += 2) if (Math.hypot(p.pts[i].x - x, p.pts[i].z - z) < p.width / 2 + margin) return true;
   return false;
 }
 
@@ -589,12 +631,12 @@ export function generateTrees() {
   const trees = [];
   for (let i = 0; i < 5000 && trees.length < 400; i++) {
     const x = (R() * 2 - 1) * 176, z = (R() * 2 - 1) * 176;
-    const m = materialAt(x, z);
+    const m = G0.materialAt(x, z); // The Gauntlet as baked, so the random stream is as it was
     if (m !== MAT.GRASS && m !== MAT.DIRT) continue;
     if (onAnyPath(x, z, 4.5)) continue;
-    trees.push({ x, z, y: heightAt(x, z), s: 0.7 + R() * 0.8 });
+    trees.push({ x, z, y: G0.heightAt(x, z), s: 0.7 + R() * 0.8 });
   }
-  return trees;
+  return trees.filter((t) => !nearCourses(COURSES, ACCESS, t.x, t.z, 5) && !changedNear(t.x, t.z, 1)); // none on the side courses, their tracks or ground they reshaped
 }
 
 // Small loose stones (about 0.2-0.38 m across) on the early stages; src/crawl_view.js makes them

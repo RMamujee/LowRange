@@ -1,7 +1,7 @@
 // Pixel maps: terrain baked in the ART_STYLE ramps (stepped hill shading, contour lines, tree dots,
 // roads / trails / race track stamped as hard pixels), the player-centred minimap, the expandable
 // big map with pan / zoom and click-to-place waypoints, and the per-map waypoint store.
-import { SIZE, RES, GRID, MAT, ROADS, TRAILS, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from '../terrain.js';
+import { SIZE, RES, GRID, MAT, ROADS, TRAILS, COURSES, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from '../terrain.js';
 import { P, mk, rect, px, board, paper, inset, shape, tiny, tinyMeasure, sign, bayer, clamp, diffSym, tick, fmtT, fmtLap, rotSprite, spriteFrom } from './px.js';
 
 // ------------------------------------------------------------------ terrain bake
@@ -73,6 +73,12 @@ function bakeBase(ppm, trees) {
     // [crawl] a staged trail is stamped stage by stage in each stage's colour
     if (t.stages) for (const st of t.stages) stamp({ pts: t.pts.filter((p) => p.s >= st.s0 - 0.5 && p.s <= st.s1 + 0.5) }, w, coreOf(st.diff));
     else stamp(t, w, coreOf(t.diff));
+  }
+  // [crawl] the Gauntlet's side courses, section by section, as wide as they really are (the slab face)
+  for (const C of COURSES) {
+    const secs = C.stages.map((st) => [{ pts: C.pts.filter((p) => p.s >= st.s0 - 0.5 && p.s <= st.s1 + 0.5) }, Math.max(1, Math.min(st.width, 12) * ppm * 0.55), st.diff]);
+    for (const [q, w] of secs) stamp(q, w + 2, P.cream);
+    for (const [q, w, d] of secs) stamp(q, w, coreOf(d));
   }
   return f.cv;
 }
@@ -268,7 +274,7 @@ export class BigMap {
     if (TRAILHEAD) { const [hx, hy] = V(TRAILHEAD.x, TRAILHEAD.z); rect(g, hx - 3, hy - 3, 7, 7, P.ol); rect(g, hx - 2, hy - 2, 5, 5, P.amber); px(g, hx - 2, hy - 2, P.amberHi); if (f.z >= 1) labelBox(g, 'TRAILHEAD', hx, hy + 6, P.ink); }
     const placed = [];
     TRAILS.forEach((t, i) => {
-      const s = st.trails[i], act = st.active && st.active.trail === i;
+      const s = st.trails[i], act = st.active && st.active.trail === i && !st.active.course; // [crawl] (not a side course's run)
       const m =pathPoint(t, t.length / 2), [lx, ly] = V(m.x, m.z);
       let label = t.name.toUpperCase();
       if (act) label += ' ' + fmtT(st.active.t);
@@ -283,6 +289,14 @@ export class BigMap {
       placed.push([bx - bw / 2, by, bw, 9]);
       const w = labelBox(g, label, bx, by, act ? P.redDark : P.ink, pad);
       if (pad) tick(g, bx - Math.floor(w / 2) + 2, by + 1);
+    });
+    // [crawl] side course names; the one in focus shows its clock (at 1/2 zoom the sidebar names it)
+    COURSES.forEach((C) => {
+      // at the middle of the longest section: as far from its gates and spawn signposts as it gets
+      const big = C.stages.reduce((a, q) => (q.len > a.len ? q : a)), m = pathPoint(C, big.s0 + big.len / 2), [lx, ly] = V(m.x, m.z), cs = st.crawl?.course;
+      const label = C.name.toUpperCase() + (cs && cs.id === C.id && cs.running ? ' ' + fmtT(cs.t) : '');
+      // (from zoom 1 up, like the trailhead's: at 1/2 the course is too short for a label to clear its gates)
+      if (f.z >= 1) labelBox(g, label, lx, ly - 14, cs?.id === C.id && cs.running ? P.redDark : P.ink);
     });
     if (this.isRace && CHECKPOINTS.length) {
       CHECKPOINTS.forEach((c, i) => {
@@ -315,6 +329,15 @@ export class BigMap {
         }
       } else for (const end of [3, t.length - 3]) { const e = pathPoint(t, end); const [ex, ey] = V(e.x, e.z); diffSym(g, t.diff, ex, ey); }
     });
+    // [crawl] side course gates: numbered, F for the finish, the next one lit for the course in focus
+    for (const C of COURSES) {
+      const cs = st.crawl?.course && st.crawl.course.id === C.id ? st.crawl.course : null, cur = cs ? cs.stage : 0;
+      for (const q of C.stages) {
+        const [gx, gy] = V(q.gate.x, q.gate.z), next = cs && q.n === cur + 1, done = cs && q.n <= cur;
+        rect(g, gx - 4, gy - 4, 9, 9, P.ol); rect(g, gx - 3, gy - 3, 7, 7, next ? P.amber : done ? P.green : P.paper);
+        tiny(g, q.n === C.stages.length ? 'F' : String(q.n), gx + 1, gy - 2, P.ink, { align: 'center' });
+      }
+    }
     this.waypoints.list.forEach((w, i) => { const [wx, wy] = V(w.x, w.z); flagPin(g, wx, wy, i + 1, i === 0); });
     {
       const ni = this.hover >= 0 ? this.hover : this.prompt < 0 && this.tab === 'spawn' ? this.sel : -1;
@@ -335,7 +358,23 @@ export class BigMap {
     const head = (txt) => { tiny(g, txt, sx0 + 5, y, P.redDark); for (let i = sx0 + 5; i < sx0 + sw - 5; i += 2) px(g, i, y + 7, P.inkSoft); y += 10; };
     if (this.tab === 'spawn' && this.spawns.length) { this.drawSpawnList(g, sx0, sy0, sw, sh); this.drawPrompt(g, f); return; } // [spawns]
     this.list = null;
-    if (!this.isRace && TRAILS.length === 1 && TRAILS[0].stages) {
+    if (!this.isRace && st.crawl?.course) {
+      // [crawl] a side course in focus: its sections, splits (or best splits) and run / best
+      const c = st.crawl.course;
+      head(c.name.toUpperCase());
+      c.sections.forEach((q, k) => {
+        const cur = q.n === c.stage, split = c.splits[k], best = c.bestSplits[k], last = q.n === c.sections.length;
+        diffSym(g, q.diff, sx0 + (q.diff === 'dblack' ? 10 : 9), y + 2);
+        let label = last ? 'FINISH' : `${q.n} ${q.name.toUpperCase()}`; const maxW = sw - 46;
+        while (tinyMeasure(label) > maxW && label.length > 3) label = label.slice(0, -1);
+        tiny(g, label, sx0 + 18, y, cur ? P.redDark : split != null ? P.greenDark : P.ink);
+        const right = last ? '' : split != null ? fmtT(split) : best != null ? fmtT(best) : '';
+        if (right) tiny(g, right, sx0 + sw - 5, y, split != null ? P.ink : P.inkSoft, { align: 'right' });
+        y += 9;
+      });
+      y += 1;
+      tiny(g, c.running ? 'RUN' : 'BEST', sx0 + 5, y, P.ink); tiny(g, c.running ? fmtT(c.t) : c.best != null ? fmtT(c.best) : '-:--', sx0 + sw - 5, y, c.running ? P.redDark : P.inkSoft, { align: 'right' }); y += 10;
+    } else if (!this.isRace && TRAILS.length === 1 && TRAILS[0].stages) {
       // [crawl] stage list: symbol, number + name, this run's split (or the rig's best split)
       const c = st.crawl || { stage: 0, splits: [], bestSplits: [] };
       head('STAGES');
@@ -437,7 +476,7 @@ export class BigMap {
       const sp = this.spawns[r.i], sel = r.i === this.sel, hov = r.i === this.rowHover;
       if (sel || hov) rect(g, sx0 + 2, ry - 2, sw - 6, 9, sel ? P.paperShade : '#f0dcaa');
       if (sel) rect(g, sx0 + 2, ry - 2, 1, 9, P.red);
-      if (sp.kind === 'stage' || sp.kind === 'summit' || sp.kind === 'trail') diffSym(g, sp.diff, sx0 + (sp.diff === 'dblack' ? 10 : 9), ry + 2);
+      if (sp.kind === 'stage' || sp.kind === 'summit' || sp.kind === 'trail' || sp.kind === 'course') diffSym(g, sp.diff, sx0 + (sp.diff === 'dblack' ? 10 : 9), ry + 2);
       else if (sp.kind === 'checkpoint') { rect(g, sx0 + 5, ry - 2, 9, 9, P.ol); rect(g, sx0 + 6, ry - 1, 7, 7, P.paper); tiny(g, String(sp.cp), sx0 + 10, ry, P.ink, { align: 'center' }); }
       else spawnIcon(g, sx0 + 6, ry - 1, sel);
       const last = sp.id === this.lastId && !sp.default, tag = sp.tag || (last ? 'LAST' : '');

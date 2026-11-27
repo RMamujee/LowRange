@@ -1,13 +1,17 @@
 // The Gauntlet's run logic (src/maps/crawl.js): where the truck is along the course, which
 // stage it is in, the run clock, per-stage split times and per-rig bests (kept in
 // localStorage, or in memory in Node). No three.js and no DOM, so tests can drive it.
+// The same class runs the side courses (src/maps/crawl_courses.js: Broken Slab, Camber Ridge,
+// Cobble Gully), whose "stages" are their sections, each with its own storage key; CourseSet
+// below ties them together on the map (one run at a time, which course the HUD and Y follow).
 //
 // Rules: crossing the stage 1 gate starts a run; each later gate crossed in order ends the
 // previous stage's split; the Summit gate (the last stage) finishes the run. Driving in by a
 // bypass spur, past a gate you skipped, still times the stages you drive, but the run's total
 // doesn't count as a best. Y (restartPose) puts you back at the gate of the stage you are in and
-// restarts that stage's split; the run clock keeps going.
-import { heightAt } from './terrain.js';
+// restarts that stage's split; the run clock keeps going. After a spawn at a later stage's gate
+// (joinAt), Y comes back to that gate until a gate is crossed.
+import { heightAt, GRID, ROADS, SIZE, RES, MAP } from './terrain.js';
 
 const memStore = new Map();
 const store = {
@@ -16,9 +20,12 @@ const store = {
 };
 
 export class CrawlCourse {
-  constructor(trail, stages) {
+  // opts (side courses): key = storage key prefix (per rig: `${key}.${rig}`), unit = what a stage
+  // is called ('Section'), finish = the finish gate's name, id
+  constructor(trail, stages, opts = {}) {
     this.trail = trail; this.stages = stages;
     this.pts = trail.pts;
+    this.key = opts.key ?? 'lowrange.crawl'; this.unit = opts.unit ?? 'Stage'; this.finish = opts.finish ?? 'SUMMIT'; this.id = opts.id ?? 'gauntlet';
     this.rig = null; this.rec = { best: null, splits: [] };
     this.reset();
   }
@@ -46,14 +53,14 @@ export class CrawlCourse {
     if (id === this.rig) return;
     this.rig = id;
     let rec = null;
-    try { rec = JSON.parse(store.get(`lowrange.crawl.${id}`) || 'null'); } catch { rec = null; }
+    try { rec = JSON.parse(store.get(`${this.key}.${id}`) || 'null'); } catch { rec = null; }
     const st = this.stages, total = st.at(-1).gateS - st[0].gateS;
     this.rec = rec && typeof rec === 'object' && !Array.isArray(rec)
       ? { best: this.plausible(rec.best, total) ? rec.best : null,
         splits: Array.isArray(rec.splits) ? rec.splits.slice(0, st.length - 1).map((x, k) => (this.plausible(x, st[k + 1].gateS - st[k].gateS) ? x : null)) : [] }
       : { best: null, splits: [] };
   }
-  save() { if (this.rig) store.set(`lowrange.crawl.${this.rig}`, JSON.stringify(this.rec)); }
+  save() { if (this.rig) store.set(`${this.key}.${this.rig}`, JSON.stringify(this.rec)); }
 
   // nearest point on the trail to p: searches near the last fix, or the whole trail after a jump
   project(p) {
@@ -70,11 +77,14 @@ export class CrawlCourse {
     if (this.s !== null) { const c = this.idx; [i, d] = scan(c - 40, c + 60, 1); }
     if (this.s === null || d > 10) { [i] = scan(0, P.length - 1, 4); [i, d] = scan(i - 6, i + 6, 1); }
     this.idx = i;
-    const a = P[i], b = P[Math.min(P.length - 1, i + 1)], tx = b.x - a.x, tz = b.z - a.z, L = Math.hypot(tx, tz) || 1;
-    const lat = ((p.x - a.x) * -tz + (p.z - a.z) * tx) / L;
+    // tangent from this point to the next (from the one before at the last point, which has no next)
+    const a = P[i], last = i >= P.length - 1, q0 = last ? P[i - 1] : a, q1 = last ? a : P[i + 1];
+    const tx = q1.x - q0.x, tz = q1.z - q0.z, L = Math.hypot(tx, tz) || 1;
+    const lat = ((p.x - a.x) * -tz + (p.z - a.z) * tx) / L, along = ((p.x - a.x) * tx + (p.z - a.z) * tz) / L;
     const st = this.stageOf(a.s);
-    // on the course: inside the corridor and at its height (the switchback legs are far apart)
-    this.on = Math.abs(lat) < st.width / 2 + 3.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3.5;
+    // on the course: inside the corridor and at its height (the switchback legs are far apart), and
+    // not out past either end of it
+    this.on = Math.abs(lat) < st.width / 2 + 3.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3.5 && !(i === 0 && along < -1) && !(last && along > 1);
     this.s = a.s; this.lat = lat;
     return { s: a.s, lat, on: this.on };
   }
@@ -151,17 +161,99 @@ export class CrawlCourse {
     const n = this.stages.length;
     const next = this.stages[Math.min(this.stage, n - 1)];
     const cur = this.stage ? this.stages[this.stage - 1] : null;
-    if (this.joined && !this.running && !this.stage) { const j = this.stages[this.joined - 1]; return { target: j.gate, stage: 0, of: n, name: j.name.toUpperCase(), next: `GATE ${j.n}`, run: null }; }
-    if (this.done) return { target: this.stages[n - 1].gate, stage: n, of: n, name: 'SUMMIT', next: 'COURSE DONE', run: this.t };
-    if (this.retry) { const r = this.stages[this.retry - 1]; return { target: r.gate, stage: r.n, of: n, name: r.name.toUpperCase(), next: `GATE ${r.n}`, run: this.running ? this.t : null }; }
+    const unit = this.unit.toUpperCase(); // the HUD reads "STAGE 7/12" / "SECTION 2/4"
+    if (this.joined && !this.running && !this.stage) { const j = this.stages[this.joined - 1]; return { target: j.gate, stage: 0, of: n, unit, name: j.name.toUpperCase(), next: `GATE ${j.n}`, run: null }; }
+    if (this.done) return { target: this.stages[n - 1].gate, stage: n, of: n, unit, name: this.finish, next: 'COURSE DONE', run: this.t };
+    if (this.retry) { const r = this.stages[this.retry - 1]; return { target: r.gate, stage: r.n, of: n, unit, name: r.name.toUpperCase(), next: `GATE ${r.n}`, run: this.running ? this.t : null }; }
     return {
-      target: next.gate, stage: this.stage, of: n,
+      target: next.gate, stage: this.stage, of: n, unit,
       name: cur ? cur.name.toUpperCase() : 'START GATE',
-      next: next.n === n ? 'SUMMIT GATE' : `GATE ${next.n}`,
+      next: next.n === n ? `${this.finish} GATE` : `GATE ${next.n}`,
       run: this.running ? this.t : null,
     };
   }
 
   // for the big map's sidebar
   snapshot() { return { stage: this.stage, of: this.stages.length, splits: this.splits, best: this.rec.best, bestSplits: this.rec.splits, t: this.t, running: this.running, clean: this.clean, done: this.done }; }
+}
+
+// All the timed courses on one map: The Gauntlet and its side courses. One run at a time (starting
+// or joining one cancels a run on any other); the HUD, the big map and Y follow the course in
+// focus: the one running, else the one a spawn joined, else a side course the truck is on or
+// close to the start of, else The Gauntlet.
+export class CourseSet {
+  constructor(gauntlet, sides = []) {
+    this.gauntlet = gauntlet; this.sides = sides; this.all = [gauntlet, ...sides];
+    this.p = null;
+    this.held = null; // the side course last in focus, kept until the truck is well away from it
+    // each side course's tracks (path ids in the grid): the way in, and both ways
+    const ids = (c, inOnly) => new Set(ROADS.map((r, i) => (r.course === c.id && (!inOnly || r.access === 'in') ? i : -1)).filter((i) => i >= 0));
+    this.trackIn = new Map(sides.map((c) => [c, ids(c, true)])); this.tracks = new Map(sides.map((c) => [c, ids(c, false)]));
+  }
+  get running() { return this.all.some((c) => c.running); }
+  byId(id) { return this.all.find((c) => c.id === id) || null; }
+  setRig(id) { for (const c of this.all) c.setRig(id); }
+  reset() { for (const c of this.all) c.reset(); this.held = null; }
+  // per frame: every course watches its own gates; events carry their course
+  update(p, dt) {
+    this.p = p;
+    const was = new Map(this.all.map((c) => [c, c.running])), out = [];
+    for (const c of this.all) for (const e of c.update(p, dt)) out.push({ ...e, course: c });
+    const started = this.all.find((c) => c.running && !was.get(c));
+    if (started) for (const c of this.all) if (c !== started && (c.running || c.joined || c.done)) { c.reset(); out.push({ type: 'cancel', course: c }); }
+    // hold a side course in focus after its finish (or after driving off it) until well away, or
+    // until the truck is back on The Gauntlet (its trail, the trailhead lot or the summit pad)
+    const claim = this.claim();
+    if (claim && claim !== this.gauntlet) this.held = claim;
+    else if (claim === this.gauntlet || this.onGauntlet() || (this.held && !this.near(this.held, 40))) this.held = null;
+    return out;
+  }
+  // on The Gauntlet's trail corridor, or on the trailhead lot or the summit pad (and their margins)
+  onGauntlet() {
+    const p = this.p; if (!p) return false;
+    if (this.gauntlet.on) return true;
+    return [MAP.TRAILHEAD, MAP.SUMMIT].some((q) => q && Math.hypot(p.x - q.x, p.z - q.z) < q.r + 4);
+  }
+  // the grid path id under the truck
+  pathId() { const p = this.p, n = RES + 1, k = SIZE / RES; if (!p) return -1; const ix = Math.max(0, Math.min(RES, Math.round((p.x + SIZE / 2) / k))), iz = Math.max(0, Math.min(RES, Math.round((p.z + SIZE / 2) / k))); return GRID.path[ix * n + iz]; }
+  // about to start a side course: on its way-in track, or within 12 m of its start gate
+  nearStart(c) {
+    const p = this.p, g = c.stages[0].gate;
+    return !!p && ((Math.hypot(p.x - g.x, p.z - g.z) < 12 && Math.abs(p.y - g.h) < 6) || this.trackIn.get(c).has(this.pathId()));
+  }
+  // within r m of a side course (or on one of its tracks)
+  near(c, r) {
+    const p = this.p; if (!p) return false;
+    if (this.tracks.get(c)?.has(this.pathId())) return true;
+    for (let i = 0; i < c.pts.length; i += 4) if (Math.hypot(c.pts[i].x - p.x, c.pts[i].z - p.z) < r) return true;
+    return false;
+  }
+  // the course that claims the truck right now (null: none in particular). On The Gauntlet only a
+  // side course's own corridor claims it, not its access track or the reach of its start gate.
+  claim() {
+    const onG = this.onGauntlet();
+    return this.all.find((c) => c.running) || this.all.find((c) => c.joined) || this.sides.find((c) => c.on || (!onG && this.nearStart(c))) || null;
+  }
+  get focus() { return this.claim() || this.held || this.gauntlet; }
+  guide() {
+    const c = this.focus, g = c.guide();
+    if (c === this.gauntlet) return { ...g, course: null };
+    const name = c.trail.name.toUpperCase();
+    // before the start gate the plaque names the course
+    return { ...g, course: name, ...(!c.stage && !c.joined && !c.done ? { name, next: 'START GATE' } : {}) };
+  }
+  // The Gauntlet's snapshot as before, plus the side course in focus (for the big map's sidebar)
+  snapshot() {
+    const c = this.focus, snap = this.gauntlet.snapshot();
+    snap.course = c === this.gauntlet ? null : { id: c.id, name: c.trail.name, diff: c.trail.diff, sections: c.stages.map((q) => ({ n: q.n, name: q.name, diff: q.diff })), ...c.snapshot() };
+    return snap;
+  }
+  // Y: the course in focus
+  restartPose() { const c = this.focus; return { ...c.restartPose(), course: c }; }
+  // a spawn point: every run cancelled; a stage / section gate spawn joins that course there
+  spawnAt(sp) {
+    this.reset();
+    if (sp.kind === 'stage') this.gauntlet.joinAt(sp.stage);
+    else if (sp.kind === 'course') this.byId(sp.course)?.joinAt(sp.stage ?? 0);
+  }
 }
