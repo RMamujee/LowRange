@@ -67,14 +67,25 @@ function buildPath(def, kind) {
   const maxG = def.maxGrade ?? (isRoad ? 0.13 : def.diff === 'dblack' ? 0.38 : def.diff === 'black' ? 0.34 : def.diff === 'blue' ? 0.35 : 0.25);
   // trails start and end exactly on the road surface, so junctions have no step
   const pin = !isRoad;
-  for (let pass = 0; pass < 3; pass++) {
-    if (pin) { hs[0] = nearestRoadHeight(pts[0].x, pts[0].z); hs[hs.length - 1] = nearestRoadHeight(pts.at(-1).x, pts.at(-1).z); }
-    for (let i = 1; i < hs.length; i++) { const ds = pts[i].s - pts[i - 1].s; hs[i] = clamp(hs[i], hs[i - 1] - maxG * ds, hs[i - 1] + maxG * ds); }
-    for (let i = hs.length - 2; i >= 0; i--) { const ds = pts[i + 1].s - pts[i].s; hs[i] = clamp(hs[i], hs[i + 1] - maxG * ds, hs[i + 1] + maxG * ds); }
+  // The pinned ends stay pinned: the forward pass never moves the last point and the backward
+  // pass never moves the first, so the grade limit reshapes the approach to each junction instead
+  // of lifting the trail's end off the road (which left 3-5 m drops at three far ends). Repeated
+  // until the profile settles inside the limit from both ends.
+  const n = hs.length;
+  const r0 = pin ? nearestRoadHeight(pts[0].x, pts[0].z) : 0, r1 = pin ? nearestRoadHeight(pts.at(-1).x, pts.at(-1).z) : 0;
+  for (let pass = 0; pass < 12; pass++) {
+    if (pin) { hs[0] = r0; hs[n - 1] = r1; }
+    for (let i = 1; i < (pin ? n - 1 : n); i++) { const ds = pts[i].s - pts[i - 1].s; hs[i] = clamp(hs[i], hs[i - 1] - maxG * ds, hs[i - 1] + maxG * ds); }
+    for (let i = n - 2; i >= (pin ? 1 : 0); i--) { const ds = pts[i + 1].s - pts[i].s; hs[i] = clamp(hs[i], hs[i + 1] - maxG * ds, hs[i + 1] + maxG * ds); }
   }
   if (pin) {
     const h0 = hs[0], h1 = hs[hs.length - 1], L = pts[pts.length - 1].s;
     hs = hs.map((h, i) => { const s = pts[i].s; return lerp(h1, lerp(h0, h, smooth(0, 15, s)), smooth(0, 15, L - s)); });
+    // that easing can steepen the last metres past the limit: clamp again, ends still pinned
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 1; i < n - 1; i++) { const ds = pts[i].s - pts[i - 1].s; hs[i] = clamp(hs[i], hs[i - 1] - maxG * ds, hs[i - 1] + maxG * ds); }
+      for (let i = n - 2; i >= 1; i--) { const ds = pts[i + 1].s - pts[i].s; hs[i] = clamp(hs[i], hs[i + 1] - maxG * ds, hs[i + 1] + maxG * ds); }
+    }
   }
   pts.forEach((p, i) => { p.h = hs[i]; });
   const width = def.width ?? (isRoad ? 8 : def.diff === 'green' ? 5.5 : def.diff === 'blue' ? 5 : 5.2);
