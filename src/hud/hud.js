@@ -13,6 +13,7 @@ import { Dial, Shifter, TransferLever, ParkLever, drawLockers, drawPedals, drawL
 import { MapBases, BigMap, Waypoints, drawMinimap } from './mapview.js';
 import { Beacons } from './waypoint_pillars.js';
 import { TEMP, engineStatus, engineLamps, EngineWarnings } from './engine_state.js';
+import { BOARDS, BIG_MAX, hudLayout, fitToast, fitBig, fitScale } from './layout.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,22 +71,30 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   const ARROW = guideArrow();
   const trailEnds = TRAILS.map((t) => [pathPoint(t, 3), pathPoint(t, t.length - 3)]);
 
-  let spec = null, scale = 2, mapScale = 2, clock = 0, acc = 0, last = null;
+  let spec = null, scale = 2, mapScale = 2, clock = 0, acc = 0, last = null, L = null;
   let toastT = 0, bigT = 0, mapOpen = false, helpOpen = false, lastToast = '', guideAng = null;
+  let toastMsg = null, toastWait = false, toastMoved = false, bigArgs = null, bigBox = null;
 
   // ------------------------------------------------------------ layout
+  // layout.js picks the scale from the window's width and height, and moves or hides boards that
+  // would overlap in small windows; at normal sizes it gives the scale and spots the HUD always had.
   function layout() {
     const dpr = devicePixelRatio || 1;
-    scale = Math.max(2, Math.floor((innerHeight * dpr) / 400));
-    mapScale = Math.max(2, Math.floor(Math.min((innerWidth * dpr * 0.94) / big.W, (innerHeight * dpr * 0.9) / big.H)));
-    sizeCanvas(cluster, 283, 77, scale);
-    sizeCanvas(chassis, 200, 60, scale);
-    sizeCanvas(engine, 128, 40, scale); engineSig = '';
+    L = hudLayout({ W: innerWidth, H: innerHeight, dpr, centre: BIG_MAX });
+    scale = L.scale;
+    mapScale = fitScale(innerWidth, innerHeight, dpr, big.W, big.H);
+    sizeCanvas(cluster, ...BOARDS.cluster, scale);
+    sizeCanvas(chassis, ...BOARDS.chassis, scale);
+    sizeCanvas(engine, ...BOARDS.engine, scale); engineSig = '';
     engine.cv.style.bottom = `${10 + ((cluster.h + 3) * scale) / dpr}px`; // stacked on the cluster's left end
-    sizeCanvas(mini, 108, 146, scale);
+    sizeCanvas(mini, ...BOARDS.mini, scale);
+    chassis.cv.style.bottom = L.chassis === 'stacked' ? `${L.chassisBottom}px` : '';
+    chassis.cv.style.display = L.chassis === 'hidden' ? 'none' : '';
+    engine.cv.style.display = L.engine ? '' : 'none';
+    mini.cv.style.display = L.mini ? '' : 'none';
     sizeCanvas(mapC, big.W, big.H, mapScale);
-    if (toastC.w) sizeCanvas(toastC, toastC.w, toastC.h, scale);
-    if (bigC.w) sizeCanvas(bigC, bigC.w, bigC.h, scale);
+    if (bigArgs) renderBig();
+    if (toastMsg) renderToast();
     renderHelp();
     renderPause();
   }
@@ -313,28 +322,44 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
 
   // ------------------------------------------------------------ toast + big message
   function toast(msg, secs = 2.2) {
-    const lines = wrap(String(msg).replace(/[·•—–]/g, '-').replace(/✓/g, ''), 300);
-    const tw = Math.max(...lines.map(measure));
-    const w = tw + 22, h = lines.length * 10 + 13;
+    toastMsg = String(msg); lastToast = toastMsg;
+    toastT = secs;
+    renderToast();
+  }
+  // In a window too small for both, a toast waits (hidden, its clock stopped) while a big message shows.
+  function renderToast() {
+    const fit = fitToast(L, toastMsg.replace(/[·•—–]/g, '-').replace(/✓/g, ''), bigT > 0 && bigBox ? [bigBox] : []);
+    toastWait = !fit.ok; toastMoved = fit.moved;
+    toastC.cv.classList.toggle('show', toastT > 0 && !toastWait);
+    const { lines, w, h } = fit;
     sizeCanvas(toastC, w, h, scale);
+    toastC.cv.style.left = fit.moved ? `${fit.x + fit.box.w / 2}px` : ''; // hud.css centres it on left / top
+    toastC.cv.style.top = fit.moved ? `${fit.y}px` : '';
     const g = toastC.g;
     g.clearRect(0, 0, w, h);
     board(g, 0, 0, w, h, { seed: 12, plankH: 30 });
     paper(g, 5, 4, w - 10, h - 8, 13);
     lines.forEach((l, i) => drawText(g, l, Math.round((w - measure(l)) / 2), 6 + i * 10, P.ink));
-    toastC.cv.classList.add('show'); lastToast = String(msg);
-    toastT = secs;
   }
   const BIG_COL = { count: [P.red, P.redDeep], go: [P.greenHi, P.greenDeep], best: [P.gold, P.w0], warn: [P.red, P.redDeep], '': [P.paint, P.ol] };
   function bigMsg(text, secs = 1.2, cls = '') {
-    const sc = cls === 'warn' ? 3 : 5, w = measure(text) * sc + 8, h = 9 * sc + 8;
+    const was = bigT > 0 && bigBox ? `${bigBox.x},${bigBox.y},${bigBox.w}` : '';
+    bigArgs = [text, cls];
+    bigT = secs;
+    renderBig();
+    bigC.cv.classList.add('show');
+    if (toastT > 0 && toastMsg && `${bigBox.x},${bigBox.y},${bigBox.w}` !== was) renderToast(); // keep the toast clear of it
+  }
+  function renderBig() {
+    const [text, cls] = bigArgs, { sc, w, h, moved, box } = fitBig(L, text, cls === 'warn' ? 3 : 5);
+    bigBox = box;
     sizeCanvas(bigC, w, h, scale);
+    bigC.cv.style.left = moved ? `${box.x + box.w / 2}px` : ''; // hud.css centres it on left / top
+    bigC.cv.style.top = moved ? `${box.y + box.h / 2}px` : '';
     const g = bigC.g, [col, ol] = BIG_COL[cls] || BIG_COL[''];
     g.clearRect(0, 0, w, h);
     drawText(g, text, 4, 4, ol, { scale: sc, outline: ol });
     drawText(g, text, 4, 4, col, { scale: sc, shadow: ol });
-    bigC.cv.classList.add('show');
-    bigT = secs;
   }
 
   // ------------------------------------------------------------ help (controls board)
@@ -345,7 +370,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     const per = Math.ceil(rows.length / 2), colW = keyW + 6 + descW;
     const W = colW * 2 + 30, H = per * 12 + 40;
     const dpr = devicePixelRatio || 1;
-    sizeCanvas(helpC, W, H, Math.max(1, Math.floor(Math.min((innerWidth * dpr * 0.94) / W, (innerHeight * dpr * 0.9) / H))));
+    sizeCanvas(helpC, W, H, fitScale(innerWidth, innerHeight, dpr, W, H));
     const g = helpC.g;
     board(g, 0, 0, W, H, { seed: 21 });
     sign(g, 'CONTROLS', 10, 6);
@@ -550,8 +575,8 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   function update(dt, S) {
     lastS = S;
     clock += dt;
-    if (toastT > 0) { toastT -= dt; if (toastT <= 0) toastC.cv.classList.remove('show'); }
-    if (bigT > 0) { bigT -= dt; if (bigT <= 0) bigC.cv.classList.remove('show'); }
+    if (toastT > 0 && !toastWait) { toastT -= dt; if (toastT <= 0) toastC.cv.classList.remove('show'); }
+    if (bigT > 0) { bigT -= dt; if (bigT <= 0) { bigC.cv.classList.remove('show'); if (toastT > 0 && (toastWait || toastMoved)) renderToast(); } } // back home
     beacons?.update(clock);
     warnings.note(S.car.damageEvents); // [crash] seize / destroy messages, before main.js turns them into toasts
     acc += dt;
@@ -577,6 +602,6 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     get mapOpen() { return mapOpen; },
     waypoints,
     // for tests: stick position vs. the slot it should travel to, overlays, last toast, guidance angle
-    debug: () => ({ knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
+    debug: () => ({ layout: { scale, chassis: L.chassis, engine: L.engine, mini: L.mini, mapScale }, knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
   };
 }
