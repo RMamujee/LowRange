@@ -22,7 +22,7 @@ const TIPS = [
   'Lock the diffs before the ledge, not on it.',
   '4-Low, first gear, feather the throttle.',
   'Backspace repairs you where you stand.',
-  'Scroll the mouse wheel to shift.',
+  'Arrow Up / Down (or the mouse wheel) shifts gears.',
   'Hold Shift for a gentle crawl throttle.',
   'Put the tyres on the rocks, not between them.',
   'Climb straight. Sideways is how rigs roll.',

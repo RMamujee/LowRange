@@ -66,6 +66,7 @@ node test/crawlcheck.mjs && node test/crawlcourse.mjs   # The Gauntlet: numbers 
 node test/spawns.mjs                            # spawn points: every rig settled at every point on all three maps
 node test/crawl.mjs lc70,taco,wrx               # The Gauntlet autopilot, per stage (slow)
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
+CHROME=<chromium.exe> PORT=5199 node test/arrowshift.mjs   # keyboard shifting: Arrow Up / Down + PgUp / PgDn, no repeat, not pedals, gated by spawn list / pause / settings
 ```
 
 - `test/blocklist_names.mjs` exists because uBlock Origin Lite's default EasyPrivacy rule `/beacon.js` blocked `src/hud/beacon.js`

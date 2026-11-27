@@ -529,8 +529,8 @@ function updateCamera(dt) {
 
 // ---------------- input ----------------
 const CONTROLS = [
-  ['W / S', 'throttle / brake'], ['A / D', 'steer'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
-  ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
+  ['W / S', 'throttle / brake'], ['A / D', 'steer (or Left / Right arrows)'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
+  ['Up / Down', 'shift up / down (arrow keys, or PgUp / PgDn)'], ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
@@ -547,7 +547,7 @@ const hud = createHud({
 const KEYMAP = {
   KeyR: 'range', KeyQ: 'lockF', KeyE: 'lockR', KeyF: '4wd', KeyG: 'rsteer', KeyT: 'tyres', KeyI: 'ignition',
   KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyN: 'mute', KeyM: 'map', KeyJ: 'spawns', KeyH: 'help', KeyP: 'park',
-  PageUp: 'up', PageDown: 'down',
+  PageUp: 'up', PageDown: 'down', ArrowUp: 'up', ArrowDown: 'down',
 };
 
 function action(name) {
@@ -621,7 +621,7 @@ function readInput(dt) {
   crawlLimit = k('ShiftLeft') || k('ShiftRight');
   const maxT = crawlLimit ? 0.35 : 1;
   let thr = input.throttle, brk = input.brake, st = input.steer;
-  const up = k('KeyW') || k('ArrowUp'), dn = k('KeyS') || k('ArrowDown');
+  const up = k('KeyW'), dn = k('KeyS'); // ArrowUp / ArrowDown shift gears (KEYMAP), they are not pedals
   thr = up ? Math.min(maxT, thr + dt * 1.1) : Math.max(0, thr - dt * 4);
   if (thr > maxT) thr = Math.max(maxT, thr - dt * 4);
   brk = dn ? Math.min(1, brk + dt * 3) : Math.max(0, brk - dt * 6);
@@ -824,8 +824,8 @@ function startDrive({ fresh = false } = {}) {
   if ($('menu').contains(document.activeElement)) document.activeElement.blur();   // no menu button keeps keyboard focus while driving
   $('hud').classList.remove('hidden');
   playing = true;
-  if (isRace) toast(`${spec.name} on the grid: 4-HI, ${car.dt.gearLabel === 'N' ? 'neutral' : '1st gear'}. Go on green; scroll the wheel to shift.`, 3.5);
-  else toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Scroll the mouse wheel up for first gear.`, 3.5);
+  if (isRace) toast(`${spec.name} on the grid: 4-HI, ${car.dt.gearLabel === 'N' ? 'neutral' : '1st gear'}. Go on green; Up / Down arrows or the mouse wheel shift.`, 3.5);
+  else toast(`${spec.name}: ${car.dt.range === 'low' ? '4-LOW' : 'HIGH'} range, neutral. Arrow Up (or mouse wheel up) for first gear.`, 3.5);
   if (parkBrake) setTimeout(() => { if (parkBrake && playing) toast('Parking brake is ON: press P to release it', 3.5); }, 3700);
 }
 renderCards();
@@ -862,7 +862,7 @@ function frame(now) {
       if (game.active) game.active.t += dt;
       if (isRace) raceUpdate(dt); else if (crawl) updateCrawl(p, dt); else updateTrails(p); // [crawl]
       // stopped, holding the brake, in a forward gear: hint how to reverse
-      if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: scroll the wheel down through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
+      if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: Arrow Down (or wheel down) through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
       if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press Backspace to recover', 1.5); }
       // pulling away against the parking brake: remind
       if (parkBrake && input.throttle > 0.6 && car.dt.gear !== 0 && Math.abs(car.speed()) < 1 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2);

@@ -85,9 +85,10 @@ Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete
 | Input | Action |
 |---|---|
 | W / S | throttle / brake |
-| A / D | steer |
+| A / D (or Left / Right arrows) | steer |
 | Space | clutch (hold) |
 | Shift | crawl throttle (35%) |
+| Arrow Up / Down (or PageUp / PageDown, Fn+Up / Fn+Down on most laptops) | shift up / down, one gear per press (no mouse needed) |
 | Mouse wheel | shift up / down |
 | R | high / low range |
 | Q / E | front / rear locker |
