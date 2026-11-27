@@ -5,13 +5,13 @@
 // Rapier shape query over the footprint asserts no rock / tree / prop collider is in the way.
 // Also: the list is deterministic, ids are unique, saved ids are validated, and 40 teleports leave
 // the body / collider counts where they started (no leaks).
-// usage: MAP=park|race|crawl node test/spawns.mjs [rigs=taco,lc70,wrx]   (no MAP: runs all three)
+// usage: MAP=park|race|crawl|jungle node test/spawns.mjs [rigs=taco,lc70,wrx]   (no MAP: runs all four)
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 if (!process.env.MAP) {
   let failed = 0;
-  for (const m of ['park', 'race', 'crawl']) {
+  for (const m of ['park', 'race', 'crawl', 'jungle']) {
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], { env: { ...process.env, MAP: m }, stdio: 'inherit' });
     if (r.status !== 0) failed++;
   }
@@ -47,11 +47,11 @@ check(list.filter((s) => s.default).length === 1 && list[0].default, 'exactly on
 check(list.every((s) => typeof s.name === 'string' && s.name && Number.isFinite(s.x) && Number.isFinite(s.z) && Number.isFinite(s.yaw) && !s.unsafe), 'every point has a name and a finite, checked pose');
 const again = S.buildSpawnPoints({ rocks, trees, warn: () => {} });
 check(JSON.stringify(again) === JSON.stringify(list), 'deterministic: same list on a second build');
-const minimum = { park: 6, race: 7, crawl: 14 }[T.MAP_ID];
+const minimum = { park: 6, race: 7, crawl: 14, jungle: 20 }[T.MAP_ID];
 check(list.length >= minimum, `at least ${minimum} spawn points (${list.length})`);
 if (T.MAP_ID === 'crawl') check(T.TRAILS[0].stages.every((st) => ids.includes(`stage-${st.n}`)) && ids.includes('summit') && ids.includes('bypass'), 'every stage gate, the summit and the bypass start');
 if (T.MAP_ID === 'race') check(T.CHECKPOINTS.slice(1).every((c) => ids.includes(`cp-${c.i}`)) && ids.includes('grid') && ids.includes('paddock'), 'grid, paddock and every checkpoint');
-if (T.MAP_ID === 'park') check(T.TRAILS.every((t, i) => list.some((s) => s.trail === i)), 'every trail has at least one end');
+if (T.MAP_ID === 'park' || T.MAP_ID === 'jungle') check(T.TRAILS.every((t, i) => list.some((s) => s.trail === i)), 'every trail has at least one end');
 // saved ids: unknown / corrupt fall back to the default
 S.saveLastSpawn({ id: 'no-such-spawn' });
 check(S.loadLastSpawn(list).id === list[0].id, 'unknown saved id falls back to the default');

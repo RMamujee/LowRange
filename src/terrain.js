@@ -10,12 +10,13 @@ export const MAPS = [
   { id: 'park', name: 'Trail Park' },
   { id: 'race', name: 'Race Track' },
   { id: 'crawl', name: 'The Gauntlet' },
+  { id: 'jungle', name: 'Coralume Island' }, // [jungle] src/maps/jungle.js
 ];
 const want = (globalThis.location && new URLSearchParams(globalThis.location.search).get('map')) || globalThis.process?.env?.MAP || 'park';
 // only known ids map to fixed module paths; if the chosen map fails to load, fall back to the park
 let M;
 try {
-  M = want === 'race' ? await import('./maps/racetrack.js') : want === 'crawl' ? await import('./maps/crawl.js') : await import('./maps/trailpark.js');
+  M = want === 'race' ? await import('./maps/racetrack.js') : want === 'crawl' ? await import('./maps/crawl.js') : want === 'jungle' ? await import('./maps/jungle.js') : await import('./maps/trailpark.js');
 } catch (e) {
   console.warn(`Map "${want}" failed to load, falling back to the Trail Park`, e);
   M = await import('./maps/trailpark.js');
@@ -27,6 +28,7 @@ export const MAP_NAME = M.NAME;
 export const MAP_KIND = M.KIND;           // 'trails' | 'race'
 export const SIZE = M.SIZE, RES = M.RES, GRID = M.GRID;
 export const heightAt = M.heightAt, visualHeightAt = M.visualHeightAt, materialAt = M.materialAt;
+export const surfaceAt = M.surfaceAt ?? M.heightAt; // where a truck is placed: a map with decks above its ground (bridges, a dock) gives the top surface
 export const SPAWN = M.SPAWN;             // { x, z, yaw } where a fresh truck is placed
 export const ROADS = M.ROADS ?? [];
 export const TRAILS = M.TRAILS ?? [];

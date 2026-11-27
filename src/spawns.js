@@ -11,7 +11,7 @@
 // caller passes, e.g. loose physics props). A candidate that fails is nudged along its path until it
 // is clear; one that can't be made safe is skipped with a console warning. Deterministic: same map
 // data, same list. No three.js and no DOM, so Node tests use it as is.
-import { MAP, MAP_ID, SIZE, SPAWN, TRAILS, ROADS, COURSES, CHECKPOINTS, TRACK, PROPS, DIFF, MAT, heightAt, materialAt, pathPoint } from './terrain.js';
+import { MAP, MAP_ID, SIZE, SPAWN, TRAILS, ROADS, COURSES, CHECKPOINTS, TRACK, PROPS, DIFF, MAT, heightAt, surfaceAt, materialAt, pathPoint } from './terrain.js';
 
 // Footprint checked under a spawn: covers the longest rig (6.4 m) with a margin.
 export const FOOT = { hl: 3.5, hw: 1.35, margin: 0.35 };
@@ -86,11 +86,11 @@ const flatness = (x, z, yaw) => { const r = checkSpot(x, z, yaw, [], FOOT, { gra
 // spawn height: lift the truck so its highest wheel clears the ground by `clear` (slopes!), as the
 // lift argument of main.js respawnFresh (which adds it to the ground height under the centre)
 export function liftFor(sp, spec, clear = 0.15) {
-  const fx = -Math.sin(sp.yaw), fz = -Math.cos(sp.yaw), lx = -fz, lz = fx, h0 = heightAt(sp.x, sp.z);
+  const fx = -Math.sin(sp.yaw), fz = -Math.cos(sp.yaw), lx = -fz, lz = fx, h0 = surfaceAt(sp.x, sp.z);
   let up = 0;
   for (const a of [-1, 1]) for (const b of [-1, 1]) {
     const x = sp.x + fx * a * spec.wheelbase / 2 + lx * b * (spec.track / 2), z = sp.z + fz * a * spec.wheelbase / 2 + lz * b * (spec.track / 2);
-    up = Math.max(up, heightAt(x, z) - h0);
+    up = Math.max(up, surfaceAt(x, z) - h0);
   }
   return up + clear;
 }
@@ -128,7 +128,16 @@ function candidates() {
   }
 
   const crawlCourse = TRAILS.length === 1 && TRAILS[0].stages;
-  add({ id: 'trailhead', name: 'Trailhead', short: 'TRAILHEAD', kind: 'trailhead', group: 'start', pose: fixed(SPAWN.x, SPAWN.z, SPAWN.yaw), required: true });
+  add({ id: 'trailhead', name: MAP.TRAILHEAD?.name ?? 'Trailhead', short: (MAP.TRAILHEAD?.name ?? 'Trailhead').toUpperCase(), kind: 'trailhead', group: 'start', pose: fixed(SPAWN.x, SPAWN.z, SPAWN.yaw), required: true });
+  // map-defined named places: any map can list PLACES ({ id, name, x, z, yaw, note }), offered in one
+  // "PLACES" group after the start; each is nudged a few metres forward / back / sideways if the exact
+  // spot fails its footprint check
+  for (const pl of MAP.PLACES ?? []) {
+    const offs = [[0, 0], [3, 0], [-3, 0], [6, 0], [-6, 0], [0, 2.5], [0, -2.5], [9, 0], [-9, 0], [3, 2.5], [3, -2.5], [-3, 2.5], [-3, -2.5]];
+    const fx = -Math.sin(pl.yaw), fz = -Math.cos(pl.yaw);
+    add({ id: pl.id, name: pl.name, short: pl.name.toUpperCase(), kind: 'place', group: 'places', note: pl.note,
+      pose: (k) => (k < offs.length ? { x: pl.x + fx * offs[k][0] - fz * offs[k][1], z: pl.z + fz * offs[k][0] + fx * offs[k][1], yaw: pl.yaw } : null) });
+  }
   if (crawlCourse) {
     const T = TRAILS[0], road = ROADS[0];
     if (road) add({ id: 'bypass', name: 'Bypass Track', short: 'BYPASS TRACK', kind: 'road', group: 'start', note: 'Graded track with a spur into every stage gate',
@@ -216,9 +225,9 @@ function approachClear(p, obstacles, hw = FOOT.hw + 0.2) {
 // trail gates (for the "don't spawn inside a gate" rule)
 const GATES = TRAILS.length === 1 && TRAILS[0].stages ? [] : TRAILS.flatMap((t) => [pathPoint(t, 3), pathPoint(t, t.length - 3)].map((p) => ({ x: p.x, z: p.z, r: t.width / 2 + 2.5 })));
 
-export const GROUP_LABEL = { start: MAP_ID === 'race' ? 'START' : 'TRAILHEAD', green: DIFF.green.label.toUpperCase() + ' TRAILS', blue: DIFF.blue.label.toUpperCase() + ' TRAILS', black: DIFF.black.label.toUpperCase() + ' TRAILS', dblack: DIFF.dblack.label.toUpperCase() + ' TRAILS', stages: 'STAGES', checkpoints: 'CHECKPOINTS' };
+export const GROUP_LABEL = { start: MAP_ID === 'race' ? 'START' : 'TRAILHEAD', places: 'PLACES', green: DIFF.green.label.toUpperCase() + ' TRAILS', blue: DIFF.blue.label.toUpperCase() + ' TRAILS', black: DIFF.black.label.toUpperCase() + ' TRAILS', dblack: DIFF.dblack.label.toUpperCase() + ' TRAILS', stages: 'STAGES', checkpoints: 'CHECKPOINTS' };
 for (const K of COURSES) GROUP_LABEL[`course-${K.id}`] = K.name.toUpperCase(); // one group per side course
-const GROUP_ORDER = ['start', ...DIFF_ORDER, 'stages', ...COURSES.map((K) => `course-${K.id}`), 'checkpoints'];
+const GROUP_ORDER = ['start', 'places', ...DIFF_ORDER, 'stages', ...COURSES.map((K) => `course-${K.id}`), 'checkpoints'];
 
 // Build the validated list. opts: { rocks, trees, extra, warn }
 export function buildSpawnPoints(opts = {}) {
