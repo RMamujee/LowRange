@@ -2,6 +2,20 @@
 
 State of the project for the next working session, which will have the Blender MCP tools loaded.
 
+## Picking this up on another machine
+
+Everything is on `main`; there are no unpushed branches or local-only source files.
+
+1. `git clone https://github.com/RMamujee/LowRange.git`, then `npm ci` (Node 20+; built and tested here on Node 22 and 24).
+2. `npm run dev` serves http://localhost:5199. Maps: pick in the menu or with `?map=park|race|crawl|jungle|desert` (park is the default).
+3. Set the commit identity in the new clone before the first commit, so a private address never reaches this public repo:
+   `git config user.name RMamujee` and `git config user.email 133895954+RMamujee@users.noreply.github.com`.
+4. Pushing to `main` deploys to https://lowrange.vercel.app (Vercel project `lowrange`, Vite preset, `npm run build`, output `dist`). Nothing to set up per machine.
+5. Blender (only for art work): Blender 5.3 with the official Blender Lab MCP add-on (`mcp`, listens on localhost:9876 while Blender's GUI is open, needs Preferences > System > Allow Online Access), plus its MCP server registered with the coding agent. This is per machine and not in the repo. Do not install the PyPI package `blender-mcp`: that is the community server, a different protocol. The `.blend` sources are in `art/blender/`.
+6. If the game loads headless but fails in your own browser, suspect an ad blocker matching a file name (see `test/blocklist_names.mjs`).
+
+Open items to start from: the "Needs playtesting" checklists below; the Pickup's square-ledge climb (0.30 m down to 0.25 m, cause untraced); `MAP=park node test/spawns.mjs` failing by a hair for the Cruiser at the Boulder Alley start (0.016 m against a 0.015 m limit).
+
 ## What's in `main` now
 
 | Area | State |
@@ -24,7 +38,7 @@ surfaces, stepped toon lighting with warm shadows, dark outlines. No brand names
 
 Work so far, in `tools/blender/`:
 
-- `bridge.py`: talks to the Blender add-on socket (127.0.0.1:9876) without MCP tools, e.g. `py tools/blender/bridge.py get_scene_info` or `py tools/blender/bridge.py exec <script.py>`. With the Blender MCP loaded, use its tools instead.
+- `bridge.py`: talks to the Blender add-on socket (127.0.0.1:9876) without MCP tools, e.g. `py tools/blender/bridge.py get_scene_info` or `py tools/blender/bridge.py exec <script.py>`. It speaks the community add-on's protocol and does NOT work with the official Blender Lab add-on; with that one, use the MCP tool `execute_blender_code` instead.
 - `lib.py`: helpers. Primitives with bevels, `parent_keep`, `arch_flare`, `build_wheel`, boolean arch cutters, preview camera and lights, `export_glb`. Materials store `base_rgb`, `emit_rgb`, `emit_str` and `rough` so the restyle can re-run.
 - `build_lc70.py`: the 70-series-style wagon, built to the physics spec (named `Body`/`Wheel`/`AxleFront`/`AxleRear` parts, `Marker_*` empties, `tyre_radius`/`tyre_width` on `Wheel`). It goes into its own Blender scene, `LowRange_lc70`.
 - `pixel_style.py`: the pixel-art restyle. Cube-projected UVs at 20 px/m, 16 px dithered pixel tiles with Closest sampling, a toon ramp with warm shadows via Shader-to-RGB, inverted-hull outlines, and a chunky-pixel rendered viewport. The first result works but needs stronger light/shadow bands, a richer palette, and more of the reference's softer, rounder shapes.
