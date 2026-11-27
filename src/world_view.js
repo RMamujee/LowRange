@@ -9,6 +9,7 @@ import { buildSetDressing, gridClearance } from './art/dressing.js';
 import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals, visualSurface } from './gfx/terrain_look.js';
 import { BACKDROP } from './gfx/palette.js';
 import { cullBeyond } from './gfx/pipeline.js';
+import { fitFace, signpost, bannerBoard, faceYaw } from './art/signs.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -132,39 +133,12 @@ function drawDiffSymbol(ctx, diff, x, y, r) {
   else { diamond(x - r * 0.75); diamond(x + r * 0.75); }
 }
 
-function signTexture(lines, diff, w = 512, h = 256) {
-  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#5b3d22'; ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = '#6d4a2a'; for (let y = 0; y < h; y += 32) ctx.fillRect(0, y, w, 3);
-  ctx.strokeStyle = '#e8d8b0'; ctx.lineWidth = 8; ctx.strokeRect(10, 10, w - 20, h - 20);
-  ctx.fillStyle = '#f3e6c4'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const x0 = diff ? w / 2 + 40 : w / 2;
-  ctx.font = `bold ${lines[0].length > 16 ? 46 : 56}px Bahnschrift, Segoe UI, sans-serif`;
-  ctx.fillText(lines[0], x0, h * 0.4);
-  ctx.font = '34px Bahnschrift, Segoe UI, sans-serif';
-  if (lines[1]) ctx.fillText(lines[1], x0, h * 0.72);
-  if (diff) drawDiffSymbol(ctx, diff, 80, h / 2, 46);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
+// Sign faces (src/art/signs.js): pixel-font text, dark ink on parchment, sized around the words.
+const SIGN_M = 0.05;   // trail signposts: metres per sign pixel (title caps 0.35 m)
+const BANNER_M = 0.07; // gate banners (title caps 0.49 m)
 
-function signpost(x, z, faceYaw, lines, diff) {
-  const g = new THREE.Group();
-  const y = heightAt(x, z);
-  g.position.set(x, y, z);
-  g.rotation.y = faceYaw;
-  const wood = new THREE.MeshStandardMaterial({ color: 0x4a3420, flatShading: true });
-  for (const sx of [-1.15, 1.15]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.6, 0.16), wood); p.position.set(sx, 1.3, 0); p.castShadow = true; g.add(p); }
-  const board = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.3, 0.08), [wood, wood, wood, wood, new THREE.MeshStandardMaterial({ map: signTexture(lines, diff) }), wood]);
-  board.position.y = 1.9; board.castShadow = true;
-  g.add(board);
-  return g;
-}
-
-// start / finish arch across a trail
+// start / finish arch across a trail: a two-faced banner with the trail's name, resting on the
+// posts (which stop at its lower edge, so they never cross the letters from either side)
 function gate(path, atEnd) {
   const p = pathPoint(path, atEnd ? path.length - 3 : 3);
   const g = new THREE.Group();
@@ -173,19 +147,18 @@ function gate(path, atEnd) {
   const col = DIFF[path.diff].hex === 0x000000 || DIFF[path.diff].hex === 0x1a1a1a ? 0x2b2b2b : DIFF[path.diff].hex;
   const mat = new THREE.MeshStandardMaterial({ color: col, flatShading: true });
   const hw = path.width / 2 + 0.9;
+  // one big line; the banner may overhang the posts a little rather than shrink the letters
+  const face = fitFace({ title: path.name, sub: atEnd ? 'FINISH' : 'START', diff: path.diff, frame: 2 }, { m: BANNER_M, minW: hw * 2 + 0.4, maxW: hw * 2 + 2.4 });
+  const y0 = 2.7; // banner's lower edge
   for (const sx of [-hw, hw]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, 3.6, 0.25), mat);
-    post.position.set(sx, 1.8, 0); post.castShadow = true; g.add(post);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, y0 + 0.4, 0.25), mat);
+    post.position.set(sx, (y0 - 0.4) / 2, 0); post.castShadow = true; g.add(post);
     const cap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.4), new THREE.MeshStandardMaterial({ color: 0xffb340, emissive: 0x553300 }));
-    cap.position.set(sx, 3.7, 0); g.add(cap);
+    cap.position.set(sx, y0 + face.h + 0.15, 0); g.add(cap);
   }
-  const bannerTex = signTexture([path.name, atEnd ? 'FINISH' : 'START'], path.diff, 768, 160);
-  // two single-sided faces so the text reads correctly from both directions
-  for (const ry of [0, Math.PI]) {
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, 0.9), new THREE.MeshStandardMaterial({ map: bannerTex }));
-    banner.position.y = 3.1; banner.rotation.y = ry;
-    g.add(banner);
-  }
+  const banner = bannerBoard(face);
+  banner.position.y = y0 + face.h / 2;
+  g.add(banner);
   return g;
 }
 
@@ -228,16 +201,19 @@ export function buildMarkers(scene) {
   const gates = [];
   for (const t of TRAILS) {
     for (const atEnd of [false, true]) {
-      const p = pathPoint(t, atEnd ? t.length - 6 : 6);
-      const side = t.width / 2 + 2.6;
+      // the signpost stands just outside the gate's post and a step in front of it (behind the
+      // gate it was hidden by the post from the approach), toed in a little towards the trail
+      const p = pathPoint(t, atEnd ? t.length - 1.5 : 1.5);
+      const face = fitFace({ title: t.name, sub: `${DIFF[t.diff].label} · ${(t.length).toFixed(0)} m`, diff: t.diff, maxTitleW: 60 }, { m: SIGN_M });
+      const side = t.width / 2 + 0.9 + 0.6 + face.w / 2;
       const sx = p.x - p.tz * side, sz = p.z + p.tx * side;
-      const yaw = Math.atan2(p.tx, p.tz) + (atEnd ? 0 : Math.PI);
-      scene.add(signpost(sx, sz, yaw, [t.name, `${DIFF[t.diff].label} · ${(t.length).toFixed(0)} m`], t.diff));
+      const dir = atEnd ? [p.tx, p.tz] : [-p.tx, -p.tz];
+      scene.add(signpost(sx, sz, faceYaw(dir, sx, sz, p.x, p.z, 0.2), face));
       const gt = gate(t, atEnd); scene.add(gt); gates.push(gt);
     }
   }
   // trailhead sign
-  scene.add(signpost(TRAILHEAD.x + 6, TRAILHEAD.z - 10, Math.PI * 0.85, ['LOW RANGE', 'Trail Park · Trailhead']));
+  scene.add(signpost(TRAILHEAD.x + 6, TRAILHEAD.z - 10, Math.PI * 0.85, fitFace({ title: 'LOW RANGE', sub: 'Trail Park · Trailhead' }, { m: 0.06 })));
   return gates;
 }
 

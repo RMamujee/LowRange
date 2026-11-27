@@ -199,7 +199,9 @@ export function markWorld(root, keep = /flower/i) {
   root.traverse((o) => {
     if (!o.material || keep.test(o.name || '') || (o.parent && keep.test(o.parent.name || ''))) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-      if (m.isMeshStandardMaterial && !m.userData.world) { m.userData.world = true; m.needsUpdate = true; }
+      // (userData.world === false opts out: sign faces, src/art/signs.js, whose text the texture
+      // calm and its coarser mip would blur)
+      if (m.isMeshStandardMaterial && !m.userData.world && m.userData.world !== false) { m.userData.world = true; m.needsUpdate = true; }
     }
   });
 }
