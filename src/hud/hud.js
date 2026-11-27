@@ -1,6 +1,7 @@
 // LowRange driving HUD, all pixel art: a wooden instrument board (tach, speedo, H-pattern stick,
 // transfer lever, locker rockers, parking brake, pedal bars, lamps and buttons), the chassis board
-// (pitch / roll inclinometers, wheels + suspension + surface card, damage), the framed minimap with a
+// (pitch / roll inclinometers, wheels + suspension + surface card, damage), the engine board above the
+// cluster (temperature gauge, oil / coolant / drive lamps, seized engine), the framed minimap with a
 // guidance plaque (or the race lap readout), the expandable map with waypoints, plank toasts, big race
 // messages, the controls board (H) and the pause buttons on the menu.
 // main.js owns the simulation; it hands this module a state snapshot every frame and gets actions back.
@@ -11,6 +12,7 @@ import { P, mk, rect, px, board, paper, inset, tiny, tinyMeasure, sign, drawText
 import { Dial, Shifter, TransferLever, ParkLever, drawLockers, drawPedals, drawLamp, drawIncl } from './instruments.js';
 import { MapBases, BigMap, Waypoints, drawMinimap } from './mapview.js';
 import { Beacons } from './waypoint_pillars.js';
+import { TEMP, engineStatus, engineLamps, EngineWarnings } from './engine_state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +49,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   const root = $('hud');
   const cluster = pixCanvas('hud-cluster', root);
   const chassis = pixCanvas('hud-chassis', root);
+  const engine = pixCanvas('hud-engine', root);
   const mini = pixCanvas('hud-mini', root);
   const toastC = pixCanvas('hud-toast', root);
   const bigC = pixCanvas('hud-big', root);
@@ -63,6 +66,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   const beacons = scene ? new Beacons(scene, heightAt, noOutline) : null;
   beacons?.sync(waypoints.list);
   waypoints.onChange = (l) => beacons?.sync(l);
+  const warnings = new EngineWarnings();
   const ARROW = guideArrow();
   const trailEnds = TRAILS.map((t) => [pathPoint(t, 3), pathPoint(t, t.length - 3)]);
 
@@ -76,6 +80,8 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     mapScale = Math.max(2, Math.floor(Math.min((innerWidth * dpr * 0.94) / big.W, (innerHeight * dpr * 0.9) / big.H)));
     sizeCanvas(cluster, 283, 77, scale);
     sizeCanvas(chassis, 200, 60, scale);
+    sizeCanvas(engine, 128, 40, scale); engineSig = '';
+    engine.cv.style.bottom = `${10 + ((cluster.h + 3) * scale) / dpr}px`; // stacked on the cluster's left end
     sizeCanvas(mini, 108, 146, scale);
     sizeCanvas(mapC, big.W, big.H, mapScale);
     if (toastC.w) sizeCanvas(toastC, toastC.w, toastC.h, scale);
@@ -186,6 +192,51 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     const H2 = car.health, pct = (v) => Math.round(v * 100), dc = (v) => (v > 0.75 ? P.greenDark : v > 0.35 ? P.amberDark : P.red);
     tiny(g, d.dead ? 'ENG DEAD' : `ENG ${pct(H2.engine)}%`, X + 5, Y + 42, d.dead ? P.red : dc(H2.engine));
     tiny(g, `BODY ${pct(H2.body)}%`, X + W - 5, Y + 42, dc(H2.body), { align: 'right' });
+  }
+
+  // ------------------------------------------------------------ engine board
+  // Temperature strip (zones at the damage model's thresholds, engine_state.js), a status line with
+  // power loss, and oil / coolant / drive lamps. Quiet when healthy (needle on the cold stop, lamps
+  // dark); a warning blinks for a moment when it first comes on or gets worse. Redrawn only when
+  // what it shows changes.
+  const SEIZE_TEXT = { oil: 'NO OIL', heat: 'OVERHEATED', damage: 'WRECKED' };
+  const ZONE = { normal: ['NORMAL', P.inkSoft], hot: ['HOT', P.amberDark], overheat: ['OVERHEATING', P.red] };
+  const BAND_COOK = [P.red, P.red, P.redDark], BAND_HOT = [P.amber, P.amber, P.amberDark], BAND_OK = [P.paperShade, P.paperShade, P.paperShade];
+  const TEMP_TICKS = [0, 0.25, 0.5, TEMP.hot, TEMP.cook, TEMP.max], LAMP_KEYS = ['oil', 'coolant', 'drive'];
+  let engineSig = '';
+  function drawEngine(S) {
+    const { car } = S, g = engine.g, W = engine.w, xs = 28, xe = W - 9, span = xe - xs;
+    const st = engineStatus(car.crash.mech, car.dt), w = warnings.update(st, clock, car.crash.mech), L = engineLamps(st);
+    const nx = xs + Math.round(st.tempFrac * span), pw = Math.round(st.power * 100);
+    const sig = st.seized ? `S${w.cause}${w.lit.seized}` : `${st.zone}${nx}${w.lit.temp}${st.lowPower && w.lit.power ? pw : ''}`;
+    const lamps = LAMP_KEYS.map((k) => `${L[k].label}${w.lit[k] ? L[k].state : ''}`).join();
+    if (sig + lamps === engineSig) return;
+    engineSig = sig + lamps;
+    board(g, 0, 0, W, engine.h, { seed: 14 });
+    paper(g, 4, 4, W - 8, 19, 15);
+    if (st.seized) {
+      if (w.lit.seized) drawText(g, 'ENGINE SEIZED', Math.round((W - measure('ENGINE SEIZED')) / 2), 5, P.red);
+      tiny(g, SEIZE_TEXT[w.cause] || SEIZE_TEXT.damage, 8, 16, P.redDark);
+      tiny(g, 'BACKSPACE: REPAIR', W - 9, 16, P.inkSoft, { align: 'right' });
+    } else {
+      tiny(g, 'TEMP', 8, 7, P.inkSoft);
+      for (let x = xs; x <= xe; x++) {
+        const v = ((x - xs) / span) * TEMP.max;
+        const band = v > TEMP.cook ? BAND_COOK : v > TEMP.hot ? BAND_HOT : BAND_OK;
+        for (let k = 0; k < 3; k++) px(g, x, 8 + k, band[k]);
+      }
+      rect(g, xs, 11, span + 1, 1, P.inkSoft);
+      for (const v of TEMP_TICKS) {
+        const major = v === 0 || v === TEMP.hot || v === TEMP.cook || v === TEMP.max;
+        rect(g, xs + Math.round((v / TEMP.max) * span), 12, 1, major ? 2 : 1, major ? P.ink : P.inkSoft);
+      }
+      rect(g, nx + 1, 7, 1, 6, P.ol); rect(g, nx, 6, 1, 7, P.red); px(g, nx, 6, P.redHi);
+      const [zw, zc] = ZONE[st.zone];
+      if (w.lit.temp) tiny(g, zw, 8, 16, zc);
+      if (st.lowPower && w.lit.power) tiny(g, `POWER ${pw}%`, W - 9, 16, st.power < 0.5 ? P.red : P.amberDark, { align: 'right' });
+    }
+    let x = 5;
+    for (const k of LAMP_KEYS) x += drawLamp(g, x, 26, L[k].label, w.lit[k] ? L[k].state : null) + 2;
   }
 
   // ------------------------------------------------------------ guidance
@@ -502,11 +553,13 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     if (toastT > 0) { toastT -= dt; if (toastT <= 0) toastC.cv.classList.remove('show'); }
     if (bigT > 0) { bigT -= dt; if (bigT <= 0) bigC.cv.classList.remove('show'); }
     beacons?.update(clock);
+    warnings.note(S.car.damageEvents); // [crash] seize / destroy messages, before main.js turns them into toasts
     acc += dt;
     if (acc < 1 / 30) return;
     const step = acc; acc = 0;
     drawCluster(S, step);
     drawChassis(S);
+    drawEngine(S);
     drawMini(S);
     if (mapOpen) big.draw(mapC.g, mapSnapshot(S));
   }

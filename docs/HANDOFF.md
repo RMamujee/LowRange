@@ -12,7 +12,7 @@ State of the project for the next working session, which will have the Blender M
 | Garage | Tyres, tread, lift, springs, damping, travel, engine, gearing, diffs, armour and paint, saved per rig (`src/garage.js`, `src/garage_ui.js`). |
 | Loading screen | Pixel-art "LowRange" title scene with staged boot (`src/boot.js`, `src/ui/`). |
 | Desktop | Electron offline game. `npm run desktop` runs it; `npm run dist:win` builds the installer and portable exe into `release/`. The builds are unsigned. F10 opens settings. |
-| Crash damage | `src/damage/`: impact energy per contact event (impulse x closing speed, per kg), a free-form deformation cage the glTF bodies follow (zone travel caps, no-inversion, buckling), glass / lamps / tear-off parts, location-based mechanical damage (radiator + overheating, engine, corner suspension, fender drag, driveshaft, oil pan, diffs, roof). Wheel damage is windowed AND gated on closing speed (wheel or the body above it): slow crawling can't bend or snap anything. `node test/crash.mjs`, `node test/slowcrawl.mjs`, `test/crashshots.mjs`, `test/lib/damage_watch.mjs`. HUD hook available: `car.crash.mech` (`temp`, `coolant`, `oil`, `radiator`, `driveLost`) and `car.crash.report()`. |
+| Crash damage | `src/damage/`: impact energy per contact event (impulse x closing speed, per kg), a free-form deformation cage the glTF bodies follow (zone travel caps, no-inversion, buckling), glass / lamps / tear-off parts, location-based mechanical damage (radiator + overheating, engine, corner suspension, fender drag, driveshaft, oil pan, diffs, roof). Wheel damage is windowed AND gated on closing speed (wheel or the body above it): slow crawling can't bend or snap anything. `node test/crash.mjs`, `node test/slowcrawl.mjs`, `test/crashshots.mjs`, `test/lib/damage_watch.mjs`. The HUD's engine board (above the cluster) reads `car.crash.mech` + `car.dt.dead` / `powerScale` through the pure `engineStatus` in `src/hud/engine_state.js`: temperature strip with NORMAL / HOT (> 0.75, steam) / OVERHEATING (> 1.0, engine wear) zones, POWER % once heat (> 0.85) or engine damage costs power, OIL / COOL lamps (amber leaking with level, red under 25%, NO OIL / NO COOL), NO DRIVE F / R, and ENGINE SEIZED with its cause. Warnings blink for 2.4 s when they come on or get worse; a repair clears it all. `node test/enginehud.mjs`. |
 | Art | Interim procedural vehicles styled after the reference (`src/vehicle_view.js`). Set dressing: trees, bushes, flowers, fences, log edging and stumps (`src/art/`). The glTF loader picks up `public/models/**.glb` automatically (`docs/MODELING_SPEC.md`, `docs/ASSETS.md`). |
 
 ## Next: Blender pipeline (start here)
@@ -47,7 +47,7 @@ To-do, roughly in order:
 
 ## Known gaps
 
-- Crash model limits: the collision shape stays boxes (only shrinks a little as ends / roof crush), the deformation is visual + a cage, not a soft body; rollover damage depends a lot on how the tumble goes. The HUD doesn't yet show engine temperature / oil (fields are on `car.crash.mech`).
+- Crash model limits: the collision shape stays boxes (only shrinks a little as ends / roof crush), the deformation is visual + a cage, not a soft body; rollover damage depends a lot on how the tumble goes.
 - Trails were made tougher (taller/longer ledges, denser boulders, more camber, a longer, uneven bog). Autopilot, 400 s budget: green done by all three; blue done by Cruiser and Pickup, the Rally Sedan crawls through Granite Steps (164 s) and sinks in Bog Run; black done by Cruiser (165 s) and Pickup (237 s); double black done only by the Cruiser (309 s, so it times out under the usual 240 s), Pickup stops at 129/144 m. `node test/trailaudit.mjs` prints real rock and ledge heights per trail.
 - The Rally Sedan's physics box is still taller than its 0.25 m sills; green rocks are capped at 0.20 m so the model never visibly scrapes.
 - Desktop builds are unsigned (SmartScreen warning).
@@ -58,7 +58,7 @@ To-do, roughly in order:
 
 ```bash
 node test/blocklist_names.mjs                   # instant: no fetchable file may be named like an ad/tracker (see below)
-node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs
+node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs && node test/enginehud.mjs
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
 node test/race.mjs                              # race autopilot
