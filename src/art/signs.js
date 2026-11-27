@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { measure, eachPixel, GLYPHS, SPACE_W, GLYPH_GAP } from '../ui/pixelfont.js';
 import { DIFF, heightAt } from '../terrain.js';
+import { toonPatch } from '../gfx/toon.js';
 
 export const TEX = 8; // texels per sign pixel
 
@@ -239,9 +240,21 @@ export function signTexture(cv, text) {
 
 // sign face material: lit like everything else, plus a little of its own light so a board in the
 // shade band stays readable; out of the world grade
+// The face is sampled a fraction of a mip level sharper than the GPU would pick (MIP_BIAS): the
+// letters are solid blocks several texels wide, so this keeps strokes dark a little further out
+// (most useful at the coarse pixel sizes, where every letter is minified one to two levels more)
+// without bringing back the shimmer.
 export const SIGN_GLOW = 0x8c8c8c;
+const MIP_BIAS = -0.6;
 export function signMaterial(texture, extra = {}) {
   const m = new THREE.MeshStandardMaterial({ map: texture, emissiveMap: texture, emissive: SIGN_GLOW, roughness: 0.9, ...extra });
   m.userData.world = false;
+  m.onBeforeCompile = (shader) => {
+    toonPatch(shader, m);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <map_fragment>', `#ifdef USE_MAP\n  diffuseColor *= texture(map, vMapUv, ${MIP_BIAS.toFixed(2)});\n#endif`)
+      .replace('#include <emissivemap_fragment>', `#ifdef USE_EMISSIVEMAP\n  totalEmissiveRadiance *= texture(emissiveMap, vEmissiveMapUv, ${MIP_BIAS.toFixed(2)}).rgb;\n#endif`);
+  };
+  m.customProgramCacheKey = () => 'toon+sign';
   return m;
 }

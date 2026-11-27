@@ -152,7 +152,7 @@ for (const px of sizes) {
             }
           }
           return { samples, crop: out };
-        }, { b64: buf.toString('base64'), m, crop: !/^burst/.test(name) });
+        }, { b64: buf.toString('base64'), m, crop: !/^burst/.test(name) || !!process.env.BURST });
         const LL = r.samples.map(([R, G, B]) => lum(R, G, B));
         const L = LL.slice(0, m.nMain), LN = LL.slice(m.nMain);
         const ratio = (A) => (pct(A, 0.9) + 0.05) / (pct(A, 0.1) + 0.05);
@@ -160,15 +160,18 @@ for (const px of sizes) {
         if (r.crop) fs.writeFileSync(`${out}/${tag}_${c.id}_${name}m_${px}x.png`, Buffer.from(r.crop, 'base64'));
         shots.push({ name, d, letter: m.letter, contrast, numLetter: m.numLetter, numContrast, camDist: m.camDist, L, mirrored: m.mirrored, offscreen: m.offscreen });
       }
-      // shimmer: mean absolute luminance change between consecutive burst frames at the same
-      // points on the sign (the sample grid moves with the sign), relative to the text contrast span
+      // shimmer: letters breaking up and re-forming as the truck creeps in shows as the text
+      // line's stroke energy (standard deviation of its lightness, sqrt luminance) jumping from
+      // frame to frame; steady text only loses a little of it per step. Mean relative frame-to-
+      // frame change of that energy (0 = rock steady). (Point-by-point differences would mostly
+      // measure where the sample points land on a few-pixel letter, not the rendering.)
       const b = shots.filter((s) => /^burst/.test(s.name));
       let shimmer = null;
       if (b.length > 1) {
-        let acc = 0, nn = 0;
-        for (let i = 1; i < b.length; i++) for (let k = 0; k < b[i].L.length; k++) { acc += Math.abs(Math.sqrt(b[i].L[k]) - Math.sqrt(b[i - 1].L[k])); nn++; }
-        const span = Math.sqrt(pct(b[0].L, 0.9)) - Math.sqrt(pct(b[0].L, 0.1));
-        shimmer = acc / nn / Math.max(span, 1e-3);
+        const sd = b.map((s) => { const v = s.L.map(Math.sqrt), m = v.reduce((a, x) => a + x, 0) / v.length; return Math.sqrt(v.reduce((a, x) => a + (x - m) ** 2, 0) / v.length); });
+        let acc = 0;
+        for (let i = 1; i < sd.length; i++) acc += Math.abs(sd[i] - sd[i - 1]) / Math.max((sd[i] + sd[i - 1]) / 2, 1e-4);
+        shimmer = acc / (sd.length - 1);
       }
       for (const s of shots.filter((s) => !/^burst/.test(s.name))) {
         const row = { tag, case: c.id, px, dist: s.d, camDist: +s.camDist.toFixed(1), letterPx: +s.letter.toFixed(1), contrast: +s.contrast.toFixed(2), numPx: s.numLetter === null ? null : +s.numLetter.toFixed(1), numContrast: s.numContrast === null ? null : +s.numContrast.toFixed(2), mirrored: s.mirrored, shimmer: shimmer === null ? null : +shimmer.toFixed(3) };
