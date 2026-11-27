@@ -50,6 +50,26 @@ export function ridged(x, z, oct = 4) {
   return s / norm;
 }
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ---------- micro-relief ----------
+// Physical bumps baked into the 1 m heightfield. The grid holds nothing much finer than ~2 m,
+// so these are the rolling part of the relief; sub-metre bumps are embedded rock colliders
+// (rockKit.embedded). All deterministic.
+// rounded humps and hollows 1.5-4 m across: standard deviation amp/2, peaks about 1.5 amp
+export const lumps = (x, z, amp) => amp * 1.6 * fbm(x * 0.29 + 11.3, z * 0.29 - 7.1, 2);
+// sparse potholes: on a `cell` m lattice each cell holds one with chance `prob`, `rad` m in radius
+// (scaled 0.7-1.3), up to `depth` deep with a soft rim; returns a height offset (<= 0)
+export function potholes(x, z, cell, prob, depth, rad, seed = 0) {
+  const cx = Math.floor(x / cell), cz = Math.floor(z / cell);
+  let dh = 0;
+  for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) {
+    if (hash(i * 7 + seed, j * 13 - seed) > prob) continue;
+    const px = (i + 0.2 + 0.6 * hash(i + 101 + seed, j - 37)) * cell, pz = (j + 0.2 + 0.6 * hash(i - 53, j + 211 + seed)) * cell;
+    const r = rad * (0.7 + 0.6 * hash(i + 17, j + 29 + seed)), d = Math.hypot(x - px, z - pz);
+    if (d < r) dh = Math.min(dh, -depth * (0.6 + 0.4 * hash(i - 9, j + 3 + seed)) * (1 - (d / r) ** 2) ** 2);
+  }
+  return dh;
+}
 export const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 export const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -103,7 +123,8 @@ export function pathPoint(path, s) {
 // surface material and path id per 1 m grid vertex.
 export function makeGrid(SIZE, RES) {
   const N1 = RES + 1, CELL = SIZE / RES;
-  const GRID = { h: new Float32Array(N1 * N1), vis: new Float32Array(N1 * N1), mat: new Uint8Array(N1 * N1), path: new Int16Array(N1 * N1).fill(-1) };
+  // tone: 0-255 darkening of the shown ground (wheel ruts, wet mud), read by gfx/terrain_look.js
+  const GRID = { h: new Float32Array(N1 * N1), vis: new Float32Array(N1 * N1), mat: new Uint8Array(N1 * N1), path: new Int16Array(N1 * N1).fill(-1), tone: new Uint8Array(N1 * N1) };
   const sample = (arr, x, z) => {
     const fx = clamp((x + SIZE / 2) / CELL, 0, RES - 1e-6), fz = clamp((z + SIZE / 2) / CELL, 0, RES - 1e-6);
     const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz;
@@ -173,7 +194,31 @@ export function rockKit(R, heightAt) {
     for (let i = 0; i < pts.length; i += 3) pts[i + 1] += gSide * pts[i] + gAlong * pts[i + 2];
     rocks.push({ x, y: heightAt(x, z) + H / 2 - 0.6, z, rotY, pts, ledge: true });
   };
-  return { rocks, shape, put, boulder, reach, ledge };
+  // Embedded rock: a low, rounded dome of rock sunk into the ground, `across` m wide where it
+  // meets the ground and its crown `proud` m above it. The hull is the top of an ellipsoid (the
+  // ground cuts it at 70% of its half-height) with a flat base buried about `proud` deep, tilted
+  // to the ground's slope: crawl-over relief in the wheel tracks, smooth enough to roll onto.
+  // ground: optional { y, gx, gz } surface height and slope to sit on instead of the heightfield
+  // (e.g. the top of a step slab)
+  const embedded = (x, z, across, proud, ground = null) => {
+    const pts = [];
+    const e = 0.75 + R() * 0.5, ax = across * 0.7 * e, az = (across * 0.7) / e, ay = proud / 0.3;
+    for (const v of [0.4, 0.58, 0.72, 0.84, 0.93]) {
+      const rr = Math.sqrt(1 - v * v), n = v > 0.9 ? 6 : 8, a0 = R() * 6.28;
+      for (let k = 0; k < n; k++) {
+        const a = a0 + (k / n) * Math.PI * 2 + (R() - 0.5) * 0.5, j = 0.9 + R() * 0.16;
+        pts.push(Math.cos(a) * rr * ax * j, (v - 0.7) * ay * (0.97 + R() * 0.06), Math.sin(a) * rr * az * j);
+      }
+    }
+    pts.push((R() - 0.5) * ax * 0.2, proud * (0.94 + R() * 0.06), (R() - 0.5) * az * 0.2);
+    const r = { pts, sy: 0, embed: 0, rotY: R() * Math.PI * 2 };
+    const g = across * 0.5 + 0.3, c = Math.cos(r.rotY), s = Math.sin(r.rotY);
+    const gx = ground ? ground.gx : (heightAt(x + g, z) - heightAt(x - g, z)) / (2 * g);
+    const gz = ground ? ground.gz : (heightAt(x, z + g) - heightAt(x, z - g)) / (2 * g);
+    for (let i = 0; i < pts.length; i += 3) { const px = pts[i], pz = pts[i + 2]; pts[i + 1] += gx * (px * c + pz * s) + gz * (-px * s + pz * c); }
+    rocks.push({ x, y: ground ? ground.y : heightAt(x, z), z, rotY: r.rotY, pts, embed: true, proud });
+  };
+  return { rocks, shape, put, boulder, reach, ledge, embedded };
 }
 
 // ---------- physics ----------
@@ -189,7 +234,16 @@ export function buildTerrainPhysics(RAPIER, world, grid, rocks, trees, props = [
       .setFriction(1.0).setCollisionGroups(GROUP_WORLD)
   );
   const rockHandles = new Set();
+  let shared = null; // embedded rocks (hundreds of small hulls) share one fixed body
   for (const r of rocks) {
+    if (r.embed) {
+      const desc = RAPIER.ColliderDesc.convexHull(new Float32Array(r.pts));
+      if (!desc) continue;
+      shared ||= world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+      desc.setTranslation(r.x, r.y, r.z).setRotation({ x: 0, y: Math.sin(r.rotY / 2), z: 0, w: Math.cos(r.rotY / 2) });
+      rockHandles.add(world.createCollider(desc.setFriction(1.0).setCollisionGroups(GROUP_WORLD), shared).handle);
+      continue;
+    }
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed()
       .setTranslation(r.x, r.y, r.z)
       .setRotation({ x: 0, y: Math.sin(r.rotY / 2), z: 0, w: Math.cos(r.rotY / 2) }));

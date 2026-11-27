@@ -9,7 +9,7 @@
 // at 35%; the Rally Sedan's sills clear about 0.25 m. Steps here are step-ups (a flat-topped
 // slab with the ground filled in behind it), so a staircase really climbs and no pit forms
 // between two steps.
-import { MAT, MUD_SINK, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit } from './common.js';
+import { MAT, MUD_SINK, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
 
 export const ID = 'crawl';
 export const NAME = 'The Gauntlet';
@@ -80,6 +80,34 @@ export const STAGE_DEFS = [
   { name: 'Summit', diff: 'green', blurb: 'You made it. Enjoy the view.',
     path: [['s', 30]], width: 8, grade: 0, rough: 0.02, mat: 'gravel', summit: true },
 ];
+
+// Ground relief per stage, same order as STAGE_DEFS (merged into each row as `relief`):
+// BeamNG-style lumpy crawl ground that escalates with the stage.
+//   lumps  rounded humps and hollows 1.5-4 m across baked into the heightfield (m; sd lumps/2)
+//   ruts   wheel-track ruts along the trail (m deep), dirt stages
+//   holes  potholes: [lattice m, chance per lattice cell, depth m, radius m]
+//   embed  embedded rocks: low, rounded, FIXED hulls sunk into the tread (the 1 m heightfield
+//          can't hold sub-metre bumps), mostly in the wheel tracks: one per `every` m, `size` m
+//          across, crown `proud` m above the ground; `tops` = how many on each step slab
+//   rubble embedded rocks on the ground beside the tread, one per `rubble` m
+// Relief fades out just before every step face and gatekeeper, so the designed step heights hold.
+const RELIEF = [
+  /* 1 Warm-up      */ { lumps: 0.1, ruts: 0.07, holes: [8, 0.35, 0.13, 1.1], embed: { every: 2.2, size: [0.45, 0.9], proud: [0.06, 0.13] }, rubble: 3 },
+  /* 2 Articulation */ { lumps: 0.07, ruts: 0.06, holes: [9, 0.25, 0.12, 1.0], embed: { every: 2.2, size: [0.3, 0.75], proud: [0.07, 0.16] }, rubble: 3 },
+  /* 3 Ledges I     */ { lumps: 0.13, holes: [8, 0.3, 0.13, 1.0], embed: { every: 1.4, size: [0.35, 0.85], proud: [0.09, 0.22], tops: 1 }, rubble: 2.5 },
+  /* 4 Side-slope   */ { lumps: 0.14, holes: [8, 0.3, 0.14, 1.0], embed: { every: 1.4, size: [0.35, 0.9], proud: [0.1, 0.24] }, rubble: 2.5 },
+  /* 5 Garden I     */ { lumps: 0.15, holes: [7, 0.3, 0.15, 1.1], embed: { every: 1.4, size: [0.4, 1.0], proud: [0.1, 0.22] }, rubble: 2 },
+  /* 6 The Climb    */ { lumps: 0.07, embed: { every: 2.0, size: [0.35, 0.8], proud: [0.06, 0.16] }, rubble: 2.5 },
+  /* 7 Ledges II    */ { lumps: 0.15, holes: [7, 0.3, 0.14, 1.0], embed: { every: 1.4, size: [0.4, 1.0], proud: [0.1, 0.24], tops: 2 }, rubble: 2 },
+  /* 8 Bog & Ford   */ { lumps: 0.08, ruts: 0.08, embed: { every: 2.5, size: [0.3, 0.7], proud: [0.06, 0.14] }, rubble: 3 },
+  /* 9 Notches      */ { lumps: 0.2, holes: [6, 0.35, 0.17, 1.0], embed: { every: 1.2, size: [0.4, 1.1], proud: [0.12, 0.28] }, rubble: 2 },
+  /* 10 Garden II   */ { lumps: 0.22, holes: [6, 0.4, 0.2, 1.1], embed: { every: 0.85, size: [0.5, 1.2], proud: [0.14, 0.3] }, rubble: 1.8 },
+  /* 11 Waterfall   */ { lumps: 0.05, embed: { every: 3, size: [0.35, 0.8], proud: [0.08, 0.16] }, rubble: 2 },
+  /* 12 Summit      */ { lumps: 0.04 },
+];
+STAGE_DEFS.forEach((d, i) => { d.relief = RELIEF[i]; });
+// the bog's churned wheel ruts (m), on top of its soft, uneven floor
+STAGE_DEFS[7].bog.ruts = 0.14;
 
 const START = { x: -120, z: 110 };   // where the trail leaves the spawn pad, heading east
 const H0 = 2;                        // spawn pad height
@@ -223,6 +251,27 @@ function baseHeight(x, z) {
 
 // ---------------------------------------------------------------- tread shaping per stage
 const bump = (d, r) => (d >= r ? 0 : (1 - (d / r) ** 2) ** 2);
+// 0 where relief must not change a designed step: from 1.6 m in front of a step face over its
+// slab, and round the gatekeeper ledges; 1 elsewhere
+function reliefFade(st, u) {
+  let f = 1;
+  if (st.steps) for (const at of st.steps.at) f = Math.min(f, 1 - smooth(at - 2.6, at - 1.6, u) * smooth(at + st.steps.depth + 1.2, at + st.steps.depth + 0.4, u));
+  if (st.gatekeepers) for (const at of st.gatekeepers.at) { const h = st.gatekeepers.depth / 2; f = Math.min(f, 1 - smooth(at - h - 2.6, at - h - 1.6, u) * smooth(at + h + 2.6, at + h + 1.6, u)); }
+  return f;
+}
+// the stage's micro-relief at stage-local u / lateral lat (see RELIEF)
+function relief(st, u, lat, hw, x, z) {
+  const r = st.relief, f = reliefFade(st, u);
+  if (!r || f <= 0) return 0;
+  let dh = lumps(x, z, r.lumps || 0);
+  const inBog = st.bog && u > st.bog.from - 2 && u < st.bog.to + 2;
+  if (r.ruts && !inBog) { // two wheel-track ruts, deeper in places
+    const k = 0.65 + 0.7 * fbm(x * 0.11 - 4, z * 0.11 + 8, 2);
+    dh -= r.ruts * k * (bump(Math.abs(lat - 0.82), 0.62) + bump(Math.abs(lat + 0.82), 0.62)) * (1 - smooth(hw - 0.6, hw + 0.4, Math.abs(lat)));
+  }
+  if (r.holes) dh += potholes(x, z, r.holes[0], r.holes[1], r.holes[2], r.holes[3], st.n * 31);
+  return dh * f;
+}
 // height offset of the trail surface at stage-local u and lateral lat (m, + = right of travel)
 function tread(st, u, lat, hw, x, z) {
   let dh = 0;
@@ -251,6 +300,7 @@ function tread(st, u, lat, hw, x, z) {
     // kicker bumps under the uphill wheels
     if (c.bumps) for (let q = c.from + 9; q < c.to - 6; q += 7) dh += c.bumps * f * bump(Math.hypot(u - q, lat + 0.8), 1.1);
   }
+  dh += relief(st, u, lat, hw, x, z) * ends;
   if (st.ford) {
     const f = st.ford, mid = (f.from + f.to) / 2, half = (f.to - f.from) / 2;
     const along = Math.abs(u - mid) < half ? 0.5 + 0.5 * Math.cos((Math.PI * (u - mid)) / half) : 0;
@@ -285,7 +335,7 @@ function bake() {
     for (let iz = 0; iz <= RES; iz++) {
       const z = -SIZE / 2 + iz * CELL;
       const idx = ix * N1 + iz;
-      let h = baseHeight(x, z);
+      let h = baseHeight(x, z) + lumps(x, z, 0.14); // rolling bumps all over the open ground
       const n = fbm(x * 0.08 + 9, z * 0.08 - 4, 3);
       // spawn pad and summit pad: flat, graded gravel
       const wTH = 1 - smooth(TRAILHEAD.r, TRAILHEAD.r + 10, Math.hypot(x - TRAILHEAD.x, z - TRAILHEAD.z));
@@ -309,7 +359,7 @@ function bake() {
       }
       let best = null;
       for (const c of perPath.values()) if (!best || c.score < best.score) best = c;
-      let mat = n > 0.1 ? MAT.DIRT : MAT.GRASS, pathId = -1, sink = 0, water = false;
+      let mat = n > 0.1 ? MAT.DIRT : MAT.GRASS, pathId = -1, sink = 0, water = false, vRut = 0;
       if (best) {
         let num = 0, den = 0, W = 0;
         for (const c of perPath.values()) {
@@ -317,7 +367,8 @@ function bake() {
           const w = 1 - smooth(c.hw, c.hw + q.shoulder, c.d);
           if (w <= 0) continue;
           let surf = c.ph;
-          if (q.kind === 'road') surf -= Math.min(1, c.d / c.hw) ** 2 * 0.1; // crown
+          // crown; graded, but not billiard-flat: gentle lumps and the odd shallow pothole
+          if (q.kind === 'road') surf += -(Math.min(1, c.d / c.hw) ** 2) * 0.1 + lumps(x, z, 0.04) + potholes(x, z, 9, 0.3, 0.08, 1.2, 7);
           else { const st = stageAt(c.s); surf += tread(st, c.s - st.s0, c.lat, c.hw, x, z); }
           const ww = w * w * (q.kind === 'road' ? 2 : 1);
           num += surf * ww; den += ww; W = Math.max(W, w);
@@ -332,10 +383,22 @@ function bake() {
             mat = st.mat === 'rock' ? (n > 0.42 ? MAT.DIRT : MAT.ROCK) : st.mat === 'gravel' ? MAT.GRAVEL : n > 0.3 ? MAT.GRAVEL : MAT.DIRT;
             if (st.camber && u > st.len * 0.55) mat = n > 0.35 ? MAT.GRAVEL : MAT.DIRT; // grip drops off on the second half
             if (st.gravel && u > st.gravel[0] && u < st.gravel[1]) mat = MAT.GRAVEL;
+            // worn wheel ruts on the dirt stages show as darker tread
+            if (st.relief?.ruts) GRID.tone[idx] = Math.round(clamp((bump(Math.abs(best.lat - 0.82), 0.62) + bump(Math.abs(best.lat + 0.82), 0.62)) * 0.55, 0, 1) * 255 * reliefFade(st, u));
             if (st.bog && u > st.bog.from && u < st.bog.to) {
               // uneven bog floor: soft holes and firmer humps under a flat-looking surface
-              const depth = st.bog.sink * (1 + 0.4 * fbm(x * 0.16 + 3, z * 0.16 - 7, 2)) * smooth(st.bog.from, st.bog.from + 3, u) * smooth(st.bog.to, st.bog.to - 3, u);
+              const ease = smooth(st.bog.from, st.bog.from + 3, u) * smooth(st.bog.to, st.bog.to - 3, u);
+              const depth = st.bog.sink * (1 + 0.4 * fbm(x * 0.16 + 3, z * 0.16 - 7, 2)) * ease;
               mat = MAT.MUD; sink = depth * smooth(best.hw + 0.5, best.hw - 1, best.d); h -= sink;
+              // churned wheel ruts along the bog: grooves you can see (they lower the shown
+              // surface too), deeper and softer in places, a firmer crown between them
+              if (st.bog.ruts) {
+                const k = 0.6 + 0.8 * clamp(fbm(x * 0.13 + 1, z * 0.13 + 5, 2) + 0.5, 0, 1);
+                const ruts = bump(Math.abs(best.lat - 0.85), 0.7) + bump(Math.abs(best.lat + 0.85), 0.7);
+                h -= st.bog.ruts * k * ease * ruts - 0.04 * ease * bump(Math.abs(best.lat), 0.6);
+                vRut = st.bog.ruts * k * ease * ruts * 0.4; // (the rest of the groove is hidden, like the sink)
+                GRID.tone[idx] = Math.round(clamp(ruts * k * 0.8, 0, 1) * 255);
+              }
             }
             if (st.ford && u > st.ford.from - 2 && u < st.ford.to + 2) water = true;
           }
@@ -344,7 +407,7 @@ function bake() {
       }
       if (wTH > 0.5 || wSU > 0.6) { mat = wSU > 0.6 ? MAT.GRAVEL : MAT.ROAD; isPad[idx] = 1; }
       if (water && h < WATER.y) mat = MAT.WATER;
-      GRID.h[idx] = h; GRID.vis[idx] = h + sink; GRID.mat[idx] = mat; GRID.path[idx] = pathId;
+      GRID.h[idx] = h; GRID.vis[idx] = h + sink + vRut; GRID.mat[idx] = mat; GRID.path[idx] = pathId;
     }
   }
   // off the paths the surface follows the slope: bare rock on cliffs, scree on steep ground
@@ -472,7 +535,53 @@ export function generateRocks() {
     if (onAnyPath(x, z, 3)) continue;
     boulder(x, z, 0.5 + Math.pow(R(), 2) * 2.4, 0.8);
   }
+
+  // ---- ground relief: embedded rocks in the tread, on the step tops and beside the trail ----
+  // (own random stream, so the obstacle layout above is unchanged by relief tuning)
+  const E = rockKit(rng(4711), heightAt), R2 = rng(4712);
+  for (const st of STAGES) {
+    const rl = st.relief, hw = st.width / 2;
+    if (!rl) continue;
+    // keep step faces, slabs, gatekeepers, the bog, the ford and the squeezes as designed
+    const blocked = (u) => (st.steps && st.steps.at.some((a) => u > a - 1.6 && u < a + st.steps.depth + 0.4))
+      || (st.gatekeepers && st.gatekeepers.at.some((a) => Math.abs(u - a) < st.gatekeepers.depth / 2 + 1.6))
+      || (st.bog && u > st.bog.from - 1 && u < st.bog.to + 1) || (st.ford && u > st.ford.from - 1 && u < st.ford.to + 1)
+      || (st.squeezes && st.squeezes.at.some((a) => Math.abs(u - a) < 1.5));
+    const e = rl.embed;
+    if (e) {
+      for (let u = APRON; u < st.len - 3; u += e.every * (0.6 + R2() * 0.8)) {
+        if (blocked(u)) continue;
+        // 70% in the wheel tracks (about 0.8 m either side of the centre), the rest anywhere
+        const lat = R2() < 0.7 ? (R2() < 0.5 ? -1 : 1) * (0.8 + (R2() - 0.5) * 0.6) : (R2() * 2 - 1) * (hw - 0.4);
+        const q = at(st.s0 + u, lat), k = R2(); // the bigger ones stand prouder
+        E.embedded(q.x, q.z, lerp(e.size[0], e.size[1], k), lerp(e.proud[0], e.proud[1], 0.3 * R2() + 0.7 * k));
+      }
+      // uneven ledge tops: rocks sunk into each step slab, back from its lip
+      if (e.tops && st.steps) st.steps.at.forEach((a, k) => {
+        const p0 = pathPoint(TRAIL, st.s0 + a), g = (pathPoint(TRAIL, st.s0 + a - 1).h - pathPoint(TRAIL, st.s0 + a - 2).h);
+        for (let n = 0; n < e.tops; n++) {
+          const zz = 0.9 + R2() * (st.steps.depth - 1.5), lat = (R2() * 2 - 1) * (hw - 0.6), q = at(st.s0 + a + zz, lat);
+          E.embedded(q.x, q.z, lerp(e.size[0], e.size[1], R2()), lerp(e.proud[0], e.proud[1], R2()) * 0.8,
+            { y: p0.h + st.steps.rise[k] + g * zz, gx: g * p0.tx, gz: g * p0.tz });
+        }
+      });
+    }
+    // rock rubble on the ground either side of the tread: bumpy going for anyone leaving the line
+    if (rl.rubble) for (let u = 4; u < st.len - 2; u += rl.rubble * (0.6 + R2() * 0.8)) {
+      const sd = R2() < 0.5 ? -1 : 1, s = st.s0 + u;
+      if (nearSpur(s, sd) || (st.bog && u > st.bog.from - 2 && u < st.bog.to + 2) || (st.ford && u > st.ford.from - 3 && u < st.ford.to + 3)) continue;
+      const q = at(s, sd * (hw + 0.7 + R2() * 3.2));
+      if (onRoad(q.x, q.z, 1.5)) continue;
+      E.embedded(q.x, q.z, 0.4 + R2() * 0.7, 0.08 + R2() * 0.17);
+    }
+  }
+  for (const r of E.rocks) rocks.push(r);
   return rocks;
+}
+// near the bypass track or a spur?
+function onRoad(x, z, margin) {
+  for (const p of ROADS) for (let i = 0; i < p.pts.length; i += 2) if (Math.hypot(p.pts[i].x - x, p.pts[i].z - z) < p.width / 2 + margin) return true;
+  return false;
 }
 
 export function generateTrees() {
@@ -488,18 +597,18 @@ export function generateTrees() {
   return trees;
 }
 
-// Loose stones and logs on the early stages; src/crawl_view.js makes them physical props
-// (src/physics_props.js), so they roll and shift under the tyres.
+// Small loose stones (about 0.2-0.38 m across) on the early stages; src/crawl_view.js makes them
+// physical props (src/physics_props.js), so they roll and shift under the tyres. No logs on the
+// course: logs only appear as fixed trail-crew edging off the tread (src/art/dressing.js).
+// (s is the crawl_view scale: the procedural pebble is 0.7 m wide at s = 1, rock_small.glb gets
+// s * 1.6 and is ~0.57 m wide at 1)
 export const LOOSE = { stones: [], logs: [] };
 {
   const R = rng(808);
-  const st1 = STAGES[0], st2 = STAGES[1];
-  for (let u = 9; u < st1.len - 6; u += 4 + R() * 3) {
-    const lat = (R() * 2 - 1) * 2.2, p = pathPoint(TRAIL, st1.s0 + u);
-    LOOSE.stones.push({ x: p.x - p.tz * lat, z: p.z + p.tx * lat, ry: R() * 6.28, s: 0.55 + R() * 0.4 });
-  }
-  for (const [st, u, lat, skew] of [[st1, 33, 1.0, 0.45], [st1, 56, -1.1, -0.5], [st2, 37, 0.4, 0.3]]) {
-    const p = pathPoint(TRAIL, st.s0 + u);
-    LOOSE.logs.push({ x: p.x - p.tz * lat, z: p.z + p.tx * lat, ry: Math.atan2(-p.tz, p.tx) + Math.PI / 2 + skew, sx: 2.4 + R() * 0.6, s: 0.8 });
+  for (const [st, every] of [[STAGES[0], 5], [STAGES[1], 7], [STAGES[3], 8], [STAGES[4], 8]]) {
+    for (let u = 9; u < st.len - 6; u += every * (0.7 + R() * 0.6)) {
+      const lat = (R() * 2 - 1) * (st.width / 2 - 0.5), p = pathPoint(TRAIL, st.s0 + u);
+      LOOSE.stones.push({ x: p.x - p.tz * lat, z: p.z + p.tx * lat, ry: R() * 6.28, s: 0.28 + R() * 0.14 });
+    }
   }
 }

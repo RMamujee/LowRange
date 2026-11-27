@@ -8,11 +8,12 @@ const H=1/200;
 const world=new RAPIER.World({x:0,y:-9.81,z:0}); world.timestep=H; world.numSolverIterations=8;
 const rocks=generateRocks();
 for (const r of rocks){ let m=0; for(let i=0;i<r.pts.length;i+=3) m=Math.max(m,Math.hypot(r.pts[i],r.pts[i+2])); r.rad=m; let ym=-1e9; for(let i=1;i<r.pts.length;i+=3) ym=Math.max(ym,r.pts[i]); r.top=r.y+ym; }
+// (embedded rocks are low crawl-over relief: driven over, not around)
 function pickLine(t,s,spec){ // lateral offset with most clearance from boulders over the next 8 m
   const hw=t.width/2; let bestO=0,bestC=-1e9;
   for(let o=-hw+0.6;o<=hw-0.6;o+=0.25){ let c=1e9;
     for(let q=s;q<s+8;q+=1){ const p=pathPoint(t,q); const x=p.x-p.tz*o, z=p.z+p.tx*o;
-      for(const r of rocks){ if(r.ledge) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
+      for(const r of rocks){ if(r.ledge||r.embed) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
     c = Math.min(c, 2.5) - Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} } // past 2.5 m of room, stay central
   return bestO; }
 const terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());

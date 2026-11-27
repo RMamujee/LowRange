@@ -128,7 +128,7 @@ export function terrainMaterial({ GRID, RES, SIZE, NROADS, MAT }) {
     data[o + 1] = GRID.path[g] >= NROADS && m !== MAT.MUD ? 255 : 0;
     const nz = Math.sin(ix * 0.071 + Math.sin(iz * 0.05) * 2.1) * Math.sin(iz * 0.063 + Math.sin(ix * 0.045) * 1.7);
     data[o + 2] = Math.round((nz * 0.5 + 0.5) * 255);
-    data[o + 3] = 255;
+    data[o + 3] = 255 - (GRID.tone ? GRID.tone[g] : 0); // A = 255 - tone (wheel ruts, wet mud)
   }
   const grid = new THREE.DataTexture(data, N1, N1, THREE.RGBAFormat, THREE.UnsignedByteType);
   grid.magFilter = grid.minFilter = THREE.NearestFilter;
@@ -198,6 +198,16 @@ float surfVote(vec2 gp, out float share) {
           // worn trail tread one step darker; slow, stepped tone drift so big areas aren't flat
           g *= cell.g > 0.5 ? 0.86 : 1.0;
           g *= 0.95 + 0.035 * floor(cell.b * 3.0);
+          // wheel ruts and churned mud (GRID.tone): at most two calm steps darker, in soft shapes
+          // from a bilinear read of the tone field at the wobbled position (no per-cell blocks)
+          {
+            ivec2 i0 = clamp(ivec2(floor(gp)), ivec2(0), ivec2(int(uGridInfo.z) - 1));
+            vec2 f = gp - vec2(i0);
+            float t00 = texelFetch(uGrid, ivec2(i0.y, i0.x), 0).a, t10 = texelFetch(uGrid, ivec2(i0.y, i0.x + 1), 0).a;
+            float t01 = texelFetch(uGrid, ivec2(i0.y + 1, i0.x), 0).a, t11 = texelFetch(uGrid, ivec2(i0.y + 1, i0.x + 1), 0).a;
+            float tn = 1.0 - mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y);
+            g *= tn > 0.45 ? 0.88 : tn > 0.2 ? 0.94 : 1.0;
+          }
           diffuseColor.rgb *= g;
         }`);
   };

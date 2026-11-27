@@ -1,7 +1,7 @@
 // Trail park: rugged hills everywhere, with a graded road network and difficulty-rated
 // rock-crawling trails carved through it. Heights and materials are baked once onto the
 // 1 m physics grid so physics, visuals and lookups agree exactly.
-import { MAT, MUD_SINK, fbm, ridged, clamp, smooth, lerp, rng, catmull, pathPoint, makeGrid, rockKit } from './common.js';
+import { MAT, MUD_SINK, fbm, ridged, clamp, smooth, lerp, rng, catmull, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
 
 export const ID = 'park';
 export const NAME = 'Trail Park';
@@ -32,6 +32,18 @@ const TRAIL_DEFS = [
   { name: 'Boulder Alley', diff: 'black', pts: [[96, -96], [80, -70], [72, -50], [56, -45], [40, -60], [30, -85], [10, -110], [-8, -133]] },
   { name: 'Widowmaker Falls', diff: 'dblack', pts: [[-68, -121], [-55, -95], [-40, -75], [-30, -55], [-25, -35], [-5, -32], [20, -24]] },
 ];
+
+// Ground relief on the rated trails by difficulty (the terms are those of maps/crawl.js RELIEF:
+// heightfield lumps / ruts / potholes, embedded rock hulls in the tread, rubble beside it).
+// Green stays gentle enough for the low Rally Sedan: nothing there stands over ~0.15 m.
+const RELIEF = {
+  green:  { lumps: 0.05, ruts: 0.05, holes: [9, 0.25, 0.08, 1.0], embed: { every: 3.2, size: [0.3, 0.6], proud: [0.05, 0.12] }, rubble: 5 },
+  blue:   { lumps: 0.1, ruts: 0.08, holes: [8, 0.3, 0.12, 1.0], embed: { every: 2.0, size: [0.35, 0.8], proud: [0.07, 0.18] }, rubble: 3.5 },
+  black:  { lumps: 0.13, ruts: 0, holes: [7, 0.3, 0.14, 1.0], embed: { every: 1.4, size: [0.4, 1.0], proud: [0.1, 0.25] }, rubble: 2.5 },
+  dblack: { lumps: 0.15, ruts: 0, holes: [7, 0.35, 0.15, 1.0], embed: { every: 1.2, size: [0.45, 1.1], proud: [0.12, 0.28] }, rubble: 2.2 },
+};
+const MUD_RUTS = 0.14; // churned wheel ruts in Bog Run (m)
+const bump = (d, r) => (d >= r ? 0 : (1 - (d / r) ** 2) ** 2);
 
 
 function nearestRoadHeight(x, z) {
@@ -98,7 +110,7 @@ function bake() {
     for (let iz = 0; iz <= RES; iz++) {
       const z = -SIZE / 2 + iz * CELL;
       const idx = ix * N1 + iz;
-      let h = baseHeight(x, z);
+      let h = baseHeight(x, z) + lumps(x, z, 0.14); // rolling bumps all over the open ground
       // trailhead parking lot
       const dTH = Math.hypot(x - TRAILHEAD.x, z - TRAILHEAD.z);
       const wTH = 1 - smooth(TRAILHEAD.r, TRAILHEAD.r + 10, dTH);
@@ -128,7 +140,7 @@ function bake() {
       const n = fbm(x * 0.08 + 9, z * 0.08 - 4, 3);
       mat = slope > 0.75 ? MAT.ROCK : slope > 0.45 ? (n > -0.1 ? MAT.ROCK : MAT.GRAVEL) : n > 0.1 ? MAT.DIRT : MAT.GRASS;
       if (Math.max(Math.abs(x), Math.abs(z)) > 170) mat = n > 0 ? MAT.ROCK : MAT.GRAVEL;
-      let pathId = -1, sink = 0;
+      let pathId = -1, sink = 0, vRut = 0;
       if (best) {
         const p = PATHS[best.pi];
         const hw = p.width / 2;
@@ -140,14 +152,23 @@ function bake() {
           const w = 1 - smooth(qhw, qhw + q.shoulder, c.d);
           if (w <= 0) continue;
           let surf = c.ph;
-          if (q.kind === 'road') surf -= Math.min(1, c.d / qhw) ** 2 * 0.12; // crown
-          else {
+          if (q.kind === 'road') {
+            surf -= Math.min(1, c.d / qhw) ** 2 * 0.12; // crown
+            // graded, not billiard-flat: a gentle washboard along the road (about 2.8 m, the
+            // 1 m grid samples it into an uneven corrugation), soft lumps and shallow potholes
+            surf += 0.022 * Math.sin(c.s * 2.24) * (0.6 + 0.4 * fbm(x * 0.05, z * 0.05, 2) * 2) + lumps(x, z, 0.03) + potholes(x, z, 10, 0.3, 0.08, 1.2, 3);
+          } else {
             // rough tread, eased in away from the trail ends
             const ends = smooth(0, 12, Math.min(c.s, q.length - c.s));
             const rough = { green: 0.15, blue: 0.26, black: 0.28, dblack: 0.32 }[q.diff];
             // steep pitches get smoother rock: small steps on a 35% grade act like ledges
             const steep = q.diff === 'black' || q.diff === 'dblack' ? 1 - 0.6 * smooth(0.15, 0.35, Math.abs(c.g)) : 1;
             surf += fbm(x * 0.45, z * 0.45, 2) * rough * steep * ends;
+            // micro-relief by difficulty (RELIEF): rolling lumps, wheel-track ruts, potholes
+            const rl = RELIEF[q.diff], inMud = q.mud && c.s / q.length > q.mud[0] - 0.02 && c.s / q.length < q.mud[1] + 0.02;
+            surf += lumps(x, z, rl.lumps) * steep * ends;
+            if (rl.ruts && !inMud) surf -= rl.ruts * (0.65 + 0.7 * fbm(x * 0.11 - 4, z * 0.11 + 8, 2)) * (bump(Math.abs(c.lat - 0.82), 0.62) + bump(Math.abs(c.lat + 0.82), 0.62)) * ends;
+            surf += potholes(x, z, rl.holes[0], rl.holes[1], rl.holes[2], rl.holes[3], c.pi * 17) * ends;
             const camber = { green: 0, blue: q.mud ? 0 : 0.07, black: 0.16, dblack: 0.17 }[q.diff];
             if (camber) surf += clamp(c.lat, -qhw - 0.5, qhw + 0.5) * camber * Math.sin(c.s * 0.045) * ends; // off-camber
           }
@@ -165,13 +186,25 @@ function bake() {
               // the bog's floor is uneven: soft holes and firmer humps under a flat-looking surface
               const depth = (p.mudSink ?? MUD_SINK) * (1 + 0.4 * fbm(x * 0.16 + 3, z * 0.16 - 7, 2));
               mat = MAT.MUD; sink = depth * smooth(hw + 0.5, hw - 1, best.d); h -= sink;
+              // churned wheel ruts along the bog: grooves you can see (60% of their depth shows),
+              // deeper and softer in places, a firmer crown between them
+              const ease = smooth(p.mud[0], p.mud[0] + 0.04, f) * smooth(p.mud[1], p.mud[1] - 0.04, f);
+              const k = 0.6 + 0.8 * clamp(fbm(x * 0.13 + 1, z * 0.13 + 5, 2) + 0.5, 0, 1);
+              const ruts = bump(Math.abs(best.lat - 0.85), 0.7) + bump(Math.abs(best.lat + 0.85), 0.7);
+              h -= MUD_RUTS * k * ease * ruts - 0.04 * ease * bump(Math.abs(best.lat), 0.6);
+              vRut = MUD_RUTS * k * ease * ruts * 0.4;
+              GRID.tone[idx] = Math.round(clamp(ruts * k * 0.8 * ease, 0, 1) * 255);
             }
-            else mat = p.diff === 'green' ? (n > 0.3 ? MAT.GRAVEL : MAT.DIRT) : (n > (p.diff === 'blue' ? 0.15 : 0.35) ? MAT.DIRT : MAT.ROCK); // hard trails are mostly bare rock
+            else {
+              mat = p.diff === 'green' ? (n > 0.3 ? MAT.GRAVEL : MAT.DIRT) : (n > (p.diff === 'blue' ? 0.15 : 0.35) ? MAT.DIRT : MAT.ROCK); // hard trails are mostly bare rock
+              // worn wheel ruts show as darker tread
+              if (RELIEF[p.diff].ruts) GRID.tone[idx] = Math.round(clamp((bump(Math.abs(best.lat - 0.82), 0.62) + bump(Math.abs(best.lat + 0.82), 0.62)) * 0.55, 0, 1) * 255 * smooth(0, 12, Math.min(best.s, p.length - best.s)));
+            }
           }
         } else if (w > 0.3 && mat === MAT.GRASS) mat = MAT.DIRT;
       }
       if (wTH > 0.5) mat = MAT.ROAD;
-      GRID.h[idx] = h; GRID.vis[idx] = h + sink; GRID.mat[idx] = mat; GRID.path[idx] = pathId;
+      GRID.h[idx] = h; GRID.vis[idx] = h + sink + vRut; GRID.mat[idx] = mat; GRID.path[idx] = pathId;
     }
   }
 }
@@ -304,6 +337,32 @@ export function generateRocks() {
     if (onAnyPath(x, z, 3)) continue;
     boulder(x, z, 0.5 + Math.pow(R(), 2) * 2.4, 0.8);
   }
+
+  // ---- ground relief: embedded rocks in the trail tread (mostly the wheel tracks) and rock
+  // rubble beside it, by difficulty (RELIEF); own random stream, so the layout above holds ----
+  const E = rockKit(rng(4711), heightAt), R2 = rng(4712);
+  const ledges = rocks.filter((r) => r.ledge);
+  for (const t of TRAILS) {
+    const rl = RELIEF[t.diff], e = rl.embed, hw = t.width / 2;
+    const mud = (s) => t.mud && s / t.length > t.mud[0] - 0.03 && s / t.length < t.mud[1] + 0.03;
+    const nearLedge = (x, z) => ledges.some((r) => Math.hypot(r.x - x, r.z - z) < 4.2);
+    for (let s = 8; s < t.length - 6; s += e.every * (0.6 + R2() * 0.8)) {
+      if (mud(s)) continue;
+      const p = pathPoint(t, s), lat = R2() < 0.7 ? (R2() < 0.5 ? -1 : 1) * (0.8 + (R2() - 0.5) * 0.6) : (R2() * 2 - 1) * (hw - 0.4);
+      const x = p.x - p.tz * lat, z = p.z + p.tx * lat;
+      if (nearLedge(x, z)) continue;
+      const k = R2();
+      E.embedded(x, z, lerp(e.size[0], e.size[1], k), lerp(e.proud[0], e.proud[1], 0.3 * R2() + 0.7 * k));
+    }
+    for (let s = 6; s < t.length - 4; s += rl.rubble * (0.6 + R2() * 0.8)) {
+      if (mud(s)) continue;
+      const p = pathPoint(t, s), lat = (R2() < 0.5 ? -1 : 1) * (hw + 0.7 + R2() * 3.2);
+      const x = p.x - p.tz * lat, z = p.z + p.tx * lat;
+      if (onAnyPath(x, z, 0.5)) continue;
+      E.embedded(x, z, 0.4 + R2() * 0.7, 0.08 + R2() * 0.17);
+    }
+  }
+  for (const r of E.rocks) rocks.push(r);
   return rocks;
 }
 
