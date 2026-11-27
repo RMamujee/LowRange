@@ -1,16 +1,26 @@
-// Offline render of engine audio (old git HEAD vs current) -> spectral stats + WAVs.
-// usage: node test/audio.mjs [path/to/old_audio.js]
+// Offline render of engine audio (an old copy vs current) -> spectral stats + WAVs.
+// usage: node test/audio.mjs [path/to/old_audio.js]   (default old copy: test/lib/audio_baseline.js)
+// The full by-the-numbers check with asserts is test/audiospec.mjs.
 import { chromium } from 'playwright';
 import fs from 'fs';
-const oldSrc = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : null;
-const newSrc = fs.readFileSync(new URL('../src/audio.js', import.meta.url), 'utf8');
+import path from 'path';
+const ROOT = new URL('../', import.meta.url);
+const oldPath = path.resolve(process.argv[2] || new URL('./lib/audio_baseline.js', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {}); // CHROME=path/to/chrome.exe to use a specific browser
 const page = await browser.newPage();
+// modules are served on a routed origin so their relative imports resolve
+await page.route('http://audio.test/**', (route) => {
+  const p = new URL(route.request().url()).pathname.slice(1);
+  const f = p === 'old.js' ? oldPath : new URL(p, ROOT);
+  if (!p || !fs.existsSync(f)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>audio</title>' });
+  route.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(f, 'utf8') });
+});
+await page.goto('http://audio.test/');
 const out = new URL('./audio-samples/', import.meta.url);
 fs.mkdirSync(out, { recursive: true });
 const cases = [['idle', 800, 0.12], ['cruise', 3000, 0.5], ['high', 6500, 1.0]];
 const engines = { v8: 800, v6: 800, diesel: 700, boxer: 900 };
-const res = await page.evaluate(async ({ srcs, cases, engines }) => {
+const res = await page.evaluate(async ({ cases, engines }) => {
   const results = [];
   function fft(re, im) { const n = re.length; for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
     for (let l = 2; l <= n; l <<= 1) { const a = -2 * Math.PI / l; for (let i = 0; i < n; i += l) for (let k = 0; k < l / 2; k++) { const wr = Math.cos(a * k), wi = Math.sin(a * k); const ur = re[i + k], ui = im[i + k]; const vr = re[i + k + l / 2] * wr - im[i + k + l / 2] * wi, vi = re[i + k + l / 2] * wi + im[i + k + l / 2] * wr; re[i + k] = ur + vr; im[i + k] = ui + vi; re[i + k + l / 2] = ur - vr; im[i + k + l / 2] = ui - vi; } } }
@@ -25,14 +35,13 @@ const res = await page.evaluate(async ({ srcs, cases, engines }) => {
     let acc = 0, roll = 0; for (const [f, m] of sp) { acc += m; if (acc >= 0.95 * tot) { roll = f; break; } }
     return { roll95: roll, pctAbove1k: 100 * hi / tot, centroid: num / den, dominant: bi, pctBelow200: 100 * lo / tot, peak, rms };
   }
-  for (const [label, src] of Object.entries(srcs)) {
-    if (!src) continue;
-    const mod = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  for (const [label, url] of Object.entries({ old: 'http://audio.test/old.js', new: 'http://audio.test/src/audio.js' })) {
+    const mod = await import(url);
     for (const [kind, idle] of Object.entries(engines)) for (const [cn, rpm0, thr] of cases) {
       const rpm = cn === 'idle' ? idle : rpm0 * (kind === 'diesel' ? 0.45 : 1);
       const off = new OfflineAudioContext(1, 44100 * 2.5, 44100);
       const orig = window.AudioContext; window.AudioContext = function () { return off; };
-      const a = new mod.EngineAudio(); a.start(kind); window.AudioContext = orig;
+      const a = new mod.EngineAudio({ context: off }); a.start(kind); window.AudioContext = orig; // old copies ignore the option and use the patched constructor
       a.update(rpm, thr, true, 3);
       const buf = await off.startRendering();
       const x = buf.getChannelData(0);
@@ -40,7 +49,7 @@ const res = await page.evaluate(async ({ srcs, cases, engines }) => {
     }
   }
   return results;
-}, { srcs: { old: oldSrc, new: newSrc }, cases, engines });
+}, { cases, engines });
 await browser.close();
 function wav(pcm) { const b = Buffer.alloc(44 + pcm.length * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + pcm.length * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(44100, 24); b.writeUInt32LE(88200, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(pcm.length * 2, 40); pcm.forEach((v, i) => b.writeInt16LE(v, 44 + i * 2)); return b; }
 console.log('label kind case rpm | centroid Hz | dominant Hz | %energy<200Hz | peak | rms | 95% rolloff Hz | %>1kHz');
