@@ -200,6 +200,45 @@ plane so the static hold works in mud) have not been seen in the game. A human s
 - [ ] Spawn list (J): every place and trail end lands somewhere sensible.
 - [ ] Sand tyre marks: visible enough, not distracting; fade time.
 
+## Engine, tyre and winch sound (`src/audio.js`)
+
+User ask: heavier, deeper engine sound and no whine; better tyre sound.
+
+**What the whine was** (measured offline on the old voice, `test/lib/audio_baseline.js`): one 2-revolution cycle of thumps, each a sum of pure sines (f, 2f, 3f, 5f with f = 40-66 Hz), looped perfectly and resampled with playbackRate = rpm / 750. So every component was an exact harmonic line, and the thump's own tone rode up with rpm (the Rally Sedan's 58 Hz thump sits at about 540 Hz at 7000 rpm) behind a low-pass that also swept with rpm. Result: a pure, rising buzz at 450-1000 Hz only 3-9 dB under the low note at 4000-5500 rpm (Sedan 458 Hz at -4.3 dB, Pickup 549 Hz at -5.1 dB, Cruiser 493 Hz at -9.3 dB) and narrow lines just above 1 kHz at -18 to -22 dB. The old voice was already dark by spectral centroid (58-104 Hz at idle and crawl); its problem was tone, not brightness. The 55-235 Hz "driveline" sine was too quiet to matter (about -48 dB) and is gone.
+
+**Engine voice now:**
+- Per rig from `spec.engine`: `sound` picks a profile in `PROFILES` (diesel = V8 diesel for the Cruiser, v6 for the Pickup, boxer for the Rally Sedan, v8 for the parked rig), `idle` and `redline` set the range, and optional `cyl` / `diesel` fields override the profile. No id checks.
+- Three looping buffers per engine, built once at idle rpm (about 3 s of firing events, firing rate = rpm / 60 x cylinders / 2): DRIVE (firm pressure pulses plus a short combustion-noise burst), COAST (soft, wider, uneven pulses, about 1 in 7 nearly missing, the odd small pop on a petrol) and CLATTER (diesel knock clicks with their own timing jitter, or exhaust rasp on a petrol). Every event has a per-cylinder strength and timing offset (bank-to-bank lope on the V8, paired pulses on the flat four), timing jitter (4-5% of the interval), amplitude jitter, and each cycle's length wanders about 1.5%, so no order settles into a pure tone. The buffers are band-limited at build time so playback up to redline cannot alias.
+- They play in lock step with playbackRate = rpm / idle (a pulse lasts a fixed crank angle, so it shortens with rpm like a real exhaust pulse).
+- Body chain: soft saturation (more drive at high load and low rpm) -> three FIXED peaking resonances, exhaust / block / intake (low Q, never move; only the intake's gain follows load) -> a low-pass with no resonance (Q 0.6) that opens with load far more than with rpm, held to 45% of its opening in 4-Low under 10 km/h -> plus a fixed 85 Hz sub branch, strongest at idle.
+- Load: `audioStateFrom(car)` computes load = engine torque / available torque, x0.4 in neutral. Effort = max(load, throttle / 2), smoothed (rises in 0.1 s, falls in 0.25 s so it does not pump), crossfades COAST to DRIVE and raises level, saturation and brightness.
+- Tuning constants per rig (`PROFILES`): pulse width (fraction of the firing interval) diesel 0.7, v6 0.5, boxer 0.44; jitter 0.05; exhaust / block / intake resonances diesel 88 / 210 / 400 Hz, v6 105 / 270 / 620 Hz, boxer 96 / 250 / 600 Hz; low-pass closed / open diesel 280 / 820 Hz, v6 340 / 1400 Hz, boxer 360 / 1500 Hz; diesel knock 0.55, petrol rasp 0.3-0.34. No gear or transfer-case whine layer, no turbo whistle.
+
+**Tyres and ground:** six looping textures built at start (brown noise, white noise, gravel grains, mud blobs with a downward glide, water swells) through fixed filters into one gain per surface: dirt / grass rumble, gravel crunch (plus some rumble), rock crackle (low-passed grains, audible even at walking pace), tarmac hum (kept low), sand hush, mud squelch (louder with wheel spin), water splash (plus rumble). The mix follows the share of grounded wheels on each material and the tyre surface speed. Scrub: per-wheel slip velocity over 0.35 m/s, weighted by load, on rock / tarmac / wood, through a 620 Hz band-pass with Q 0.9 (grainy, low-mid, no squeal); on loose ground slip adds crunch and rumble instead. Scrape: the rate of `car.crash.scrape` (the crash model's scrape work) drives a 420 Hz grain voice. The `clunk` (gear / locker / parking brake) is now a 78-38 Hz thud, `grind` a short gritty 700 Hz scrape (it was a 2.4 kHz Q 4 band-pass), `starter` a low churn.
+
+**Winch:** `audioStateFrom` passes `car.winch` (or its `.state`) when present: `{ running, load 0-1, direction: 'in' | 'out' }`. The voice (a 40-46 Hz band-limited sawtooth plus a sub sine through a 260 Hz low-pass, and a 160 Hz gear growl that grows with load) is only built the first time such a state shows up. A DC motor slows under load, so the pitch drops as load rises.
+
+**Mix, comfort and lifecycle:** engine bus and effects bus (settings: Engine volume, Effects volume) -> high shelf -8 dB above 4.5 kHz -> low-pass 7 kHz -> compressor (-12 dB, 4:1) -> master gain (Master volume, Mute sound in F10, the M key and the pause fade). All parameter moves are `setTargetAtTime` ramps; voices fade in, and a rig swap crossfades and releases the old voice when it ends. The AudioContext is only created once the page has user activation (a click or key), and resumed on the next gesture if the browser still holds it back. The pause menu fades out and then suspends the context (no CPU while paused; `update()` does nothing while suspended so ramps do not pile up); page hide (a map change reloads the page) closes it. `window.__audio` is a console handle. No AudioWorklet, so nothing changes for the Electron CSP.
+
+**Cost:** 55 persistent nodes (engine voice 3 sources, 3 gains, 1 out; body chain 14; tyres 6 sources and about 22 filters / gains; master 7), plus 9 more once a winch exists. Rendering 10 s of the whole graph offline takes about 56 ms per second of audio including building the buffers (under 6% of one core, on the audio thread); `update()` takes about 46 us per call on the main thread. Building one engine's buffers is a one-off when a drive starts.
+
+**Tests:**
+- `CHROME=<chrome exe> node test/audiospec.mjs` renders the old and new voices offline at idle, 1500 / 2500 / 4000 / 5500 rpm on and off throttle, crawl under load in 4-Low, and 20 / 60 km/h, per rig, prints a before / after table and asserts: peak <= 0.89 (no clipping), no narrow partial above 1 kHz within 30 dB of the loudest partial below 400 Hz (old: -18.0 dB, fails; new: about -35 dB), no narrow partial at 450-1000 Hz within 10 dB of it (old: -4.3 dB, fails; new: about -10.6 dB, these are the 2nd and 2.5th firing orders of the note, now in noise), idle centroid <= 120 Hz and crawl centroid <= 200 Hz and not above the old voice, >= 90% of the energy below 400 Hz at crawl, level rising with throttle, silence when muted, every surface present and low (centroid under 1.1 kHz), tarmac quieter than gravel, scrub raised by slip without a squeal, a deep winch, rig swaps releasing nodes. `WAV=docs/previews/audio` writes the previews (`new_<rig>_idle / crawl / sweep / gravel45.wav`, 22 kHz mono); `WAV_OLD=<dir>` also writes the old voice's rev sweeps.
+- `CHROME=<chrome exe> PORT=5234 node test/audiobrowser.mjs [maps]` on a dev server: every map loads without console errors, no AudioContext before a gesture, the parameters move while driving, pause suspends and resume runs, rig swaps keep the node count, page hide closes the context and frees every node.
+- `node test/audio.mjs [old_audio.js]` is the older quick comparison (stats + WAVs into `test/audio-samples/`, ignored).
+
+### Needs listening (audio)
+
+- [ ] Cruiser idle: a slow, uneven V8 diesel lope with a light knock on top, felt more than heard on small speakers; no steady tone.
+- [ ] Cruiser in 4-Low crawling up a ledge at 1000-1500 rpm with the throttle in: it should get louder, rougher and a bit growly but stay low and lazy, never thin or buzzy.
+- [ ] Pickup and Rally Sedan revved to redline in neutral and in gear: no rising whistle or whine; the Sedan should burble (paired pulses), the Pickup sound throaty. If the top end now sounds too dull, raise `lp[1]` for that profile.
+- [ ] Lift off at high rpm: a softer, uneven overrun burble, not a cut to silence.
+- [ ] Tyres: gravel crunch, dirt rumble, rock crackle and scrub when a tyre slips on rock (short and grainy, never a squeal), mud squelch (more with wheel spin), water splash in fords, tarmac quiet. Chassis scraping a rock: a gritty low scrape.
+- [ ] Shifts and lockers: a low clunk; a missed shift: a short gritty grind.
+- [ ] F10 settings: Master / Engine / Effects volume and Mute sound work and persist; M still mutes; the pause menu goes silent and sound comes back on resume with no click.
+- [ ] Switch rigs and maps several times: no clicks, no doubled engine, no sound before the first click or key press.
+- [ ] Winch (once it lands): a low motor growl that deepens and gets louder under load; free-spooling out is quieter.
+
 ## Known gaps
 
 - Mud limits: the mud's support on a tyre is always vertical and the berms only raise the surface, so ruts don't steer a truck or hold it in its track (no sideways rut guidance), and a tyre climbing out of a rut gets no extra resistance. The rut lattice is 0.2 m. Mud packs on the tread only as a look (no grip loss from clogged tread). The belly reads `spec.chassis.floor` (chassis-local floor-pan height) when a spec has one, else the frame box's bottom.
@@ -233,6 +272,8 @@ node test/tipangle.mjs                          # side-slope tip-over angles per
 node test/spawns.mjs                            # spawn points: every rig settled at every point on every map
 node test/crawl.mjs lc70,taco,wrx               # The Gauntlet autopilot, per stage (slow)
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
+CHROME=<chromium.exe> node test/audiospec.mjs              # engine / tyre / winch audio by the numbers, old vs new (WAV=<dir> writes previews)
+CHROME=<chromium.exe> PORT=5199 node test/audiobrowser.mjs  # audio in the game: gesture start, parameters move, pause suspend, no node leaks, no console errors
 CHROME=<chromium.exe> PORT=5199 node test/arrowshift.mjs   # keyboard shifting: Arrow Up / Down + PgUp / PgDn, no repeat, not pedals, gated by spawn list / pause / settings
 ```
 

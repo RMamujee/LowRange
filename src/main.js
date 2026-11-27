@@ -8,7 +8,7 @@ import { VEHICLES } from './specs.js';
 import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
 import { buildTerrainMesh, buildRocks, buildTrees, buildMarkers, buildMinimapBase, setGateDone, buildBackdrop } from './world_view.js';
-import { EngineAudio } from './audio.js';
+import { EngineAudio, audioStateFrom } from './audio.js'; // [audio]
 import { applyBuild, loadBuild, isStock, stats } from './garage.js';
 import { Garage } from './garage_ui.js';
 import { initSettings } from './settings.js';
@@ -765,8 +765,7 @@ function startDrive({ fresh = false } = {}) {
   paused = false;
   audio.setMuted(muted);
   setPausedUi();
-  audio.start(spec.engine.sound);
-  audio.kind = spec.engine.sound;
+  audio.start(spec.engine); // [audio] the voice is built from the rig's engine spec
   $('menu').classList.add('hidden');
   if ($('menu').contains(document.activeElement)) document.activeElement.blur();   // no menu button keeps keyboard focus while driving
   $('hud').classList.remove('hidden');
@@ -833,7 +832,7 @@ function frame(now) {
       fx.wheels(car, dt); // [tyre fx] mud, water, dust and grit off each tyre (src/fx/tyre_fx.js)
     }
     fx.update(dt); mudView.update(); mudCoat.update(car, view, fx); // [tyre fx]
-    audio.update(car.dt.rpm, car.dt.throttleEff, car.dt.running, car.wheelState[2].spin);
+    audio.update(audioStateFrom(car)); // [audio] rpm, load, gear, per-wheel surface / slip, scrape, winch
   }
   pixels.render(scene, camera, sun);
   requestAnimationFrame(frame);
