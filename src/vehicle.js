@@ -12,6 +12,7 @@ import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE, sandDepthAt } from './terrain
 import { CrashModel } from './damage/crash.js';
 import { MUD, mudDamping } from './mud.js'; // [mud]
 import { DeepSand } from './deepsand.js'; // [deep sand] dunes on maps with a sand depth field (the desert)
+import { TyrePressure, mix } from './tyres/pressure.js'; // [tyre pressure] live pressure (CTIS) and its effects
 
 const G = 9.81;
 const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
@@ -47,7 +48,7 @@ const qyaw = (a) => ({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) });
 export class Vehicle {
   constructor(RAPIER, world, spec, terrain, pos, yaw = 0) {
     this.R = RAPIER; this.world = world; this.spec = spec; this.terrain = terrain;
-    this.airedDown = false;
+    this.tyre = new TyrePressure(spec); // [tyre pressure] starts at road pressure (main.js sets the drive's start)
     this.rearSteerOn = false;
     this.steer = 0;
     // Damage: 1 = healthy, 0 = destroyed. Big impacts wear these down.
@@ -228,6 +229,7 @@ export class Vehicle {
     }
     this.grace = 1.5; // no damage while a fresh spawn / recovery settles
     this.hold = null; // standing tyres' anchors (postPhysics): none after a rebuild
+    this.tyreR = [t.radius, t.radius, t.radius, t.radius]; // [tyre pressure] loaded radius per wheel (colliders start round)
     this.deepSand?.sink.fill(0); // [deep sand] a rebuilt (repaired) truck is not dug in
     this.wheelHandles = this.wheelColliders.map((c) => c.handle);
     this.bodyHandles = [];
@@ -330,6 +332,24 @@ export class Vehicle {
     this.build(pos, yaw);
   }
 
+  // [tyre pressure] the old on / off switch, kept for tests and callers: true = crawl pressure
+  // (exactly the old aired-down tyre), false = road pressure (exactly the old aired-up one).
+  // Reads true while the tyres are at or heading below the trail stop.
+  get airedDown() { return this.tyre.target < this.tyre.P.trail; }
+  set airedDown(v) { this.tyre.set(v ? this.tyre.P.crawl : this.tyre.P.road); }
+
+  // [tyre pressure] the wheel colliders follow the loaded radius (a softer, lower tyre aired down)
+  applyTyreRadius() {
+    const t = this.spec.tire, d = this.tyre.deflPhys;
+    for (let i = 0; i < 4; i++) {
+      const r = t.radius - d[i];
+      if (Math.abs(r - this.tyreR[i]) < 0.001) continue;
+      const border = Math.min(0.09, t.width * 0.3);
+      this.wheelColliders[i].setRadius(r - border);
+      this.tyreR[i] = d[i] > 0 ? r : t.radius;
+    }
+  }
+
   get mass() {
     const s = this.spec;
     return s.chassis.mass + 2 * s.axleMass * 1.15 + 4 * (s.tire.mass + 25);
@@ -344,11 +364,14 @@ export class Vehicle {
   // Called before each world.step.
   prePhysics(input, h) {
     const { spec, R, world } = this;
+    // [tyre pressure] valves / compressor, loaded radius, speed costs for this step
+    if (this.tyre.step(h, this)) this.tyreArrived = true;
+    this.applyTyreRadius();
     // steering (rate limited, slower at speed)
     const kmh = Math.abs(this.speed()) * 3.6;
     const maxSteer = spec.steer.max * (1 - Math.min(0.55, kmh / 90));
     const target = input.steer * maxSteer;
-    const rate = spec.steer.rate * h;
+    const rate = spec.steer.rate * h * this.tyre.steerMul; // [tyre pressure] soft tyres answer the wheel more slowly at speed
     this.steer += Math.max(-rate, Math.min(rate, target - this.steer));
     const d = this.steer;
     // Ackermann geometry
@@ -453,12 +476,17 @@ export class Vehicle {
     const info = MAT_INFO[mat];
     const tm = this.treadMul[mat];
     let mu = info.mu * tm[0], rr = info.rr * tm[1];
-    if (this.airedDown) {
-      if (mat === MAT.ROCK) mu *= 1.15;
-      else if (mat === MAT.SAND) { mu *= 1.12; rr *= 0.55; }
-      else if (mat === MAT.MUD) mu *= 1.06;
-      else rr *= 1.25;
+    // [tyre pressure] one continuous function of pressure: f = 0 at road pressure (no change), 1 at
+    // crawl pressure (exactly the old aired-down numbers), more below. A longer, wider patch that
+    // wraps rock edges grips rock better and floats on sand; it costs rolling drag on hard ground.
+    const f = this.tyre.f;
+    if (f !== 0) {
+      if (mat === MAT.ROCK) mu *= mix(1, 1.15, f);
+      else if (mat === MAT.SAND) { mu *= mix(1, 1.12, f); rr *= Math.max(0.2, mix(1, 0.55, f)); }
+      else if (mat === MAT.MUD) mu *= mix(1, 1.06, f);
+      else rr *= mix(1, 1.25, f);
     }
+    if (this.tyre.rrSpeed) rr += this.tyre.rrSpeed; // [tyre pressure] a flexing carcass heats up at speed
     // a spinning tyre grips less than a rolling one (static vs sliding friction)
     if (slipping) mu *= mat === MAT.ROCK ? 0.8 : 0.88;
     return { mu, rr };
@@ -510,7 +538,7 @@ export class Vehicle {
         const radial = sub(n, scale(ax, dot(ax, n)));
         const rl = len(radial);
         const p = rl > 0.35
-          ? sub(c, scale(radial, (t.radius * 0.97) / rl))
+          ? sub(c, scale(radial, (this.tyreR[i] * 0.97) / rl)) // [tyre pressure] loaded radius
           : sub(c, scale(ax, Math.sign(dot(ax, n)) * t.width * 0.5));
         const r = sub(p, c);
         const d0 = scale(cross(ax, r), -1);
@@ -712,6 +740,10 @@ export class Vehicle {
       rrs[pt.wheel] = Math.max(rrs[pt.wheel], rr);
     }
 
+    // [tyre pressure] soft tyres at speed give sideways (lower cornering stiffness): compliance on the
+    // sideways rows of rolling tyres (0 below the speed gate; standing tyres keep their own)
+    if (this.tyre.latCfm) for (const pt of patches) if (!pt.rowA.cfm) pt.rowA.cfm = this.tyre.latCfm;
+
     // 3. brakes + rolling resistance (N·m capacity per wheel)
     const drag = this.crash.mech.wheelDrag; // a fender crushed onto the tyre rubs it
     // Parking brake / handbrake: a drum on the driveline ahead of the transfer case, acting on
@@ -787,6 +819,11 @@ export class Vehicle {
     }
     this.patches = patches;
     this.hold = hold;
+    // [tyre pressure] a bead unseated by a hard corner / side hit on very soft tyres: a flat (repair fixes it)
+    for (const i of this.tyre.post(this, patches, h)) {
+      this.health.tire[i] = Math.min(this.health.tire[i], 0.3);
+      this.damageEvents.push(`Bead popped: ${TyrePressure.NAMES[i]} tyre is flat. Backspace repairs`);
+    }
     if (this.terrain.mud) this.mudWork(h, patches); // [mud] ruts, digging, churn
     // engine torque reaction rolls the chassis
     const fwd = qrot(cq, v(0, 0, -1));
@@ -815,8 +852,9 @@ export class Vehicle {
       const dl = Math.hypot(dx, dy, dz);
       if (dl < 0.35) continue; // on its side
       dx /= dl; dy /= dl; dz /= dl;
-      const bx = c.x + dx * t.radius, by = c.y + dy * t.radius, bz = c.z + dz * t.radius;
-      mud.tyre(bx, bz, by, t.radius, t.width, this.airedDown, st);
+      const r = this.tyreR[i]; // [tyre pressure] loaded radius; the footprint follows the live pressure (f)
+      const bx = c.x + dx * r, by = c.y + dy * r, bz = c.z + dz * r;
+      mud.tyre(bx, bz, by, t.radius, t.width, this.tyre.f, st);
       if (st.F <= 0) continue;
       const lv = w.linvel();
       const N = Math.max(0, Math.min(6 * Wst, st.F - mudDamping(st.A, t.mass, h) * lv.y));
