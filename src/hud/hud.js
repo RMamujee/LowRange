@@ -10,7 +10,7 @@ import { TRAILS, CHECKPOINTS, SIZE, heightAt, pathPoint } from '../terrain.js';
 import { P, mk, rect, px, board, paper, inset, tiny, tinyMeasure, sign, drawText, measure, wrap, clamp, fmtT, fmtLap, spriteFrom, rotSprite, shape } from './px.js';
 import { Dial, Shifter, TransferLever, ParkLever, drawLockers, drawPedals, drawLamp, drawIncl } from './instruments.js';
 import { MapBases, BigMap, Waypoints, drawMinimap } from './mapview.js';
-import { Beacons } from './beacon.js';
+import { Beacons } from './waypoint_pillars.js';
 
 const $ = (id) => document.getElementById(id);
 
