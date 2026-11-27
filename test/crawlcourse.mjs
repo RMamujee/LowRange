@@ -65,5 +65,50 @@ ok(r5.stage.n === 1 && !c5.running && c5.stage === 0, 'Y in stage 1: back to the
 // the off-course check: a point on the next switchback leg (far below/above) is not "on" the trail
 const leg = at(STAGES[6].s0 + 20);
 ok(!new CrawlCourse(t, STAGES).project({ x: leg.x, y: leg.y + 20, z: leg.z }).on, 'off the corridor height: not on the course');
+// regression (playtest): spawned at stage 5's gate (spawnAt: reset + joinAt), Y before driving
+// through it went back to the course start; it must come back to stage 5's gate
+{
+  const c6 = new CrawlCourse(t, STAGES); c6.setRig('testrig');
+  c6.reset(); c6.joinAt(5);
+  ok(c6.guide().target === STAGES[4].gate && c6.guide().next === 'GATE 5', 'stage 5 spawn: the HUD points at gate 5');
+  c6.update(at(STAGES[4].s0 - 4), 0.05);
+  const r6 = c6.restartPose();
+  ok(r6.stage.n === 5 && r6.joined && Math.hypot(r6.x - at(STAGES[4].s0 - 1.5).x, r6.z - at(STAGES[4].s0 - 1.5).z) < 1, 'Y right after a stage 5 spawn: back at stage 5\'s gate, not the start');
+  ok(c6.guide().next === 'GATE 5' && !c6.running, 'still pointing at gate 5, nothing running');
+  ok(c6.restartPose().stage.n === 5, 'Y again: still stage 5');
+  ev = drive(c6, STAGES[4].s0 - 1.5, STAGES[5].gateS + 2);
+  ok(c6.running && !c6.clean && c6.stage === 6 && ev.filter((e) => e.type === 'split').length === 1 && ev.find((e) => e.type === 'split').stage.n === 5, 'driving through: joins at stage 5 (timed, not clean)');
+  ok(c6.restartPose().stage.n === 6 && !c6.joined, 'after a gate, Y works per stage as before');
+  // a fresh trailhead start (reset) forgets the join
+  c6.reset();
+  ok(c6.restartPose().stage.n === 1, 'after reset (trailhead restart): Y goes to the course start');
+  // a stage 1 spawn is no join at all
+  c6.reset(); c6.joinAt(1);
+  ok(c6.restartPose().stage.n === 1 && c6.guide().next === 'GATE 1', 'stage 1 spawn: Y goes to the start gate');
+}
+// regression (playtest): corrupted saved bests (negative, zero, absurdly small, NaN, wrong type)
+// are not records, so they can't make a best unbeatable
+{
+  const key = 'lowrange.crawl.junkrig';
+  // a localStorage stand-in (crawl_course.js reads it when present, as in the browser)
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)) };
+  const setStored = (k, v) => ls.set(k, v);
+  const mem = () => new CrawlCourse(t, STAGES);
+  const cases = [['{"best":-5,"splits":[-1,0,1e-9,"3",null,5]}', null], ['{"best":0}', null], ['{"best":0.001}', null], ['{"best":"120"}', null], ['[1,2]', null], ['"x"', null], ['{"best":null,"splits":{}}', null], ['{"best":600,"splits":[40]}', 600]];
+  for (const [raw, want] of cases) {
+    setStored(key, raw);
+    const c = mem(raw); c.setRig('junkrig');
+    const junkSplits = c.rec.splits.every((x) => x == null || (x > 1 && Number.isFinite(x)));
+    ok(c.rec.best === want && junkSplits, `stored ${raw}: best ${c.rec.best}, splits ${JSON.stringify(c.rec.splits)}`);
+  }
+  // a real run then sets a best over the junk
+  setStored(key, '{"best":-5,"splits":[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]}');
+  const c7 = new CrawlCourse(t, STAGES); c7.setRig('junkrig');
+  c7.update(at(0), 0.05);
+  ev = drive(c7, 0, STAGES[N - 1].gateS + 2, 4);
+  const fin7 = ev.find((e) => e.type === 'finish');
+  ok(fin7 && fin7.best && c7.rec.best === fin7.time && ev.filter((e) => e.type === 'split').every((e) => e.best), 'a clean run beats a junk record (total and every split)');
+}
 console.log(fails ? `${fails} failure(s)` : 'all crawl course checks passed');
 process.exit(fails ? 1 : 0);

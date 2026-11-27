@@ -31,14 +31,27 @@ export class CrawlCourse {
     this.stageT = 0;           // time in the current stage
     this.splits = [];          // this run's split per stage (s)
     this.s = null; this.lat = 0; this.on = false; this.retry = null;
+    this.joined = null;        // spawned at a later stage's gate (n), until a gate is crossed
   }
+
+  // a spawn point facing stage n's gate (n > 1): until a gate is crossed, the HUD points at that
+  // gate and Y comes back to it rather than to the course start
+  joinAt(n) { this.joined = n > 1 && n <= this.stages.length ? n : null; }
+
+  // a stored time is a real record only if it is a finite, positive number no faster than
+  // 40 m/s over the distance (a corrupted "-5", "0" or "1e-9" would be unbeatable)
+  plausible(t, metres) { return Number.isFinite(t) && t > 0 && t >= metres / 40; }
 
   setRig(id) {
     if (id === this.rig) return;
     this.rig = id;
     let rec = null;
     try { rec = JSON.parse(store.get(`lowrange.crawl.${id}`) || 'null'); } catch { rec = null; }
-    this.rec = rec && typeof rec === 'object' ? { best: Number.isFinite(rec.best) ? rec.best : null, splits: Array.isArray(rec.splits) ? rec.splits.map((x) => (Number.isFinite(x) ? x : null)) : [] } : { best: null, splits: [] };
+    const st = this.stages, total = st.at(-1).gateS - st[0].gateS;
+    this.rec = rec && typeof rec === 'object' && !Array.isArray(rec)
+      ? { best: this.plausible(rec.best, total) ? rec.best : null,
+        splits: Array.isArray(rec.splits) ? rec.splits.slice(0, st.length - 1).map((x, k) => (this.plausible(x, st[k + 1].gateS - st[k].gateS) ? x : null)) : [] }
+      : { best: null, splits: [] };
   }
   save() { if (this.rig) store.set(`lowrange.crawl.${this.rig}`, JSON.stringify(this.rec)); }
 
@@ -85,6 +98,7 @@ export class CrawlCourse {
   enter(st) {
     const ev = [];
     const last = this.stages.length;
+    this.joined = null;
     if (st.n === 1) {
       // the start gate: a new run
       this.reset(); this.s = st.gateS; this.running = true; this.stage = 1;
@@ -117,15 +131,19 @@ export class CrawlCourse {
 
   // Y: the gate of the stage you are in (or the start, before the first gate), facing uphill
   restartPose() {
-    const n = this.done || this.stage <= 1 ? 1 : this.stage;
+    // spawned at a later stage's gate and not through any gate yet: back to that gate, still
+    // joining there (nothing is running, so there is nothing to retry)
+    const join = this.joined && !this.running && !this.done && this.stage === 0 ? this.joined : null;
+    const n = join ?? (this.done || this.stage <= 1 ? 1 : this.stage);
     const st = this.stages[n - 1];
     const s = Math.max(0.5, st.s0 - 1.5);
     let i = this.pts.findIndex((q) => q.s >= s); if (i < 1) i = 1;
     const a = this.pts[i - 1], b = this.pts[i];
     this.s = null; this.stageT = 0; this.retry = null;
-    if (n === 1) { this.stage = 0; this.running = false; this.done = false; } // the start gate begins a new run
+    if (join) { /* unchanged: driving through the gate joins the course there */ }
+    else if (n === 1) { this.stage = 0; this.running = false; this.done = false; } // the start gate begins a new run
     else { this.stage = n - 1; this.retry = n; } // drive back through the gate to restart the stage
-    return { x: a.x, z: a.z, yaw: Math.atan2(-(b.x - a.x), -(b.z - a.z)), stage: st };
+    return { x: a.x, z: a.z, yaw: Math.atan2(-(b.x - a.x), -(b.z - a.z)), stage: st, joined: !!join };
   }
 
   // HUD guidance: the next gate, with progress
@@ -133,6 +151,7 @@ export class CrawlCourse {
     const n = this.stages.length;
     const next = this.stages[Math.min(this.stage, n - 1)];
     const cur = this.stage ? this.stages[this.stage - 1] : null;
+    if (this.joined && !this.running && !this.stage) { const j = this.stages[this.joined - 1]; return { target: j.gate, stage: 0, of: n, name: j.name.toUpperCase(), next: `GATE ${j.n}`, run: null }; }
     if (this.done) return { target: this.stages[n - 1].gate, stage: n, of: n, name: 'SUMMIT', next: 'COURSE DONE', run: this.t };
     if (this.retry) { const r = this.stages[this.retry - 1]; return { target: r.gate, stage: r.n, of: n, name: r.name.toUpperCase(), next: `GATE ${r.n}`, run: this.running ? this.t : null }; }
     return {
