@@ -107,7 +107,7 @@ for (const id of rigs) {
   const spec = VEHICLES.find((v) => v.id === id);
   if (!check(!!spec, `rig ${id} exists`)) continue;
   for (const sp of list) {
-    const y = T.heightAt(sp.x, sp.z) + spec.tire.radius - spec.axleY + S.liftFor(sp, spec); // as main.js spawnAt -> respawnFresh
+    const y = T.surfaceAt(sp.x, sp.z) + spec.tire.radius - spec.axleY + S.liftFor(sp, spec); // as main.js spawnAt -> respawnFresh (surfaceAt: a deck, not the ground under it)
     const car = new Vehicle(RAPIER, world, spec, terrain, { x: sp.x, y, z: sp.z }, sp.yaw);
     car.dt.gear = 0; // (the game's 1.5 s spawn grace applies, as in respawnFresh)
     for (let i = 0; i < 500; i++) car.step(hold, 1 / 200);
