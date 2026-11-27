@@ -142,6 +142,7 @@ plane so the static hold works in mud) have not been seen in the game. A human s
 ```bash
 node test/blocklist_names.mjs                   # instant: no fetchable file may be named like an ad/tracker (see below)
 node test/blend_paths.mjs                       # ~5 s: no local path / user name inside a tracked .blend (Repo hygiene)
+node test/local_paths.mjs                       # instant: no user-home path / user name in any tracked text file or PNG text chunk (Repo hygiene)
 node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs && node test/enginehud.mjs && node test/slopehold.mjs && node test/parkbrake.mjs
 node test/mud.mjs                               # deformable mud: sinkage, ruts, digging, crossing Bog Run, parked in the bog
 node test/hudlayout.mjs                         # HUD layout maths: no board off-screen / overlapping at any window size, common sizes unchanged
@@ -184,3 +185,4 @@ CHROME=<chromium.exe> PORT=5199 node test/arrowshift.mjs   # keyboard shifting: 
 - Public repo: github.com/RMamujee/LowRange. Commit as `RMamujee <133895954+RMamujee@users.noreply.github.com>`, with **no AI co-author lines**. Run gitleaks before pushing.
 - `.claude/`, `node_modules/`, `release/`, `test/shots/` and `Claude outputs/` are ignored.
 - `.blend` files: Blender stores local paths in them (the stock Shading workspace's File Browser folder, the absolute path a texture was packed from). `node test/blend_paths.mjs` fails on any absolute path or user name in a tracked `.blend`. Build scripts save through `tools/blender/blend_save.py`; to clean a hand-edited file, run `blender --background --factory-startup <file.blend> --python tools/blender/blend_save.py`.
+- Local paths in text files and PNG metadata: `node test/local_paths.mjs` fails on any absolute user-home path or the current user's name in a tracked text file or PNG text chunk; write paths in docs as `<home>\...`.

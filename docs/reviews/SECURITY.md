@@ -85,7 +85,7 @@ with LOWRANGE_ALLOW_CDP=1: CDP OPEN: Chrome/156.0.8078.109
 ### L2. Local path with the Windows user name inside shipped PNGs
 Evidence (`node scripts/png-metadata.mjs`):
 ```
-public/loading/lc70.png: File=<home>\...\loading_screen.blend | Date=… | Scene=Loading_lc70 …
+public/loading/lc70.png: File=<home>\...\art\blender\loading_screen.blend | Date=… | Scene=Loading_lc70 …
 public/loading/taco.png: (same)
 public/loading/wrx.png:  (same)
 ```
