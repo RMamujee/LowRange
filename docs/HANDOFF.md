@@ -57,6 +57,7 @@ To-do, roughly in order:
 ## Checks after any change
 
 ```bash
+node test/blocklist_names.mjs                   # instant: no fetchable file may be named like an ad/tracker (see below)
 node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
@@ -66,6 +67,13 @@ node test/spawns.mjs                            # spawn points: every rig settle
 node test/crawl.mjs lc70,taco,wrx               # The Gauntlet autopilot, per stage (slow)
 CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screenshots; QS='?map=race' for the track
 ```
+
+- `test/blocklist_names.mjs` exists because uBlock Origin Lite's default EasyPrivacy rule `/beacon.js` blocked `src/hud/beacon.js`
+  (now `src/hud/waypoint_pillars.js`). One blocked module fails the whole `import('./main.js')` in `src/boot.js`, so the game hung on
+  the loading screen with "Failed to fetch dynamically imported module" for anyone running the extension, while test browsers (no extensions)
+  passed. Don't name served files with words like beacon, analytics, tracking, ads, banner or sponsor.
+- `vite.config.js` ignores `**/.claude/**` (watch) and scans only `index.html` for deps: agent worktrees under `.claude/worktrees/` each carry
+  a copy of `index.html` and `src/`, and without this every worktree edit reloaded the open game page.
 
 ## Repo hygiene
 

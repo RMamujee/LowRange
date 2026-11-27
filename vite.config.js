@@ -28,6 +28,7 @@ export default defineConfig({
   base: './',
   plugins: [modelList()],
   build: { target: 'esnext', chunkSizeWarningLimit: 4000 },
-  optimizeDeps: { esbuildOptions: { target: 'esnext' } },
-  server: { port: 5199 },
+  // entries: scan only the real page, not index.html copies in agent worktrees under .claude/
+  optimizeDeps: { entries: ['index.html'], esbuildOptions: { target: 'esnext' } },
+  server: { port: 5199, watch: { ignored: ['**/.claude/**'] } },
 });
