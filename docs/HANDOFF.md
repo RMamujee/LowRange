@@ -87,6 +87,8 @@ Checklist for a human:
 ```bash
 node test/blocklist_names.mjs                   # instant: no fetchable file may be named like an ad/tracker (see below)
 node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs && node test/enginehud.mjs && node test/slopehold.mjs && node test/parkbrake.mjs
+node test/hudlayout.mjs                         # HUD layout maths: no board off-screen / overlapping at any window size, common sizes unchanged
+CHROME=<chromium.exe> PORT=5199 node test/hudfit.mjs [shotdir]   # same in the browser: 3 maps x size matrix x 100/125/150% scaling (slow)
 node test/waypoints.mjs && node test/camclear.mjs     # stored waypoints on every map; camera vs. trees / signs / ground
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
@@ -99,6 +101,16 @@ CHROME=<chromium.exe> PORT=5199 node test/shots.mjs <outdir> '<plan>'   # screen
 CHROME=<chromium.exe> PORT=5199 node test/arrowshift.mjs   # keyboard shifting: Arrow Up / Down + PgUp / PgDn, no repeat, not pedals, gated by spawn list / pause / settings
 ```
 
+- HUD layout lives in `src/hud/layout.js` (pure): the scale is the old height rule (at least 2, +1 per 400 device px) capped so the boards
+  fit the width too, down to 1; then the chassis board moves beside the engine board, then boards hide (chassis, minimap, engine board).
+  Toasts and big messages slide to the nearest clear spot; if a window has no room for both, the toast waits for the big message
+  (never otherwise: with no big message up a toast always shows), and a toast pushed aside goes back home when the big message ends.
+  Known, left as is: at 1024x600 a long toast wraps to 3 lines (the old 2-line width ran under the minimap); boards keep a 4 px gap, so
+  around 986-989 px wide the chassis board moves up beside the engine board where it used to sit 0-3 px from the cluster.
+  Needs playtesting: drag-resize from 1920x1080 down to about 800x500 while driving; fullscreen toggle (F11 / Alt+Enter in the desktop
+  build); a small non-fullscreen window on a laptop at 125% and 150% display scaling; clicking RECOVER / CAM / MAP / HELP, the H-shifter
+  and big-map waypoints at reduced scale and right after a resize; toasts while a big race / stage message shows in a small window.
+  `vite.config.js` doesn't watch `.claude/`, so a dev server started in a worktree serves stale code after edits: restart it.
 - `test/blocklist_names.mjs` exists because uBlock Origin Lite's default EasyPrivacy rule `/beacon.js` blocked `src/hud/beacon.js`
   (now `src/hud/waypoint_pillars.js`). One blocked module fails the whole `import('./main.js')` in `src/boot.js`, so the game hung on
   the loading screen with "Failed to fetch dynamically imported module" for anyone running the extension, while test browsers (no extensions)
