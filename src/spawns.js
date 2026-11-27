@@ -15,7 +15,14 @@ import { MAP, MAP_ID, SIZE, SPAWN, TRAILS, ROADS, COURSES, CHECKPOINTS, TRACK, P
 
 // Footprint checked under a spawn: covers the longest rig (6.4 m) with a margin.
 export const FOOT = { hl: 3.5, hw: 1.35, margin: 0.35 };
-export const LIMITS = { grade: 0.12, rough: 0.14 };
+// twist: cross-axle articulation the ground forces on a rig at the spot, measured at the wheel
+// contacts of the longest common rig (the Cruiser: wheelbase 3.24 m, track 1.62 m) as
+// (front left - front right) - (rear left - rear right). A plane fit can't see it: at the Trail
+// Park's Boulder Alley start (grade 0.119, rough 0.075, twist 0.10 m) the Cruiser's solid axles
+// rocked in roll on the parking brake and never came to rest. Every other spawn on every map is
+// under 0.07 m.
+export const WHEELS = { wb: 3.24, tr: 1.62 };
+export const LIMITS = { grade: 0.12, rough: 0.14, twist: 0.08 };
 const DIFF_ORDER = ['green', 'blue', 'black', 'dblack'];
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -68,6 +75,9 @@ export function checkSpot(x, z, yaw, obstacles, foot = FOOT, limits = LIMITS) {
   const grade = Math.hypot(ga, gb), rough = Math.max(...S.map(([a, b, h]) => Math.abs(h - (c + ga * a + gb * b))));
   if (grade > limits.grade) return { ok: false, why: `grade ${grade.toFixed(2)}`, grade, rough };
   if (rough > limits.rough) return { ok: false, why: `rough ${rough.toFixed(2)} m`, grade, rough };
+  const wh = (a, b) => heightAt(x + fx * a * WHEELS.wb / 2 + lx * b * WHEELS.tr / 2, z + fz * a * WHEELS.wb / 2 + lz * b * WHEELS.tr / 2);
+  const twist = Math.abs((wh(1, 1) - wh(1, -1)) - (wh(-1, 1) - wh(-1, -1)));
+  if (twist > (limits.twist ?? LIMITS.twist)) return { ok: false, why: `twist ${twist.toFixed(2)} m`, grade, rough };
   // colliders: disc vs. the footprint rectangle grown by the margin
   const hl = foot.hl + foot.margin, hw = foot.hw + foot.margin, R = Math.hypot(hl, hw);
   for (const o of obstacles) {
@@ -81,7 +91,7 @@ export function checkSpot(x, z, yaw, obstacles, foot = FOOT, limits = LIMITS) {
 }
 
 // cost term for ranking candidate spots: the ground's grade under the footprint (0 = level)
-const flatness = (x, z, yaw) => { const r = checkSpot(x, z, yaw, [], FOOT, { grade: Infinity, rough: Infinity }); return r.grade === undefined ? 50 : r.grade * 40 + r.rough * 20; };
+const flatness = (x, z, yaw) => { const r = checkSpot(x, z, yaw, [], FOOT, { grade: Infinity, rough: Infinity, twist: Infinity }); return r.grade === undefined ? 50 : r.grade * 40 + r.rough * 20; };
 
 // spawn height: lift the truck so its highest wheel clears the ground by `clear` (slopes!), as the
 // lift argument of main.js respawnFresh (which adds it to the ground height under the centre)
@@ -143,6 +153,10 @@ function candidates() {
     if (road) add({ id: 'bypass', name: 'Bypass Track', short: 'BYPASS TRACK', kind: 'road', group: 'start', note: 'Graded track with a spur into every stage gate',
       pose: onPath(road, 24, range(2, 16, 2), 1) });
     for (const st of T.stages) {
+      // the last "stage" is the summit pad and its gate is the finish: a spawn facing it would join the
+      // run at the finish line (crossing it "finishes" in 0:00). The Summit point below covers the pad,
+      // as each side course's finish pad does.
+      if (st.n === T.stages.length) continue;
       // a few metres before the gate (gate at s0 + 3), facing up the course; nudged back if needed
       const offs = [...range(-1, -12, -1), 1, 1.5];
       const onTrail = onPath(T, st.s0 - 2, offs, 1);

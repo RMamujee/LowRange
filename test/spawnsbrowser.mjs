@@ -146,7 +146,13 @@ for (const map of which === 'all' ? ['park', 'crawl', 'race'] : [which]) {
   await landed(page, mt, 'signpost click x2');
   const rt = list[list.length - 1];
   await key(page, 'KeyJ');
-  for (let k = 0; k < 6; k++) await page.evaluate(() => { const cv = document.querySelector('.hud-map'), r = cv.getBoundingClientRect(); cv.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: r.right - 40, clientY: r.top + r.height / 2, cancelable: true })); });
+  // scroll until the last row is drawn (six notches were enough before the Gauntlet's side courses
+  // lengthened its list; the last row stayed off the bottom and every check after this failed)
+  for (let k = 0; k < 40; k++) {
+    if (k >= 6 && await page.evaluate(() => window.__game.hud.debug().map.hits.some((h) => h.act === 'spawnrow' && h.i === window.__game.spawns.length - 1))) break;
+    await page.evaluate(() => { const cv = document.querySelector('.hud-map'), r = cv.getBoundingClientRect(); cv.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: r.right - 40, clientY: r.top + r.height / 2, cancelable: true })); });
+    if (k >= 5) await sleep(page, 120); // (hits are rebuilt on the next drawn frame)
+  }
   d = await dbg(page);
   { const L = await page.evaluate(() => { const l = window.__game.hud.debug().map.list; return [l.content, l.h]; }); check(L[0] <= L[1] ? d.spawn.scroll === 0 : d.spawn.scroll > 0, `wheel scrolls the list when it overflows (content ${L[0]} / ${L[1]} px, scroll ${d.spawn.scroll})`); }
   check(await clickHit(page, (h) => h.act === 'spawnrow' && h.i === window.__game.spawns.length - 1), `clicked the "${rt.name}" row`);

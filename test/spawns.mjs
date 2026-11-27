@@ -49,9 +49,27 @@ const again = S.buildSpawnPoints({ rocks, trees, warn: () => {} });
 check(JSON.stringify(again) === JSON.stringify(list), 'deterministic: same list on a second build');
 const minimum = { park: 6, race: 7, crawl: 14, jungle: 20, desert: 14 }[T.MAP_ID];
 check(list.length >= minimum, `at least ${minimum} spawn points (${list.length})`);
-if (T.MAP_ID === 'crawl') check(T.TRAILS[0].stages.every((st) => ids.includes(`stage-${st.n}`)) && ids.includes('summit') && ids.includes('bypass'), 'every stage gate, the summit and the bypass start');
+if (T.MAP_ID === 'crawl') {
+  const N = T.TRAILS[0].stages.length;
+  check(T.TRAILS[0].stages.every((st) => st.n === N || ids.includes(`stage-${st.n}`)) && ids.includes('summit') && ids.includes('bypass'), 'every stage gate, the summit and the bypass start');
+  // the summit gate is the finish: no spawn joins the run there (it "finished" in 0:00 and, in the game,
+  // its only clear spot was blocked by a dressing pebble, so it was dropped with a console warning)
+  check(!ids.includes(`stage-${N}`), `no spawn point at the finish gate (stage ${N})`);
+}
 if (T.MAP_ID === 'race') check(T.CHECKPOINTS.slice(1).every((c) => ids.includes(`cp-${c.i}`)) && ids.includes('grid') && ids.includes('paddock'), 'grid, paddock and every checkpoint');
 if (T.MAP_ID === 'park' || T.MAP_ID === 'jungle') check(T.TRAILS.every((t, i) => list.some((s) => s.trail === i)), 'every trail has at least one end');
+// ground twist (cross-axle articulation at the Cruiser's wheel contacts) within the limit at every point;
+// regression: the Trail Park's old Boulder Alley start (twist 0.10 m) rocked the Cruiser on the parking brake
+for (const sp of list) {
+  const fx = -Math.sin(sp.yaw), fz = -Math.cos(sp.yaw), lx = -fz, lz = fx;
+  const wh = (a, b) => T.heightAt(sp.x + fx * a * S.WHEELS.wb / 2 + lx * b * S.WHEELS.tr / 2, sp.z + fz * a * S.WHEELS.wb / 2 + lz * b * S.WHEELS.tr / 2);
+  const tw = Math.abs((wh(1, 1) - wh(1, -1)) - (wh(-1, 1) - wh(-1, -1)));
+  check(tw <= S.LIMITS.twist, `${sp.name}: ground twist ${tw.toFixed(3)} m within ${S.LIMITS.twist} m`);
+}
+if (T.MAP_ID === 'park') {
+  const r = S.checkSpot(96.59, -85.74, 0.2758, []);
+  check(!r.ok && /^twist/.test(r.why), `old Boulder Alley start rejected for its twist (${r.why ?? 'accepted'})`);
+}
 // saved ids: unknown / corrupt fall back to the default
 S.saveLastSpawn({ id: 'no-such-spawn' });
 check(S.loadLastSpawn(list).id === list[0].id, 'unknown saved id falls back to the default');
@@ -89,7 +107,7 @@ for (const id of rigs) {
   const spec = VEHICLES.find((v) => v.id === id);
   if (!check(!!spec, `rig ${id} exists`)) continue;
   for (const sp of list) {
-    const y = T.heightAt(sp.x, sp.z) + spec.tire.radius - spec.axleY + S.liftFor(sp, spec); // as main.js spawnAt -> respawnFresh
+    const y = T.surfaceAt(sp.x, sp.z) + spec.tire.radius - spec.axleY + S.liftFor(sp, spec); // as main.js spawnAt -> respawnFresh (surfaceAt: a deck, not the ground under it)
     const car = new Vehicle(RAPIER, world, spec, terrain, { x: sp.x, y, z: sp.z }, sp.yaw);
     car.dt.gear = 0; // (the game's 1.5 s spawn grace applies, as in respawnFresh)
     for (let i = 0; i < 500; i++) car.step(hold, 1 / 200);

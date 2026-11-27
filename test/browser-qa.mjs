@@ -69,7 +69,8 @@ const { page, errors } = await session();
 // 5. (open, main.js) finishing a trail must not immediately start a new run at the finish gate
 {
   await page.evaluate(async () => { const T = await import('/src/terrain.js'); const t = T.TRAILS[0], p = T.pathPoint(t, 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); });
-  await page.waitForTimeout(5000);
+  // the run must be over 4 s old to finish (a slow software-GL frame rate made a fixed 5 s wait too short)
+  await page.waitForFunction(() => window.__game.activeTrail?.t > 4.5, null, { timeout: 30000, polling: 100 }).catch(() => {});
   await page.evaluate(async () => { const T = await import('/src/terrain.js'); const t = T.TRAILS[0], p = T.pathPoint(t, t.length - 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); });
   await page.waitForTimeout(800);
   const a = await page.evaluate(() => window.__game.activeTrail);
@@ -146,6 +147,29 @@ const { page, errors } = await session();
   check(!(await inTree(c)) && d < 4, `Chase camera pulled in short of the tree behind the truck (${(await inTree(c)) || 'clear'}, ${d.toFixed(1)} m from the truck)`);
   await page.evaluate(() => { window.__game.cam.mode = 0; });
 }
+// 10. "All N trails conquered!" fires once per session: after every trail is done, a restart at the
+// trailhead (or a rig change) used to reset only the clock, so finishing any one trail again showed it
+// at once with the new, short "Total"
+{
+  const run = async (i) => {
+    const tp = (i, far) => page.evaluate(async ([i, far]) => { const T = await import('/src/terrain.js'), t = T.TRAILS[i], p = T.pathPoint(t, far ? t.length - 3 : 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); }, [i, far]);
+    const away = () => page.evaluate(async () => { const T = await import('/src/terrain.js'), t = T.TRAILS[2], p = T.pathPoint(t, 40); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, 0); });
+    await away(); await page.waitForTimeout(200);
+    await tp(i, false);
+    const started = await page.waitForFunction((i) => window.__game.activeTrail?.trail === i && window.__game.activeTrail.t > 4.5, i, { timeout: 30000, polling: 100 }).then(() => true, () => false);
+    await tp(i, true); await page.waitForTimeout(600);
+    return started && (await page.evaluate(() => window.__game.activeTrail)) === null;
+  };
+  const n = await page.evaluate(async () => (await import('/src/terrain.js')).TRAILS.length);
+  let ok = true, conquered = 0;
+  for (let i = 0; i < n; i++) { ok = (await run(i)) && ok; if (/conquered/.test(await page.evaluate(() => window.__game.hud.debug().lastToast))) conquered++; }
+  await key(page, 'Escape'); await page.waitForTimeout(300);
+  await page.evaluate(() => document.getElementById('restartBtn').click()); await page.waitForTimeout(1500);
+  ok = (await run(0)) && ok;
+  const again = /conquered/.test(await page.evaluate(() => window.__game.hud.debug().lastToast));
+  if (!ok) { notRun++; console.log('  NOT RUN', 'all-trails toast: a trail run did not start or finish'); }
+  else check(conquered === 1 && !again, `"all trails conquered" shown once (${conquered} time(s) in the first round, ${again ? 'again' : 'not again'} after a restart and one more trail)`);
+}
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors[0] : ''}`);
 await page.close();
 // 7. Gauntlet big map: an off-map stored waypoint is dropped, and with all 3 waypoints set the
@@ -162,6 +186,22 @@ await page.close();
   await page.evaluate(() => window.__game.hud.toggleMap()); await page.waitForTimeout(500);
   const r = await page.evaluate(() => { const m = window.__game.hud.debug().map, c = m.hits.find((h) => h.act === 'clear'); return { tab: m.tab, clearBottom: c ? c.y + c.h : null, hintsTop: m.hintsTop }; });
   check(r.clearBottom !== null && r.hintsTop >= r.clearBottom, `Gauntlet map hints clear of CLEAR ALL (${JSON.stringify(r)})`);
+  // 11. a Gauntlet run, then into a side course through a later section gate: the side course's run takes
+  // over game.active (it kept the Gauntlet's, so the big map showed The Gauntlet running on its clock)
+  {
+    await page.evaluate(() => window.__game.hud.toggleMap());
+    const walk = (which, s0, s1) => page.evaluate(async ([which, s0, s1]) => {
+      const T = await import('/src/terrain.js'), path = which < 0 ? T.TRAILS[0] : T.COURSES[which];
+      for (let s = s0; s <= s1; s += 0.5) { const p = T.pathPoint(path, s); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.0, z: p.z }, Math.atan2(-p.tx, -p.tz)); await new Promise((r) => requestAnimationFrame(r)); }
+    }, [which, s0, s1]);
+    const [g0, s2, id] = await page.evaluate(async () => { const T = await import('/src/terrain.js'); return [T.TRAILS[0].stages[0].gateS, T.COURSES[0].stages[1].gateS, T.COURSES[0].id]; });
+    await walk(-1, g0 - 4, g0 + 4);
+    const a0 = await page.evaluate(() => window.__game.activeTrail);
+    await walk(0, s2 - 4, s2 + 4);
+    const a1 = await page.evaluate(() => window.__game.activeTrail);
+    if (!a0 || a0.course !== null) { notRun++; console.log('  NOT RUN', `side course join: the Gauntlet run did not start (${JSON.stringify(a0)})`); }
+    else check(a1?.course === id, `joining ${id} at section 2 during a Gauntlet run: the run is the side course's (${JSON.stringify(a1)})`);
+  }
   check(errors.length === 0, `no console errors on the Gauntlet map${errors.length ? ': ' + errors[0] : ''}`);
 }
 await browser.close();
