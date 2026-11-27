@@ -183,7 +183,25 @@ export function fitFace(opts, { m, minW = 0, maxW = Infinity }) {
 
 // A signpost: a board with the face on its front (local +z), on two posts, the board's bottom
 // `lift` metres above the ground at (x, z); the posts run a little into the ground for slopes.
-const wood = () => new THREE.MeshStandardMaterial({ color: 0x4a3420, flatShading: true });
+// (shared: one material for every post / core, and one for every board back)
+let WOOD = null, PLANK = null;
+const wood = () => (WOOD ||= new THREE.MeshStandardMaterial({ color: 0x4a3420, flatShading: true }));
+// the board's back: horizontal planks with dark seams (a flat brown panel read as a blank sign)
+function plankBack() {
+  if (!PLANK) {
+    const cv = document.createElement('canvas'); cv.width = 16; cv.height = 12;
+    const g = cv.getContext('2d');
+    ['#6a4a2c', '#5c3f25', '#664629', '#57391f'].forEach((c, i) => {
+      g.fillStyle = c; g.fillRect(0, i * 3, 16, 3);
+      g.fillStyle = '#2e1d10'; g.fillRect(0, i * 3 + 2, 16, 1);
+      g.fillRect((i * 7 + 3) % 16, i * 3, 1, 2); // a butt joint per plank, staggered
+    });
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    PLANK = new THREE.MeshStandardMaterial({ map: tex, flatShading: true });
+  }
+  return PLANK;
+}
 export function signpost(x, z, yaw, face, { lift = 1.0 } = {}) {
   const g = new THREE.Group();
   g.position.set(x, heightAt(x, z), z);
@@ -194,9 +212,10 @@ export function signpost(x, z, yaw, face, { lift = 1.0 } = {}) {
     const p = new THREE.Mesh(new THREE.BoxGeometry(0.16, top + 0.5, 0.16), w);
     p.position.set(sx * (face.w / 2 - 0.2), (top - 0.5) / 2, -0.09); p.castShadow = true; g.add(p);
   }
-  const board = new THREE.Mesh(new THREE.BoxGeometry(face.w, face.h, 0.1), [w, w, w, w, signMaterial(face.texture), w]);
+  const board = new THREE.Mesh(new THREE.BoxGeometry(face.w, face.h, 0.1), [w, w, w, w, signMaterial(face.texture), plankBack()]);
   board.position.y = lift + face.h / 2; board.castShadow = true;
   g.add(board);
+  g.userData.camBlock = true; // src/cam_clear.js keeps the camera out of it
   return g;
 }
 
@@ -211,6 +230,7 @@ export function bannerBoard(face, material = signMaterial(face.texture)) {
     p.rotation.y = ry; p.position.z = ry ? -0.045 : 0.045; g.add(p);
   }
   g.userData.material = material;
+  g.userData.camBlock = true; // src/cam_clear.js keeps the camera out of it
   return g;
 }
 

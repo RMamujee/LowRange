@@ -81,7 +81,8 @@ function bakeBase(ppm, trees) {
 export class Waypoints {
   constructor(mapId, max = 3) {
     this.key = `lowrange.waypoints.${mapId}`; this.max = max; this.list = [];
-    try { const v = JSON.parse(localStorage.getItem(this.key) || '[]'); if (Array.isArray(v)) this.list = v.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z)).slice(0, max); } catch { /* unreadable: start empty */ }
+    // stored points are untrusted: drop junk and anything off the map (x = 1e9 showed "1414213738 M")
+    try { const v = JSON.parse(localStorage.getItem(this.key) || '[]'); if (Array.isArray(v)) this.list = v.filter((p) => p && typeof p.x === 'number' && typeof p.z === 'number' && Math.abs(p.x) <= SIZE / 2 && Math.abs(p.z) <= SIZE / 2).map((p) => ({ x: p.x, z: p.z })).slice(0, max); } catch { /* unreadable: start empty */ }
     this.onChange = null;
   }
   save() { try { localStorage.setItem(this.key, JSON.stringify(this.list)); } catch { /* storage blocked: session only */ } this.onChange?.(this.list); }
@@ -396,8 +397,11 @@ export class BigMap {
       y += 13;
     }
     // hints at the bottom of the sidebar
-    const hints = ['CLICK  SET WAYPOINT', 'RIGHT-CLICK  REMOVE', 'DRAG  PAN', 'WHEEL  ZOOM', 'M / ESC  CLOSE'];
+    // (only the ones that fit under the content: the Gauntlet's 12 stages + waypoints reach the bottom)
+    const allHints = ['CLICK  SET WAYPOINT', 'RIGHT-CLICK  REMOVE', 'DRAG  PAN', 'WHEEL  ZOOM', 'M / ESC  CLOSE'];
+    const hints = allHints.slice(Math.max(0, allHints.length - Math.floor((sy0 + sh - 5 - y) / 8)));
     let hy = sy0 + sh - 5 - hints.length * 8;
+    this.hintsTop = hy; // for tests
     for (const h of hints) { const [k, v] = h.split('  '); tiny(g, k, sx0 + 5, hy, P.redDark); tiny(g, v, sx0 + sw - 5, hy, P.inkSoft, { align: 'right' }); hy += 8; }
     this.drawPrompt(g, f); // [spawns]
   }

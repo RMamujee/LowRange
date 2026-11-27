@@ -22,6 +22,7 @@ import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics pro
 import { CrawlCourse } from './crawl_course.js'; // [crawl] The Gauntlet's stages, splits and guidance
 import { buildCrawlView } from './crawl_view.js'; // [crawl]
 import { buildSpawnPoints, loadLastSpawn, saveLastSpawn, liftFor } from './spawns.js'; // [spawns] named spawn points
+import { CamClear } from './cam_clear.js';
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -80,6 +81,7 @@ const isCrawl = MAP_ID === 'crawl'; // [crawl] The Gauntlet brings its own stage
 const crawlView = isCrawl ? buildCrawlView(scene, looseProps) : null;
 const gates = isRace ? [] : isCrawl ? crawlView.gates : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
+const camClear = new CamClear({ RAPIER, world, trees, scene, groundAt: visualHeightAt }); // keeps the camera out of canopies, signs, rocks
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
 scene.add(buildBackdrop());
 // [gfx comfort] everything built so far is world: graded a step back so the vehicle (added
@@ -297,13 +299,16 @@ function respawnFresh(x, z, yaw, lift = 0.3) {
   camState.heading = yaw; camState.yaw = 0;
 }
 
-// Which trail (if any) the truck is on: the active run, else the trail corridor under it.
+// Which trail (if any) the truck is on: the trail corridor under it, else the active run (off the
+// line mid-run). A run on a different trail than the corridor was abandoned, so it doesn't count.
+// (One label per grid cell: trails that cross would need a distance-to-line test instead.)
 function trailUnderTruck() {
-  if (game.active) return { trail: game.active.trail, from: game.active.from };
   const p = car.chassis.translation();
   const ix = clamp(Math.round((p.x + SIZE / 2) / (SIZE / RES)), 0, RES), iz = clamp(Math.round((p.z + SIZE / 2) / (SIZE / RES)), 0, RES);
   const id = GRID.path[ix * (RES + 1) + iz] - ROADS.length;
-  return id >= 0 && id < TRAILS.length ? { trail: id, from: 0 } : null;
+  const onTrail = id >= 0 && id < TRAILS.length;
+  if (game.active && (!onTrail || id === game.active.trail)) return { trail: game.active.trail, from: game.active.from };
+  return onTrail ? { trail: id, from: 0 } : null;
 }
 
 // Backspace: right the truck and repair it on the spot (trail run keeps going).
@@ -494,6 +499,7 @@ function updateCamera(dt) {
     _v.set(target.x + Math.sin(yaw) * cp * d, target.y + Math.sin(camState.pitch) * d, target.z + Math.cos(yaw) * cp * d);
     _v.y = Math.max(_v.y, visualHeightAt(_v.x, _v.z) + 0.6);
     if (camSnap) camera.position.copy(_v); else camera.position.lerp(_v, damp(7, dt)); // [spawns] a teleport snaps the camera
+    camClear.chase(target, camera.position, _v, camSnap ? 0 : dt); // out of trees, signs, rocks
     camera.lookAt(target);
   } else if (mode === 'Hood') {
     const [, ch] = spec.chassis.size;
@@ -507,8 +513,7 @@ function updateCamera(dt) {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(_q); fwd.y = 0; fwd.normalize();
     if (!camState.spot || camState.spot.distanceTo(target) > 22 || camState.spot.distanceTo(target) < 3) {
       const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
-      camState.spot = new THREE.Vector3(p.x, 0, p.z).addScaledVector(fwd, 9).addScaledVector(side, 3);
-      camState.spot.y = visualHeightAt(camState.spot.x, camState.spot.z) + 1.7;
+      camState.spot = camClear.spot(p, fwd, side, 1.7, target); // first stand ahead that isn't in a tree or a sign
     }
     camera.position.copy(camState.spot);
     camera.lookAt(target.x, p.y + 0.3, target.z);

@@ -101,7 +101,9 @@ const PATHS = [...ROADS, ...TRAILS];
 const grid = makeGrid(SIZE, RES);
 const { N1, CELL } = grid;
 export const { GRID, heightAt, visualHeightAt, materialAt } = grid;
-export const SPAWN = { x: 0, z: 0, yaw: -Math.PI * 0.31 };
+// facing down the spur road (ROADS[1]) towards the green Pinyon Two-Track's start gate and signpost;
+// the loop road's heading (-0.31 pi) pointed a new player straight into Widowmaker Falls' far gate
+export const SPAWN = { x: 0, z: 0, yaw: 2.4 };
 
 function bake() {
   // spatial hash of path segments
