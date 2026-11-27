@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js';
 import { vehicleNode } from './art/assets.js';
 import { BodyDamage } from './damage/body_view.js';
+import { RearLamps } from './art/lamps.js'; // [lamps]
 
 // No environment map in the scene, so keep metalness low or parts render near-black.
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.7, ...o });
@@ -679,6 +680,7 @@ export class VehicleView {
     this.wheels = [0, 1, 2, 3].map(() => { const w = buildWheel(spec); this.root.add(w); return w; });
     this.tailMats = []; // brake-light materials from a glTF body (named TailLight)
     useVehicleAsset(this, spec);
+    this.lamps = new RearLamps(this, spec); // [lamps] reverse lenses + brake / tail glow (before BodyDamage, so the lenses can break)
 
     // under-truck materials are kept light and rough so they read in shadow
     const axleMat = std(0x5c6066, { roughness: 0.75 });
@@ -878,12 +880,6 @@ export class VehicleView {
 
   update(input) {
     const v = this.v, spec = v.spec;
-    const L = this.body.userData.lights;
-    if (L && input) {
-      const k = input.brake > 0.05 || input.handbrake ? 1.6 : 0.15;
-      L.tail.emissiveIntensity = k;
-      for (const m of this.tailMats) { if (m.emissive && m.emissive.getHex() === 0) m.emissive.set(0xff1a1a); m.emissiveIntensity = k; }
-    }
     const copy = (obj, body) => {
       const p = body.translation(), q = body.rotation();
       obj.position.set(p.x, p.y, p.z); obj.quaternion.set(q.x, q.y, q.z, q.w);
@@ -903,6 +899,7 @@ export class VehicleView {
     while (this.dentsApplied < v.dents.length) { const dn = v.dents[this.dentsApplied++]; if (!dn.applied) this.applyDent(dn); }
     if (this.dentsApplied > v.dents.length) this.dentsApplied = v.dents.length; // the log was trimmed
     this.damage.update();
+    this.lamps.update(input); // [lamps] brake / tail and reverse lamps, after the damage view so broken lenses count (src/art/lamps.js)
 
     const { a, b, c, d, down } = this.tmp;
     const W = (obj, x, y, z, out) => out.set(x, y, z).applyQuaternion(obj.quaternion).add(obj.position);
