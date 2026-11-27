@@ -39,6 +39,7 @@ export class CrawlCourse {
     this.splits = [];          // this run's split per stage (s)
     this.s = null; this.lat = 0; this.on = false; this.retry = null;
     this.joined = null;        // spawned at a later stage's gate (n), until a gate is crossed
+    this.assisted = false;     // [winch] the winch line pulled during this run: its times are kept apart
   }
 
   // a spawn point facing stage n's gate (n > 1): until a gate is crossed, the HUD points at that
@@ -59,8 +60,13 @@ export class CrawlCourse {
       ? { best: this.plausible(rec.best, total) ? rec.best : null,
         splits: Array.isArray(rec.splits) ? rec.splits.slice(0, st.length - 1).map((x, k) => (this.plausible(x, st[k + 1].gateS - st[k].gateS) ? x : null)) : [] }
       : { best: null, splits: [] };
+    // [winch] the best winch-assisted run, kept apart from the unassisted record
+    let recA = null;
+    try { recA = JSON.parse(store.get(`${this.key}.assisted.${id}`) || 'null'); } catch { recA = null; }
+    this.recA = { best: recA && this.plausible(recA.best, total) ? recA.best : null };
   }
   save() { if (this.rig) store.set(`${this.key}.${this.rig}`, JSON.stringify(this.rec)); }
+  saveA() { if (this.rig) store.set(`${this.key}.assisted.${this.rig}`, JSON.stringify(this.recA)); } // [winch]
 
   // nearest point on the trail to p: searches near the last fix, or the whole trail after a jump
   project(p) {
@@ -125,16 +131,19 @@ export class CrawlCourse {
       const split = this.stageT, k = this.stage - 1;
       this.splits[k] = split;
       const prevBest = this.rec.splits[k];
-      const best = prevBest == null || split < prevBest;
+      const best = !this.assisted && (prevBest == null || split < prevBest); // [winch] an assisted split is not a record
       if (best) { this.rec.splits[k] = split; this.save(); }
       ev.push({ type: 'split', stage: this.stages[k], split, best, prevBest });
     } else this.clean = false; // skipped one or more stages
     this.stage = st.n; this.stageT = 0;
     if (st.n === last) {
       this.running = false; this.done = true;
-      const prevBest = this.rec.best, best = this.clean && (prevBest == null || this.t < prevBest);
+      const prevBest = this.rec.best, best = this.clean && !this.assisted && (prevBest == null || this.t < prevBest);
       if (best) { this.rec.best = this.t; this.save(); }
-      ev.push({ type: 'finish', time: this.t, clean: this.clean, best, prevBest });
+      // [winch] an assisted run never replaces the unassisted best; it has its own
+      const prevBestA = this.recA?.best ?? null, bestA = this.clean && this.assisted && (prevBestA == null || this.t < prevBestA);
+      if (bestA) { this.recA.best = this.t; this.saveA(); }
+      ev.push({ type: 'finish', time: this.t, clean: this.clean, best, prevBest, assisted: this.assisted, bestA, prevBestA });
     } else ev.push({ type: 'stage', stage: st });
     return ev;
   }
@@ -174,7 +183,7 @@ export class CrawlCourse {
   }
 
   // for the big map's sidebar
-  snapshot() { return { stage: this.stage, of: this.stages.length, splits: this.splits, best: this.rec.best, bestSplits: this.rec.splits, t: this.t, running: this.running, clean: this.clean, done: this.done }; }
+  snapshot() { return { stage: this.stage, of: this.stages.length, splits: this.splits, best: this.rec.best, bestSplits: this.rec.splits, t: this.t, running: this.running, clean: this.clean, done: this.done, assisted: this.assisted, bestAssisted: this.recA?.best ?? null }; } // [winch] assisted, bestAssisted
 }
 
 // All the timed courses on one map: The Gauntlet and its side courses. One run at a time (starting
