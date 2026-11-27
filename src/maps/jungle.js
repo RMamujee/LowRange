@@ -4,6 +4,7 @@
 // riverbed, basalt boulder field, a rock staircase to the rim); sand beaches and a bay with a
 // dock. The sea is the map's edge: shallow surf drives, deep water recovers the truck to shore.
 import { MAT, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
+import { setupWide, shapeAt, wideRocks, wideRelief } from './widecrawl.js';
 
 export const ID = 'jungle';
 export const NAME = 'Coralume Island';
@@ -213,7 +214,7 @@ function buildPath(def) {
       return h - total * smooth(def.steps[0].s - 10, def.steps.at(-1).s + def.steps.at(-1).depth + 10, s) + up;
     });
   }
-  pts.forEach((p, i) => { p.h = hs[i]; });
+  pts.forEach((p, i) => { p.h = hs[i]; p.nat = raw[i]; }); // (nat: the ground before grading, for a wide crawl's cross-slope)
   const width = def.width ?? (isRoad ? ({ paved: 7.5, dirt: 6, track: 4.4, sand: 6 })[def.surface] : 5.4);
   const path = { ...def, kind: def.kind, pts, length: L, width, shoulder: def.shoulder ?? (isRoad ? (def.surface === 'paved' ? 7 : 5) : 3.5), bridges: [] };
   BUILT.push(path);
@@ -367,11 +368,44 @@ const STAIR_PTS = [[SUMMIT_LOT.x, SUMMIT_LOT.z], polar(77, 2.4), polar(72, 2.66)
 export const TRAILS = [
   buildPath({ name: 'Cliffside Ledge', kind: 'trail', diff: 'green', pts: ledgePts, width: 5.8, camber: 0.05, mat: 'dirt' }),
   buildPath({ name: 'Riverbed Run', kind: 'trail', diff: 'blue', pts: riverbedPts(), width: 5.4, mat: 'river', win: 2, maxGrade: 0.26 }),
-  buildPath({ name: 'Basalt Garden', kind: 'trail', diff: 'black', width: 5.4, mat: 'basalt',
-    pts: [[BG0.x, BG0.z], [332, -154], [350, -172], [364, -196], [370, -222], [362, -244], [348, -254], [LIGHTHOUSE.x, LIGHTHOUSE.z]], end: { pad: LIGHTHOUSE }, minH: 2.2, maxGrade: 0.27 }),
+  // Basalt Garden: down off the coast road onto the shore, north along the lava shore, round the tip
+  // of Lava Point and back up its north flank to the lighthouse. The sea is on the +lat side, so the
+  // corridor widens inland (-lat). Easy line (centre) ledges 0.34-0.40 m, hard 0.50-0.55, extreme
+  // 0.60-0.66; ledges skewed so they can (and on the easy line should) be taken at an angle.
+  buildPath({ name: 'Basalt Garden', kind: 'trail', diff: 'black', width: 7, mat: 'basalt',
+    pts: [[BG0.x, BG0.z], [332, -154], [350, -172], [364, -196], [371, -222], [367, -246], [355, -264], [336, -273], [315, -270], [300, -258], [302, -242], [318, -236], [LIGHTHOUSE.x, LIGHTHOUSE.z]], end: { pad: LIGHTHOUSE }, minH: 2.2, maxGrade: 0.27,
+    cross: { k: 1, up: 0.14, down: 0.08, from: 2.4 },
+    crawl: { base: [3.6, 6], open: [46, 200], cruxes: [
+      { name: 'Basalt Steps', at: 0.25, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.34, 0.4], skew: 0.32, alt: true },
+        { line: 'hard', lat: -5.4, f: 'ledge', n: 2, top: [0.5, 0.55], skew: -0.22, alt: true },
+        { line: 'extreme', lat: -10, f: 'ledge', n: 3, top: [0.6, 0.66], skew: 0.15, alt: true }] },
+      { name: 'The Garden', at: 0.34, len: 18, lanes: [
+        { line: 'easy', lat: 0, w: 7.6, f: 'boulders', size: [0.9, 1.5], gap: 2.2, top: 0.75, keep: 1.75, crawl: { top: 0.3, every: 2.6 } },
+        { line: 'hard', lat: -6.6, f: 'boulders', size: [0.8, 1.3], gap: 2.5, top: 0.55 },
+        { line: 'extreme', lat: -11, f: 'boulders', size: [1.0, 1.5], gap: 2.2, top: 0.64 }] },
+      { name: 'Tide Shelf', at: 0.43, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.3, every: 2.4 },
+        { line: 'hard', lat: -6, f: 'camber', tilt: 0.26, from: 3, crawl: { top: 0.32, every: 3 } },
+        { line: 'extreme', lat: -10.4, f: 'holes', depth: 0.5 }] },
+      { name: 'Lava Tubes', at: 0.53, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'notch', top: 0.4, gap: 1.2, every: 5.5 },
+        { line: 'hard', lat: -5.8, f: 'holes', depth: 0.42, crawl: { top: 0.34, every: 3.2 } },
+        { line: 'extreme', lat: -10.2, f: 'slab', h: 1.2, up: 0.42, down: 0.5, side: 0.8 }] },
+      { name: 'Point Ledges', at: 0.64, len: 14, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.35, 0.4], skew: -0.3, alt: true },
+        { line: 'hard', lat: -5.2, f: 'ledge', n: 2, top: [0.5, 0.54], skew: 0.35, alt: true }] },
+      { name: 'Lighthouse Climb', at: 0.86, len: 15, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.3, 0.34], skew: 0.25, alt: true },
+        { line: 'hard', lat: 5.2, f: 'ledge', n: 2, top: [0.45, 0.5], skew: -0.25, alt: true },
+        { line: 'extreme', lat: 9.6, f: 'boulders', size: [0.9, 1.3], gap: 2.3, top: 0.6 }] },
+    ] } }),
   buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 5.6, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
     steps: [24, 31, 38, 52, 59, 66, 80, 86.5, 93].map((s, k) => ({ s, rise: [0.32, 0.36, 0.4, 0.4, 0.42, 0.44, 0.44, 0.45, 0.45][k], depth: 3.0 })) }),
 ];
+// wide crawls: corridor widths, lines, cruxes (src/maps/widecrawl.js); the shoulder is where the corridor edge fades into the ground
+const WIDE_SHOULDER = 5;
+for (const t of TRAILS) if (t.crawl) { setupWide(t, t.crawl); t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; }
 const PATHS = [...ROADS, ...TRAILS];
 
 // ---------------------------------------------------------------- bridges
@@ -419,6 +453,15 @@ const RELIEF = {
   dblack: { lumps: 0.1, ruts: 0, holes: [7, 0.3, 0.12, 1.0], embed: { every: 1.6, size: [0.4, 1.0], proud: [0.1, 0.22] }, rubble: 2.2 },
 };
 const bump = (d, r) => (d >= r ? 0 : (1 - (d / r) ** 2) ** 2);
+
+// wide crawls (src/maps/widecrawl.js): filler boulders in the open corridor (never on a line) and
+// rocks along its edges, by difficulty
+const WIDE = {
+  green:  { fill: { every: 9, size: [0.3, 0.7], top: 0.3 }, edge: { every: 4.5, size: [0.5, 1.2] }, embed: { every: 3.2, size: [0.3, 0.6], proud: [0.05, 0.12] } },
+  blue:   { fill: { every: 4.5, size: [0.5, 1.1], top: 0.5 }, edge: { every: 3.6, size: [0.6, 1.4] }, embed: { every: 2.2, size: [0.35, 0.85], proud: [0.07, 0.18] } },
+  black:  { fill: { every: 2.6, size: [0.7, 1.5], top: 0.8 }, edge: { every: 3.0, size: [0.7, 1.7] }, embed: { every: 1.8, size: [0.4, 1.0], proud: [0.1, 0.25] } },
+  dblack: { fill: { every: 2.6, size: [0.8, 1.6], top: 0.85 }, edge: { every: 3.0, size: [0.8, 1.8] }, embed: { every: 2.0, size: [0.4, 1.0], proud: [0.1, 0.22] } },
+};
 const MUD_SINK_J = 0.3, MUD_RUTS = 0.06; // (old ruts baked into the floor; src/mud.js adds the live ones)
 // basalt: the old lava flow round Lava Point (dark rock, boulder fields)
 export const BASALT = { x: 330, z: -215, r: 120 };
@@ -435,11 +478,15 @@ function bake() {
       for (let bx = Math.max(0, x0); bx <= Math.min(nb - 1, x1); bx++) for (let bz = Math.max(0, z0); bz <= Math.min(nb - 1, z1); bz++) bins[bx * nb + bz].push(id, i);
     }
   };
-  PATHS.forEach((p, pi) => binSeg(p.pts, p.width / 2 + p.shoulder + 1, pi));
+  // (a wide crawl reaches its widest half-width; its shoulder is where its edges fade into the ground)
+  const reachOf = (p) => (p.wide ? p.maxHalf : p.width / 2) + p.shoulder;
+  PATHS.forEach((p, pi) => binSeg(p.pts, reachOf(p) + 1, pi));
   binSeg(RIVER.pts, 48, -1);
   // nearest segment of every path in reach of the vertex (flat arrays: no per-vertex allocation)
   const NP = PATHS.length, stamp = new Int32Array(NP).fill(-1), touched = [];
   const cD = new Float64Array(NP), cLat = new Float64Array(NP), cS = new Float64Array(NP), cH = new Float64Array(NP), cBank = new Float64Array(NP);
+  const cHw = new Float64Array(NP), cNat = new Float64Array(NP); // wide crawls: half-width on this side, natural ground at the centre
+  const REACH = PATHS.map(reachOf);
   let vid = 0;
   for (let ix = 0; ix <= RES; ix++) {
     const x = -SIZE / 2 + ix * CELL;
@@ -477,24 +524,30 @@ function bake() {
         const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
         let t = ((x - a.x) * ex + (z - a.z) * ez) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
         const dx = x - a.x - ex * t, dz = z - a.z - ez * t, d = Math.sqrt(dx * dx + dz * dz);
-        if (d > p.width / 2 + p.shoulder) continue;
+        if (d > REACH[pi]) continue;
         if (stamp[pi] !== vid) { stamp[pi] = vid; cD[pi] = Infinity; touched.push(pi); }
         if (d < cD[pi]) {
           cD[pi] = d; cLat[pi] = ((x - a.x) * -ez + (z - a.z) * ex) / Math.sqrt(L2);
           cS[pi] = a.s + (b.s - a.s) * t; cH[pi] = a.h + (b.h - a.h) * t; cBank[pi] = a.bank + (b.bank - a.bank) * t;
+          if (p.wide) { cHw[pi] = cLat[pi] > 0 ? a.wl + (b.wl - a.wl) * t : a.wr + (b.wr - a.wr) * t; cNat[pi] = a.nat + (b.nat - a.nat) * t; }
+          else cHw[pi] = p.width / 2;
         }
       }
+      for (const pi of touched) if (cD[pi] > cHw[pi] + PATHS[pi].shoulder) cD[pi] = Infinity; // (out of reach on this side)
       let best = null;
-      for (const pi of touched) { const score = cD[pi] - (PATHS[pi].kind === 'road' ? 1.5 : 0); if (!best || score < best.score) best = { d: cD[pi], pi, lat: cLat[pi], s: cS[pi], ph: cH[pi], score }; }
+      // (a wide crawl scores by how far inside its corridor the vertex is, as a narrow one did)
+      for (const pi of touched) { if (cD[pi] === Infinity) continue; const P_ = PATHS[pi], score = cD[pi] - (P_.kind === 'road' ? 1.5 : P_.wide ? cHw[pi] - P_.width / 2 : 0); if (!best || score < best.score) best = { d: cD[pi], pi, lat: cLat[pi], s: cS[pi], ph: cH[pi], hw: cHw[pi], score }; }
       let pathId = -1, sink = 0, vRut = 0;
+      const hNat = h; // the ground before any path (a wide crawl's corridor follows its cross-slope)
       if (best) {
         let num = 0, den = 0, W = 0, under = Infinity;
         for (const pi of touched) {
+          if (cD[pi] === Infinity) continue;
           const cc = { d: cD[pi], pi, lat: cLat[pi], s: cS[pi], ph: cH[pi], bank: cBank[pi] };
-          const q = PATHS[cc.pi], qhw = q.width / 2;
+          const q = PATHS[cc.pi], qhw = q.width / 2, shw = cHw[pi];
           // the creek stays under a bridge deck, and nothing under it may reach up to the planks
           if (q.bridges.length && onBridge(q, cc.s)) { if (cc.d < qhw + 0.8) under = Math.min(under, cc.ph - 0.3); continue; }
-          const w = 1 - smooth(qhw, qhw + q.shoulder, cc.d);
+          const w = 1 - smooth(shw, shw + q.shoulder, cc.d);
           if (w <= 0) continue;
           let surf = cc.ph;
           const lat = clamp(cc.lat, -qhw - 0.5, qhw + 0.5);
@@ -519,14 +572,21 @@ function bake() {
             if (rl.ruts) surf -= rl.ruts * (0.65 + 0.7 * fbm(x * 0.11 - 4, z * 0.11 + 8, 2)) * (bump(Math.abs(cc.lat - 0.82), 0.62) + bump(Math.abs(cc.lat + 0.82), 0.62)) * ends;
             surf += potholes(x, z, rl.holes[0], rl.holes[1], rl.holes[2], rl.holes[3], cc.pi * 17) * ends;
             if (q.camber) surf += lat * q.camber * Math.sin(cc.s * 0.05) * ends;
-            if (q.diff === 'black') surf += lat * 0.15 * Math.sin(cc.s * 0.045) * ends;
+            if (q.diff === 'black' && !q.wide) surf += lat * 0.15 * Math.sin(cc.s * 0.045) * ends;
+            if (q.wide) {
+              // off the easy line the corridor follows the ground's own cross-slope, within limits,
+              // then the cruxes' ground features (slabs, off-camber shelves, holes)
+              const fo = q.cross, al = Math.abs(cc.lat), u = Math.max(0, al - fo.from);
+              surf += clamp((hNat - cNat[pi]) * fo.k * smooth(fo.from, fo.from + 4, al), -fo.down * u, fo.up * u);
+              surf += shapeAt(q, cc.s, cc.lat).dh;
+            }
           }
           const ww = w * w * (q.kind === 'road' ? 2 : 1);
           num += surf * ww; den += ww; W = Math.max(W, w);
         }
         if (den > 0) h = lerp(h, num / den, padCore ? 0 : W);
         h = Math.min(h, under);
-        const p = PATHS[best.pi], hw = p.width / 2;
+        const p = PATHS[best.pi], hw = best.hw;
         if (best.d < hw + 0.5 && !padCore) {
           pathId = best.pi;
           const n = fbm(x * 0.08 + 9, z * 0.08 - 4, 3), f = best.s / p.length;
@@ -556,6 +616,12 @@ function bake() {
             else if (p.mat === 'basalt') { mat = n > 0.45 ? MAT.GRAVEL : MAT.ROCK; tone = Math.round(150 * ends); }
             else mat = n > 0.4 ? MAT.GRAVEL : MAT.ROCK;
             if (RELIEF[p.diff].ruts) tone = Math.max(tone, Math.round(clamp((bump(Math.abs(best.lat - 0.82), 0.62) + bump(Math.abs(best.lat + 0.82), 0.62)) * 0.55, 0, 1) * 255 * ends));
+            if (p.wide) {
+              // the easy line is worn lighter than the corridor round it; the cruxes' slabs and shelves are bare rock
+              if (shapeAt(p, best.s, best.lat).rock) mat = MAT.ROCK;
+              const wear = 1 - smooth(1.1, 2.4, Math.abs(best.lat));
+              tone = Math.round(lerp(Math.max(tone, 70), tone * 0.55, wear));
+            }
           }
         }
       }
@@ -602,6 +668,17 @@ function clearOfPaths(x, z, margin) {
   return true;
 }
 export { clearOfPaths };
+// the jungle stands further back from the wide crawls, so the lines read and the chase camera has room
+const WIDE_IDS = new Set(TRAILS.filter((t) => t.wide).map((t) => ROADS.length + TRAILS.indexOf(t)));
+function clearOfWide(x, z, margin) {
+  const m = Math.ceil(margin / CELL), cx = Math.round((x + SIZE / 2) / CELL), cz = Math.round((z + SIZE / 2) / CELL);
+  for (let dx = -m; dx <= m; dx += 1) for (let dz = -m; dz <= m; dz += 1) {
+    if (dx * dx + dz * dz > (m + 0.5) * (m + 0.5)) continue;
+    const ix = cx + dx, iz = cz + dz;
+    if (ix >= 0 && iz >= 0 && ix <= RES && iz <= RES && WIDE_IDS.has(GRID.path[ix * N1 + iz])) return false;
+  }
+  return true;
+}
 const slopeAt = (x, z) => Math.hypot(heightAt(x + 1, z) - heightAt(x - 1, z), heightAt(x, z + 1) - heightAt(x, z - 1)) / 2;
 
 // ---------------------------------------------------------------- structures (box colliders)
@@ -690,7 +767,14 @@ export function generateRocks() {
   const inWater = (x, z) => materialAt(x, z) === MAT.WATER;
   // scattered boulders keep their whole width (plus 0.6 m) off every road and crawl
   const offPath = (x, z, size, flat, embed) => { if (clearOfPaths(x, z, size * 1.3 + 0.6)) boulder(x, z, size, flat, embed); };
+  const onRoadCell = (x, z) => { const ix = clamp(Math.round((x + SIZE / 2) / CELL), 0, RES), iz = clamp(Math.round((z + SIZE / 2) / CELL), 0, RES), id = GRID.path[ix * N1 + iz]; return id >= 0 && id < ROADS.length; };
   for (const t of TRAILS) {
+    if (t.wide) { // (each wide crawl draws from its own stream)
+      const K = rockKit(rng(9150 + TRAILS.indexOf(t)), heightAt);
+      wideRocks(t, K, rng(9160 + TRAILS.indexOf(t)), { stepCap, grade, heightAt, skip: (x, z) => inWater(x, z) || onRoadCell(x, z), spec: WIDE[t.diff] });
+      for (const r of K.rocks) rocks.push(r);
+      continue;
+    }
     const hw = t.width / 2;
     const stepAt = (s) => (t.steps || []).some((st) => s > st.s - 3 && s < st.s + st.depth + 2.5);
     if (t.steps) for (const st of t.steps) rocks.push(stepSlab(t, st, R));
@@ -766,6 +850,19 @@ export function generateRocks() {
   for (const t of TRAILS) {
     const rl = RELIEF[t.diff], e = rl.embed, hw = t.width / 2;
     const nearLedge = (x, z) => ledges.some((r) => Math.hypot(r.x - x, r.z - z) < 4.2);
+    if (t.wide) {
+      const Rw = rng(9170 + TRAILS.indexOf(t)), Ew = rockKit(rng(9180 + TRAILS.indexOf(t)), heightAt);
+      wideRelief(t, Ew, Rw, WIDE[t.diff].embed, { skip: (x, z) => nearLedge(x, z) || inWater(x, z) });
+      // rubble just outside the corridor edges
+      for (let s = 6; s < t.length - 4; s += rl.rubble * (0.6 + Rw() * 0.8)) {
+        const sd = Rw() < 0.5 ? -1 : 1, { left, right } = t.halfWidthAt(s), p = pathPoint(t, s), lat = sd * ((sd > 0 ? left : right) + 0.7 + Rw() * 3.2);
+        const x = p.x - p.tz * lat, z = p.z + p.tx * lat;
+        if (!clearOfPaths(x, z, 0.5) || inWater(x, z)) continue;
+        Ew.embedded(x, z, 0.4 + Rw() * 0.7, 0.08 + Rw() * 0.17);
+      }
+      for (const r of Ew.rocks) E.rocks.push(r);
+      continue;
+    }
     for (let s = 8; s < t.length - 6; s += e.every * (0.6 + R2() * 0.8)) {
       const p = pathPoint(t, s), lat = R2() < 0.7 ? (R2() < 0.5 ? -1 : 1) * (0.8 + (R2() - 0.5) * 0.6) : (R2() * 2 - 1) * (hw - 0.4);
       const x = p.x - p.tz * lat, z = p.z + p.tx * lat;
@@ -814,7 +911,7 @@ export function generateTrees() {
     if (c < 4 || h < 0.7) continue;
     const m = materialAt(x, z);
     if (m === MAT.WATER || m === MAT.ROCK && r3 < 0.85) continue;
-    if (slopeAt(x, z) > 0.85 || !clearOfPaths(x, z, 3.6)) continue;
+    if (slopeAt(x, z) > 0.85 || !clearOfPaths(x, z, 3.6) || !clearOfWide(x, z, 6.5)) continue;
     if (riverNearest(x, z).d < RIVER.bedW + 1.5 || Math.hypot(x - POOL.x, z - POOL.z) < POOL.r + 3) continue;
     const coastal = c < 55 + 25 * beachW(Math.atan2(z, x)) && h < 16;
     if (inBasalt(x, z) && r3 < 0.8) continue;

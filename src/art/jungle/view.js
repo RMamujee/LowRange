@@ -225,6 +225,30 @@ function gate(path, atEnd) {
   banner.userData.material.name = 'gate-start'; inside.material.name = 'gate-finish';
   return g;
 }
+// Line posts on the wide crawls (src/maps/widecrawl.js): a pair of short posts either side of each
+// lane where a crux begins, topped white for the easy line, amber for the hard line and red for the
+// extreme line, so the choice reads before you commit (no colliders, like the marker posts)
+const LINE_TOP = { easy: 0xf2f2ee, hard: 0xf0a020, extreme: 0xd8342a };
+export function linePosts(postG) {
+  const per = { easy: [], hard: [], extreme: [] };
+  for (const t of TRAILS) for (const c of t.cruxes ?? []) for (const ln of c.lanes) {
+    if (!per[ln.line]) continue;
+    const p = pathPoint(t, Math.max(2, c.s0 - 1.5));
+    for (const sd of [-1, 1]) {
+      const lat = ln.lat + sd * (ln.w / 2 + 0.3), x = p.x - p.tz * lat, z = p.z + p.tx * lat;
+      if (MAP.materialAt(x, z) !== MAT.WATER) per[ln.line].push([x, heightAt(x, z), z]);
+    }
+  }
+  const out = [], m4 = new THREE.Matrix4();
+  for (const [line, pts] of Object.entries(per)) {
+    if (!pts.length) continue;
+    const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), pts.length);
+    const tops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.25, 0.2), new THREE.MeshStandardMaterial({ color: LINE_TOP[line], emissive: LINE_TOP[line], emissiveIntensity: 0.15 }), pts.length);
+    pts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y + 0.35, z); posts.setMatrixAt(i, m4); m4.makeTranslation(x, y + 1.0, z); tops.setMatrixAt(i, m4); });
+    out.push(posts, tops);
+  }
+  return out;
+}
 export function buildMarkers(scene) {
   const postG = new THREE.BoxGeometry(0.12, 1.1, 0.12), m4 = new THREE.Matrix4();
   // trail marker posts with the difficulty colour, alternating sides
@@ -232,7 +256,8 @@ export function buildMarkers(scene) {
     const pts = [];
     let side = 1;
     for (let s = 8; s < t.length - 5; s += 11) {
-      const p = pathPoint(t, s), off = (t.width / 2 + 0.9) * side; side = -side;
+      // (a wide crawl: on the corridor's edges, src/maps/widecrawl.js)
+      const p = pathPoint(t, s), w = t.halfWidthAt ? t.halfWidthAt(s) : { left: t.width / 2, right: t.width / 2 }, off = ((side > 0 ? w.left : w.right) + 0.9) * side; side = -side;
       const x = p.x - p.tz * off, z = p.z + p.tx * off;
       if (MAP.materialAt(x, z) === MAT.WATER) continue;
       pts.push([x, heightAt(x, z), z]);
@@ -243,6 +268,7 @@ export function buildMarkers(scene) {
     pts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y + 0.55, z); posts.setMatrixAt(i, m4); m4.makeTranslation(x, y + 1.2, z); tops.setMatrixAt(i, m4); });
     scene.add(posts, tops);
   }
+  scene.add(...linePosts(postG));
   // gates + signposts at both trail ends (order: start0, end0, start1, end1, ... as main.js expects)
   const gates = [];
   for (const t of TRAILS) for (const atEnd of [false, true]) {
