@@ -229,7 +229,12 @@ whatever the content above them reaches.
 `x` / `z`. The sidebar draws only the hints that fit under the content (the last ones, so
 `M / ESC CLOSE` stays). Covered by `test/waypoints.mjs` (park, race and Gauntlet bounds) and `test/browser-qa.mjs` check 7.
 
-## 11. LOW: HUD panels overlap or leave the screen in small / tall windows. NOT FIXED here (hud.js layout is being reworked)
+## 11. LOW: HUD panels overlap or leave the screen in small / tall windows. FIXED upstream (2ea00dc, src/hud/layout.js)
+
+**Status (re-checked 2026-11-27):** the layout rework scales from width and height, restacks the
+chassis board and hides boards when there is no room. `node test/hudlayout.mjs` checks every size
+in this report (640x360, 800x600, 320x240, 800x1600) plus a sweep at 1 / 1.25 / 1.5 / 2 dpr: all
+318255 checks pass. The analysis below is kept for history.
 
 **What happens:** at 640x360 and 800x600 the cluster and chassis boards overlap; at 800x1600 the
 cluster is 1132 px wide; at 320x240 the chassis board starts at x = -90 and the minimap covers it.
@@ -301,6 +306,103 @@ Gate banners now read START from outside the trail and FINISH from inside at bot
 backs are horizontal planks with dark seams. Covered by `test/browser-qa.mjs` check 8 (banner faces
 at all 10 gates, and what the default spawn faces); `test/spawns.mjs` still settles every rig at the
 trailhead.
+
+---
+
+## Bug-fix pass 2026-11-27 (base c18ccfa)
+
+Old entries re-checked on the current code: 1-10, 12 and 13 stay fixed (`node test/storage.mjs`,
+`node test/waypoints.mjs`, `node test/camclear.mjs` and every `test/browser-qa.mjs` check pass);
+11 is fixed by the HUD layout rework (see above). Check 5 of `browser-qa` reported OPEN once in this
+pass: not the bug, but the check (it needs the run to be over 4 s old and waited a fixed 5 s, which
+a software-GL frame rate did not reach); it now waits for the run's clock.
+
+All five maps were loaded in headless Chromium and driven: W, Y, Backspace, every spawn point
+followed by Y, the big map, the spawn list, the pause menu and Restart at trailhead. No page errors
+or console errors on any map; renderer geometries / textures, scene objects and Rapier bodies stay
+flat over three rounds of every spawn point + Backspace + Y on each map.
+
+### 14. LOW: the Cruiser never settles at the Trail Park's Boulder Alley start. FIXED (src/spawns.js)
+
+**Repro:** `MAP=park node test/spawns.mjs` failed: `lc70 @ Boulder Alley: start ... moved 0.016 m in
+the last 0.5 s` (limit 0.015). A probe printing the truck every 0.25 s showed it is not sliding: it
+rocks in roll between -1.2 and -2.5 degrees with a period of about 2 s and never stops.
+
+**Root cause:** the footing. The spot (nudge 2 of the fan) passed the footprint check at grade 0.119
+(limit 0.12) and roughness 0.075, but the ground under the wheels is twisted: front left 1.590 m,
+front right 1.496 m below the datum, the rear axle level, a 0.10 m cross-axle twist. A least-squares
+plane can't see a twist. On it the Cruiser's soft solid axles keep rocking on the parking brake. No
+rock touches the truck (the nearest is 3 m to the side of the footprint).
+
+**Fix:** `checkSpot` also measures the twist at the Cruiser's wheel contacts (wheelbase 3.24 m, track
+1.62 m) and rejects over 0.08 m (`LIMITS.twist`). Every other spawn on every map was already under
+0.07 m, so only this point moves (to nudge 6, 1.7 m further out: twist 0.03 m; the Cruiser moves
+0.8 mm in the last 0.5 s, the Pickup 1.6 mm, the Sedan 0.2 mm). **Test:** `test/spawns.mjs` checks
+the twist at every point on every map and that the old pose is rejected for its twist.
+
+### 15. LOW: a "Stage 12: Summit" spawn point joined The Gauntlet at its finish gate. FIXED (src/spawns.js)
+
+**Repro:** in the game, `?map=crawl` logs `[spawns] crawl: skipped "Stage 12: Summit": no safe spot
+nearby (tries failed on: rock x7, rough x1, grade x6, loose x1)`, while `MAP=crawl node test/spawns.mjs`
+listed 28 points including it. Joining there (`CrawlCourse.joinAt(12)`, then driving through the
+gate) gives `{"type":"finish","time":0,"clean":false}`: "Summit in 0:00".
+
+**Root cause:** the stage loop in `candidates()` made a gate spawn for every stage, including the
+last one, which is the summit pad whose gate is the finish (the side courses already skip their
+finish gate). Its only clear nudge was blocked in the browser by a loose dressing pebble, which the
+headless test can't see (it has no dressing).
+
+**Fix:** no gate spawn for the last stage; the separate Summit point covers the pad. **Test:**
+`test/spawns.mjs` asserts there is no `stage-12`.
+
+### 16. LOW: "All five trails conquered!" again after a restart, with a short total. FIXED (src/main.js)
+
+**Repro:** finish every trail, Esc, Restart at trailhead (or pick another rig), finish any one trail:
+the toast says `All five trails conquered! Total 0:12`. `test/browser-qa.mjs` check 10 (fails on the
+old code).
+
+**Root cause:** `startDrive` resets `game.done` and the clock on a fresh start but keeps each trail's
+done mark (and its green gate caps), so `game.trails.every(done) && !game.done` is true again at the
+next finish.
+
+**Fix:** a session flag `game.conquered`: the toast shows once per session.
+
+### 17. LOW: joining a side course at a section gate during a Gauntlet run kept the Gauntlet's run state. FIXED (src/main.js)
+
+**Repro:** start a Gauntlet run, then drive into Broken Slab through its section 2 gate:
+`__game.activeTrail` stays `{ course: null }` (The Gauntlet's) though the Gauntlet run was cancelled,
+so the big map's Gauntlet row shows a running clock on the side course's time.
+`test/browser-qa.mjs` check 11.
+
+**Root cause:** `updateCrawl`'s `stage` event only created `game.active` when there was none.
+
+**Fix:** it replaces `game.active` when it belongs to another course.
+
+### Found, not fixed
+
+- **LOW, src/main.js `updateCrawl`:** the stage and finish toasts are delayed with `setTimeout`
+  (1.2 s / 1.5 s) and never cancelled, so a teleport (J), Y or a pause right after a gate is
+  followed by a stale "Stage n/12 ..." or "Summit! ..." toast over the spawn / restart message.
+  Suggested patch: a counter bumped in `spawnAt`, `restartTrail` and `spawn`, captured when the
+  timeout is set; the callback returns if it changed.
+- **Test gap:** `test/spawns.mjs` builds no dressing, so loose dressing stones (`looseProps.items`,
+  passed as `extra` in the game) never block a spawn headless. Bug 15 was only visible in the
+  browser. `test/spawnsbrowser.mjs` and the console-warning check in a browser sweep cover it.
+- **Off limits, not touched:** the Pickup's square-ledge regression (0.30 m to 0.25 m) in the hold
+  code, as listed in HANDOFF.
+- **Off limits (static hold), MEDIUM for parked trucks:** `node test/props.mjs` fails part (d), "parked
+  with one tyre on a rock for 5 s": with the tyre on a loose (dynamic) 0.5 m stone instead of the
+  same stone fixed, the chassis drifts 8-38 mm (fixed: 0.1-3.3 mm): Pickup 18.2 mm (9.2 in the last
+  3 s), Cruiser 8.4 mm (the stone itself moves 48 mm), Rally Sedan 38.1 mm (24.8 in the last 3 s)
+  while its stone moves only 0.6 mm. None of the files that test loads changed in this pass, so it
+  fails on c18ccfa too. Likely cause, unverified: the hold in `postPhysics` only anchors patches
+  standing on fixed ground, so a tyre on a loose stone gets no hold and slowly walks off it (the
+  Sedan case, where the stone barely moves, points that way). Suggested: let the hold anchor on a
+  dynamic collider that is asleep or slower than its standing threshold, anchored in that body's
+  frame, or relax the test for loose props if creeping off a loose stone is acceptable.
+- **Test, fixed:** `test/spawnsbrowser.mjs crawl` failed 8 checks on c18ccfa: it scrolled the spawn
+  list six wheel notches to reach the last row, which stopped being enough when the side courses
+  lengthened the Gauntlet's list. It now scrolls until the last row is drawn; all three maps pass.
 
 ---
 
