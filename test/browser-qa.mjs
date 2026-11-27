@@ -69,7 +69,8 @@ const { page, errors } = await session();
 // 5. (open, main.js) finishing a trail must not immediately start a new run at the finish gate
 {
   await page.evaluate(async () => { const T = await import('/src/terrain.js'); const t = T.TRAILS[0], p = T.pathPoint(t, 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); });
-  await page.waitForTimeout(5000);
+  // the run must be over 4 s old to finish (a slow software-GL frame rate made a fixed 5 s wait too short)
+  await page.waitForFunction(() => window.__game.activeTrail?.t > 4.5, null, { timeout: 30000, polling: 100 }).catch(() => {});
   await page.evaluate(async () => { const T = await import('/src/terrain.js'); const t = T.TRAILS[0], p = T.pathPoint(t, t.length - 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); });
   await page.waitForTimeout(800);
   const a = await page.evaluate(() => window.__game.activeTrail);
@@ -145,6 +146,29 @@ const { page, errors } = await session();
   const d = await page.evaluate(() => { const c = window.__game.gfx.camera.position, p = window.__game.car.chassis.translation(); return Math.hypot(c.x - p.x, c.z - p.z); });
   check(!(await inTree(c)) && d < 4, `Chase camera pulled in short of the tree behind the truck (${(await inTree(c)) || 'clear'}, ${d.toFixed(1)} m from the truck)`);
   await page.evaluate(() => { window.__game.cam.mode = 0; });
+}
+// 10. "All N trails conquered!" fires once per session: after every trail is done, a restart at the
+// trailhead (or a rig change) used to reset only the clock, so finishing any one trail again showed it
+// at once with the new, short "Total"
+{
+  const run = async (i) => {
+    const tp = (i, far) => page.evaluate(async ([i, far]) => { const T = await import('/src/terrain.js'), t = T.TRAILS[i], p = T.pathPoint(t, far ? t.length - 3 : 3); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, Math.atan2(-p.tx, -p.tz)); }, [i, far]);
+    const away = () => page.evaluate(async () => { const T = await import('/src/terrain.js'), t = T.TRAILS[2], p = T.pathPoint(t, 40); window.__game.car.reset({ x: p.x, y: T.heightAt(p.x, p.z) + 1.2, z: p.z }, 0); });
+    await away(); await page.waitForTimeout(200);
+    await tp(i, false);
+    const started = await page.waitForFunction((i) => window.__game.activeTrail?.trail === i && window.__game.activeTrail.t > 4.5, i, { timeout: 30000, polling: 100 }).then(() => true, () => false);
+    await tp(i, true); await page.waitForTimeout(600);
+    return started && (await page.evaluate(() => window.__game.activeTrail)) === null;
+  };
+  const n = await page.evaluate(async () => (await import('/src/terrain.js')).TRAILS.length);
+  let ok = true, conquered = 0;
+  for (let i = 0; i < n; i++) { ok = (await run(i)) && ok; if (/conquered/.test(await page.evaluate(() => window.__game.hud.debug().lastToast))) conquered++; }
+  await key(page, 'Escape'); await page.waitForTimeout(300);
+  await page.evaluate(() => document.getElementById('restartBtn').click()); await page.waitForTimeout(1500);
+  ok = (await run(0)) && ok;
+  const again = /conquered/.test(await page.evaluate(() => window.__game.hud.debug().lastToast));
+  if (!ok) { notRun++; console.log('  NOT RUN', 'all-trails toast: a trail run did not start or finish'); }
+  else check(conquered === 1 && !again, `"all trails conquered" shown once (${conquered} time(s) in the first round, ${again ? 'again' : 'not again'} after a restart and one more trail)`);
 }
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors[0] : ''}`);
 await page.close();

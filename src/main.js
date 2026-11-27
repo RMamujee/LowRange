@@ -155,7 +155,8 @@ function updateTrails(p) {
         setGateDone(gates[i * 2]); setGateDone(gates[i * 2 + 1]);
         toast(`${t.name} complete in ${fmtT(a.t)}${first ? '' : ' (best ' + fmtT(st.best) + ')'}`, 4);
         game.active = null; game.finishGate = gate;
-        if (game.trails.every((x) => x.done) && !game.done) { game.done = true; toast(`All ${['', 'one', 'two', 'three', 'four', 'five', 'six'][TRAILS.length] ?? TRAILS.length} trails conquered! Total ${fmtT(game.time)}`, 6); }
+        // once per session: a fresh start resets the clock (game.done) but not the trails' done marks
+        if (game.trails.every((x) => x.done) && !game.done && !game.conquered) { game.done = game.conquered = true; toast(`All ${['', 'one', 'two', 'three', 'four', 'five', 'six'][TRAILS.length] ?? TRAILS.length} trails conquered! Total ${fmtT(game.time)}`, 6); }
       } else if (!a || a.trail !== i) {
         game.active = { trail: i, from: end, t: 0 };
         toast(`${t.name} · ${DIFF[t.diff].label}. Good luck!`, 2.5);
