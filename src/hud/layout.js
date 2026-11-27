@@ -14,8 +14,12 @@
 import { measure, wrap } from '../ui/pixelfont.js';
 
 export const MARGIN = 10, GAP = 4;
-export const BOARDS = { cluster: [283, 77], engine: [128, 40], chassis: [200, 60], mini: [108, 146] };
+export const BOARDS = { cluster: [283, 77], engine: [128, 40], chassis: [200, 60], mini: [108, 146], tyre: [112, 40] };
 const ENGINE_LIFT = 3;
+// [tyre pressure] the tyre board sits beside the engine board, on the cluster (3 HUD px from each). Every
+// mode below is tried with it first and then without it, so where it doesn't fit the other boards get
+// exactly the scale and spots they had before it existed (the cluster's psi lamp still shows the pressure).
+const withTyre = (set) => set.flatMap((m) => (m.engine ? [{ ...m, tyre: true }, m] : [m]));
 // the widest / tallest big message (main.js: race lap time at letter scale 5, WRONG WAY at 3)
 export const BIG_MAX = [Math.max(measure('WRONG WAY') * 3, measure('10:23.4') * 5) + 8, 9 * 5 + 8];
 
@@ -24,7 +28,7 @@ const MODES = [
   [{ chassis: 'hidden', engine: true, mini: true }],
   [{ chassis: 'hidden', engine: true, mini: false }],
   [{ chassis: 'hidden', engine: false, mini: false }],
-];
+].map(withTyre);
 
 export const overlaps = (a, b, gap = 0) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 
@@ -34,6 +38,7 @@ function build(W, H, dpr, scale, mode, B) {
   const lift = (ch + ENGINE_LIFT) * u; // bottom offset of the row above the cluster
   const rects = { cluster: r(MARGIN, H - MARGIN - ch * u, cw, ch) };
   if (mode.engine) rects.engine = r(MARGIN, H - MARGIN - lift - eh * u, ew, eh);
+  if (mode.tyre) { const [tw, th] = B.tyre; rects.tyre = r(MARGIN + (ew + ENGINE_LIFT) * u, H - MARGIN - lift - th * u, tw, th); } // [tyre pressure]
   if (mode.chassis === 'side') rects.chassis = r(W - MARGIN - sw * u, H - MARGIN - sh * u, sw, sh);
   else if (mode.chassis === 'stacked') rects.chassis = r(W - MARGIN - sw * u, H - MARGIN - lift - sh * u, sw, sh);
   if (mode.mini) rects.mini = r(W - MARGIN - mw * u, MARGIN, mw, mh);
@@ -45,7 +50,8 @@ function boardsFit(L) {
   for (const n of names) { const q = L.rects[n]; if (q.x < MARGIN - 1e-6 || q.y < MARGIN - 1e-6 || q.x + q.w > L.W - MARGIN + 1e-6 || q.y + q.h > L.H - MARGIN + 1e-6) return false; }
   for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
     const pair = [names[i], names[j]];
-    const onCluster = pair.includes('cluster') && (pair.includes('engine') || (pair.includes('chassis') && L.chassis === 'stacked')); // sits 3 HUD px above it by design
+    const onCluster = (pair.includes('cluster') && (pair.includes('engine') || pair.includes('tyre') || (pair.includes('chassis') && L.chassis === 'stacked'))) // sits 3 HUD px above it by design
+      || (pair.includes('engine') && pair.includes('tyre')); // [tyre pressure] 3 HUD px beside the engine board
     if (overlaps(L.rects[names[i]], L.rects[names[j]], onCluster ? 0 : GAP)) return false;
   }
   return true;
