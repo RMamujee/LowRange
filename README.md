@@ -117,6 +117,8 @@ A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch, A 
 Headless physics checks run in Node, for example:
 
 - `node test/brake.mjs`: braking distances
+- `node test/slopehold.mjs`: parked on slopes (every rig, surfaces, brakes) must not creep; mud past the grip must slide
+- `node test/parkbrake.mjs`: the parking brake holds the engine in first (4-Low) without stalling
 - `node test/obstacle.mjs ledge`: ledge climbing
 - `node test/trails.mjs lc70,taco,wrx 240`: an autopilot drives each trail
 - `node test/damage.mjs`: drop and wall-impact damage
@@ -126,6 +128,7 @@ Headless physics checks run in Node, for example:
 - `node test/crawl.mjs lc70,taco,wrx [fromStage] [toStage]`: autopilot on The Gauntlet, furthest stage and time per stage
 - `node test/crawlcheck.mjs`: The Gauntlet by the numbers (step heights against measured limits, clear lanes, grades); `node test/crawlcourse.mjs`: its run logic
 - `node test/stairgrade.mjs <ids> <grades> <rises>`: how tall a staircase each rig walks
+- `node test/ledgeclimb.mjs [ids] [square,chamfer] [crawl,speed]`: the tallest single ledge each rig climbs (`LEDGE_ASSERT=1` checks the limits)
 - `node test/spawns.mjs`: every spawn point on every map, each rig dropped and settled on it (upright, at rest, undamaged, wheels down, no colliders in the footprint)
 
 With the dev server running (`npx vite --port 5841`), browser checks use Playwright with a Chromium path in `CHROME`:

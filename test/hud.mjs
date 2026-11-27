@@ -48,7 +48,7 @@ if (which === 'all' || which === 'park') {
   const pos = () => page.evaluate(() => { const p = window.__game.car.chassis.translation(); return [p.x, p.z]; });
   const a = await pos(); await sleep(page, 3000); const b = await pos();
   const held = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  check(held < 0.15, `parking brake holds on a ${Math.abs(slope).toFixed(0)}° slope in neutral (moved ${held.toFixed(2)} m in 3 s)`);
+  check(held < 0.02, `parking brake holds on a ${Math.abs(slope).toFixed(0)}° slope in neutral (moved ${held.toFixed(2)} m in 3 s)`);
   await key(page, 'KeyP');
   check((await page.evaluate(() => window.__game.parkBrake)) === false, 'P releases it');
   await sleep(page, 3000); const c = await pos();

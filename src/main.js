@@ -866,7 +866,7 @@ function frame(now) {
       if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: Arrow Down (or wheel down) through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
       if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press Backspace to recover', 1.5); }
       // pulling away against the parking brake: remind
-      if (parkBrake && input.throttle > 0.6 && car.dt.gear !== 0 && Math.abs(car.speed()) < 1 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2);
+      if (parkBrake && input.throttle > 0.3 && car.dt.gear !== 0 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2); // repeats while you drive against it
       updateHud(dt);
       while (car.damageEvents.length) { toast(car.damageEvents.shift(), 3); audio.grind(); }
       // [crash] crash effects from src/damage/crash.js: debris and dust at the hit, glass glitter, steam

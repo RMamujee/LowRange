@@ -180,7 +180,7 @@ export function stats(spec) {
   const crawl = spec.gears[0] * low * spec.final;
   const ind = spec.independent || [false, false];
   // lowest hard point: solid-axle diff pumpkins, IFS diffs (on the chassis), the frame itself
-  const belly = R - spec.axleY - spec.chassis.size[1] / 2;
+  const belly = R - spec.axleY + (spec.chassis.floor ?? -spec.chassis.size[1] / 2);
   const diffs = ind.map((i) => (i ? R + 0.06 - 0.3 * R : R - 0.32 * R));
   const s = spec.susp;
   return {

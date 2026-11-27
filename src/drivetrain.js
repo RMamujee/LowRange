@@ -32,6 +32,7 @@ function solveBoxed(C, w, I) {
       for (let d = 0; d < D; d++) if (C[i].j[d] && C[j].j[d]) s += (C[i].j[d] * C[j].j[d]) / I[d];
       A[i][j] = s;
     }
+    if (C[i].cfm) A[i][i] += C[i].cfm; // a slightly compliant row (a standing tyre's tread)
   }
   // b = -(current constraint velocity). Rows may supply it directly (v0), e.g. tyre slip
   // measured from the physics engine, where some DOFs only carry velocity *changes*.
@@ -286,7 +287,7 @@ export class Drivetrain {
     if (lsd.rear && !this.lockR && !B[2] && !B[3]) C.push(C.row([5, 1, 6, -1], -lsd.rear * dt, lsd.rear * dt));
     const nDriveline = nDrive();
     // tyre grip rows
-    for (const r of extra.rows) { const c = C.row(r.pairs, r.lo, r.hi); c.v0 = r.v0; C.push(c); }
+    for (const r of extra.rows) { const c = C.row(r.pairs, r.lo, r.hi); c.v0 = r.v0; c.cfm = r.cfm; C.push(c); }
     solveBoxed(C, w, I);
     this.clutchSlip = !!clutchC && clutchC.clamped;
     this.lastClutchAcc = clutchC ? clutchC.acc : 0;
