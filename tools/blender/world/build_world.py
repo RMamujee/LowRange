@@ -1,23 +1,31 @@
 # Build art/blender/world_<map>.blend from a world export (tools/export/export_world.mjs).
 #
-#   node tools/export/export_world.mjs park
-#   "C:\Program Files\Blender Foundation\Blender 5.3\blender.exe" --background --python tools/blender/world/build_world.py -- park
+#   node tools/export/export_world.mjs <map>
+#   "C:\Program Files\Blender Foundation\Blender 5.3\blender.exe" --background --factory-startup --python tools/blender/world/build_world.py -- <map>
 #
-# Options after `--`: the map id (park | race, default park) and `--no-render` to skip the preview
-# stills (docs/previews/world_<map>_*.png).
+# map = park | race | crawl | jungle | desert. Options after the map id: `--no-render` (skip the preview
+# stills, docs/previews/world_<map>_*.png), `--freestyle` (turn the 1-pixel Freestyle outline on).
+# LR_CAMS=Overview,Trailhead renders only those cameras; LR_ALL_CAMS=1 renders every camera.
 #
-# What gets built (collections):
-#   Terrain            the 400 m heightfield at 1 m (the game's visual heights and softened shading
-#                      normals) with a material that rebuilds the game's ground: per-surface pixel
-#                      tiles at 32 px/m picked by the baked material grid, pixel-stepped ragged borders,
-#                      darker trail tread, side projection on steep faces
-#   Paths              roads / trails / race track centrelines as curves (viewport only)
-#   Rocks              every gameplay rock: the game's exact convex hull and lit-top tone, rock tile
-#   Trees, Props       glTF props from public/models as collection instances (grass tufts and flowering
-#                      tufts as geometry-node instances); the race venue's procedural dressing
-#   Markers            signposts, gates, trail / road posts, checkpoints, start line, spawn, trailhead
+# What gets built (collections), the same for every map:
+#   Terrain            the heightfield (the game's visual heights and shading normals; Coralume Island's
+#                      1 m grid is decimated where the ground is plain) with a material that rebuilds the
+#                      game's ground: per-surface pixel tiles at 32 px/m picked by the game's own ground
+#                      lookup grid, pixel-stepped ragged borders, darker trail tread, ruts and churned mud,
+#                      side projection on steep faces. The distant ranges round the map edge.
+#   Water              the sea, creek, plunge pool and falls (Coralume Island), fords and splashes
+#   Paths              roads / tracks / trails / courses / the race track / the creek as named curves
+#   Rocks              every gameplay rock: the game's exact convex hull and lit-top tone, boulder tile
+#   Trees, Props       glTF props from public/models as collection instances; the procedural plants and
+#                      scatter (jungle trees, ferns, cacti, shrubs, tufts, stones) as geometry-node
+#                      instances of one source each; the race venue's procedural dressing
+#   Structures         bridges, the dock, guard rails, huts, the lookout, the lighthouse, road paint,
+#                      the desert camp (Coralume Island, Sunfall Basin)
+#   Markers            signposts, gates (their real pixel-font faces), posts, checkpoints, start line,
+#                      and named empties: spawn, trailhead, trail ends, stage / course gates, places,
+#                      landmarks, every spawn point of the game's spawn list
 #   Vehicles           the three vehicle glTFs, wheels placed at their markers, parked at the spawn
-#   Lights & Cameras   sun + named cameras (Trailhead / Race grid, each trail start, Overview, Top)
+#   Lights & Cameras   sun + named cameras
 #   Library            hidden instance sources: one collection per prop model (edit one, all update)
 import json
 import math
@@ -42,12 +50,21 @@ MODELS = os.path.join(ROOT, 'public', 'models')
 if not os.path.exists(os.path.join(EXP, 'world.json')):
     sys.exit(f'[world] no export at {EXP}: run `node tools/export/export_world.mjs {MAP}` first')
 W = json.load(open(os.path.join(EXP, 'world.json'), encoding='utf-8'))
+BLOB = open(os.path.join(EXP, 'blob.bin'), 'rb').read()
 SIZE, RES = W['map']['size'], W['map']['res']
 N1 = RES + 1
+CELL = SIZE / RES
+LOOK = W['look']
+TERRAIN_MAX_VERTS = int(os.environ.get('LR_TERRAIN_MAX_VERTS', 300000))
 
 
 def log(*a):
     print(f'[world {MAP} {time.time() - T0:6.1f}s]', *a, flush=True)
+
+
+def arr(ref):
+    off, n, dt = ref
+    return np.frombuffer(BLOB, dtype=np.dtype(dt), count=n, offset=off)
 
 
 # ---------- coordinates: three.js (y up, -z forward) -> Blender (z up) ----------
@@ -61,6 +78,17 @@ def P(x, y, z):
 
 def M(e):  # three.js Matrix4.elements (column-major) -> Blender world matrix
     return C @ Matrix((e[0:4], e[4:8], e[8:12], e[12:16])).transposed() @ CI
+
+
+def mats_of(items):
+    a = arr(items['m']).reshape(-1, 16)
+    return [M(list(map(float, e))) for e in a]
+
+
+def colors_of(items):
+    if 'c' not in items:
+        return None
+    return arr(items['c']).reshape(-1, 3)
 
 
 def verts3(flat):
@@ -82,19 +110,27 @@ def lhex(h, a=1.0):
 
 
 # ---------- grid ----------
-VIS = np.fromfile(os.path.join(EXP, 'grid_vis.f32'), dtype=np.float32).reshape(N1, N1)  # [ix, iz]
-MAT = np.fromfile(os.path.join(EXP, 'grid_mat.u8'), dtype=np.uint8).reshape(N1, N1)
-PATH = np.fromfile(os.path.join(EXP, 'grid_path.i16'), dtype=np.int16).reshape(N1, N1)
+VIS = np.fromfile(os.path.join(EXP, 'grid_vis.f32'), dtype=np.float32).reshape(N1, N1)        # [ix, iz]
+LOOKG = np.fromfile(os.path.join(EXP, 'grid_look.u8'), dtype=np.uint8).reshape(N1, N1, 4)
+NRM = np.fromfile(os.path.join(EXP, 'grid_nrm.i8'), dtype=np.int8).reshape(N1, N1, 3).astype(np.float32) / 127.0
+TINT = np.fromfile(os.path.join(EXP, 'grid_tint.u8'), dtype=np.uint8).reshape(N1, N1, 3).astype(np.float32) / 128.0
+HAS_TINT = bool(np.any(np.abs(TINT - 1.0) > 0.01))
+
+
+def bilinear(grid, x, z):
+    """grid[ix, iz, ...] sampled at three.js x, z (arrays)."""
+    fx = np.clip((np.asarray(x, np.float64) + SIZE / 2) / CELL, 0, RES - 1e-6)
+    fz = np.clip((np.asarray(z, np.float64) + SIZE / 2) / CELL, 0, RES - 1e-6)
+    ix, iz = fx.astype(np.int64), fz.astype(np.int64)
+    tx, tz = fx - ix, fz - iz
+    if grid.ndim == 3:
+        tx, tz = tx[..., None], tz[..., None]
+    return (grid[ix, iz] * (1 - tx) * (1 - tz) + grid[ix + 1, iz] * tx * (1 - tz)
+            + grid[ix, iz + 1] * (1 - tx) * tz + grid[ix + 1, iz + 1] * tx * tz)
 
 
 def height(x, z):  # visualHeightAt, bilinear like the game
-    cell = SIZE / RES
-    fx = min(max((x + SIZE / 2) / cell, 0), RES - 1e-6)
-    fz = min(max((z + SIZE / 2) / cell, 0), RES - 1e-6)
-    ix, iz = int(fx), int(fz)
-    tx, tz = fx - ix, fz - iz
-    a, b, c, d = VIS[ix, iz], VIS[ix + 1, iz], VIS[ix, iz + 1], VIS[ix + 1, iz + 1]
-    return float(a * (1 - tx) * (1 - tz) + b * tx * (1 - tz) + c * (1 - tx) * tz + d * tx * tz)
+    return float(bilinear(VIS, x, z))
 
 
 # ---------- scene + collections ----------
@@ -110,7 +146,8 @@ def coll(name, parent=None):
     return c
 
 
-COL = {n: coll(n) for n in ('Terrain', 'Paths', 'Rocks', 'Trees', 'Props', 'Markers', 'Vehicles', 'Lights & Cameras')}
+TOP = ('Terrain', 'Water', 'Paths', 'Rocks', 'Trees', 'Props', 'Structures', 'Markers', 'Vehicles', 'Lights & Cameras')
+COL = {n: coll(n) for n in TOP}
 LIB = coll('Library (instance sources)')
 _sub = {}
 
@@ -138,13 +175,12 @@ def find_layer(lc, c):
 
 
 # ---------- materials: the game's toon look ----------
-# One shared node group: stepped 3-band light from the sun (warm mauve shade, lit, highlight; deeper
-# shade on undersides), flat emission so nothing else lights it, linear distance fog to the haze.
-# Matches src/gfx/toon.js (TOON uniforms) and main.js (Fog 90..330 m). Edit it once, all update.
+# One shared node group: stepped light from the sun (toon.js: warm mauve shade, lit, highlight; the
+# ground's softer 3-step ramp when Soft = 1; deeper shade on undersides), flat emission so nothing else
+# lights it, and the game's capped aerial perspective (smoothstep fog near..far, desaturate, lean
+# towards the haze by at most FOG_MAX). Edit it once, every material follows.
 SUN_ENERGY = 1.0
 LIT_NORM = 0.2546 * SUN_ENERGY   # Shader-to-RGB of a white diffuse facing a sun of this energy (Eevee)
-FOG = '#eac47c'
-SKY = '#f3d58e'
 
 
 def toon_group():
@@ -155,16 +191,27 @@ def toon_group():
     it = ng.interface
     it.new_socket('Albedo', in_out='INPUT', socket_type='NodeSocketColor').default_value = (0.8, 0.8, 0.8, 1)
     it.new_socket('Emission', in_out='INPUT', socket_type='NodeSocketColor').default_value = (0, 0, 0, 1)
-    s = it.new_socket('Alpha', in_out='INPUT', socket_type='NodeSocketFloat')
-    s.default_value, s.min_value, s.max_value = 1.0, 0.0, 1.0
-    s = it.new_socket('Fog', in_out='INPUT', socket_type='NodeSocketFloat')
-    s.default_value, s.min_value, s.max_value = 1.0, 0.0, 1.0
+    for nm, dv in (('Alpha', 1.0), ('Fog', 1.0), ('Soft', 0.0)):
+        s = it.new_socket(nm, in_out='INPUT', socket_type='NodeSocketFloat')
+        s.default_value, s.min_value, s.max_value = dv, 0.0, 1.0
+    s = it.new_socket('Normal', in_out='INPUT', socket_type='NodeSocketVector')   # (0, 0, 0) = the surface's own
+    s.default_value = (0, 0, 0)
     it.new_socket('Shader', in_out='OUTPUT', socket_type='NodeSocketShader')
     N, L = ng.nodes, ng.links
     gi, go = N.new('NodeGroupInput'), N.new('NodeGroupOutput')
-    gi.location, go.location = (-1100, 0), (900, 0)
+    gi.location, go.location = (-1100, 0), (1100, 0)
+    # shading normal: the Normal input when given (the terrain's game normals), else the geometry's
+    gnorm = N.new('ShaderNodeNewGeometry'); gnorm.location = (-1500, -500)
+    nlen = N.new('ShaderNodeVectorMath'); nlen.operation = 'LENGTH'; nlen.location = (-1500, -300)
+    L.new(gi.outputs['Normal'], nlen.inputs[0])
+    has_n = N.new('ShaderNodeMath'); has_n.operation = 'GREATER_THAN'; has_n.location = (-1350, -300)
+    L.new(nlen.outputs['Value'], has_n.inputs[0]); has_n.inputs[1].default_value = 0.5
+    nsel = N.new('ShaderNodeMix'); nsel.data_type = 'VECTOR'; nsel.location = (-1250, -450)
+    L.new(has_n.outputs[0], nsel.inputs['Factor']); L.new(gnorm.outputs['Normal'], nsel.inputs[4]); L.new(gi.outputs['Normal'], nsel.inputs[5])
+    shading_n = nsel.outputs[1]
     diff = N.new('ShaderNodeBsdfDiffuse'); diff.location = (-1100, -300)
     diff.inputs['Color'].default_value = (1, 1, 1, 1)
+    L.new(shading_n, diff.inputs['Normal'])
     s2r = N.new('ShaderNodeShaderToRGB'); s2r.location = (-900, -300)
     L.new(diff.outputs[0], s2r.inputs[0])
     bw = N.new('ShaderNodeRGBToBW'); bw.location = (-720, -300)
@@ -172,53 +219,72 @@ def toon_group():
     norm = N.new('ShaderNodeMath'); norm.operation = 'DIVIDE'; norm.location = (-560, -300)
     norm.label = 'lit (0 = shadow, 1 = facing the sun)'
     L.new(bw.outputs[0], norm.inputs[0]); norm.inputs[1].default_value = LIT_NORM
-    ramp = N.new('ShaderNodeValToRGB'); ramp.location = (-380, -300); ramp.label = 'toon bands (toon.js)'
+    b0, b1 = LOOK['toonBands']
+    ramp = N.new('ShaderNodeValToRGB'); ramp.location = (-380, -200); ramp.label = 'toon bands (toon.js)'
     cr = ramp.color_ramp
     cr.interpolation = 'CONSTANT'
-    cr.elements[0].position, cr.elements[0].color = 0.0, lhex('#c4a6aa')
-    cr.elements[1].position, cr.elements[1].color = 0.86, lhex('#fffbe8')
-    e = cr.elements.new(0.22); e.color = lhex('#fff8ec')
+    cr.elements[0].position, cr.elements[0].color = 0.0, lhex(LOOK['toonShade'])
+    cr.elements[1].position, cr.elements[1].color = b1, lhex(LOOK['toonHi'])
+    e = cr.elements.new(b0); e.color = lhex(LOOK['toonLit'])
     L.new(norm.outputs[0], ramp.inputs['Fac'])
+    # the ground's soft ramp (toon.js TOON_SOFT): shade, a half-step, lit
+    ramp2 = N.new('ShaderNodeValToRGB'); ramp2.location = (-380, -420); ramp2.label = 'soft bands (terrain)'
+    cr2 = ramp2.color_ramp
+    cr2.interpolation = 'CONSTANT'
+    sh, lt = lin(srgb(LOOK['toonShade'])), lin(srgb(LOOK['toonLit']))
+    cr2.elements[0].position, cr2.elements[0].color = 0.0, (*sh, 1)
+    cr2.elements[1].position, cr2.elements[1].color = 0.42, (*lt, 1)
+    e = cr2.elements.new(0.16); e.color = (*[a + (b - a) * 0.55 for a, b in zip(sh, lt)], 1)
+    L.new(norm.outputs[0], ramp2.inputs['Fac'])
+    rsel = N.new('ShaderNodeMix'); rsel.data_type = 'RGBA'; rsel.location = (-180, -300)
+    L.new(gi.outputs['Soft'], rsel.inputs['Factor']); L.new(ramp.outputs['Color'], rsel.inputs['A']); L.new(ramp2.outputs['Color'], rsel.inputs['B'])
     # undersides one notch deeper in the shade band
-    geo = N.new('ShaderNodeNewGeometry'); geo.location = (-900, -600)
-    sep = N.new('ShaderNodeSeparateXYZ'); sep.location = (-720, -600)
-    L.new(geo.outputs['Normal'], sep.inputs[0])
-    under = N.new('ShaderNodeMapRange'); under.interpolation_type = 'SMOOTHSTEP'; under.location = (-560, -600)
+    sep = N.new('ShaderNodeSeparateXYZ'); sep.location = (-720, -700)
+    L.new(shading_n, sep.inputs[0])
+    under = N.new('ShaderNodeMapRange'); under.interpolation_type = 'SMOOTHSTEP'; under.location = (-560, -700)
     L.new(sep.outputs['Z'], under.inputs['Value'])
     under.inputs['From Min'].default_value, under.inputs['From Max'].default_value = -0.6, 0.2
-    under.inputs['To Min'].default_value, under.inputs['To Max'].default_value = 0.82, 1.0
-    inshade = N.new('ShaderNodeMath'); inshade.operation = 'LESS_THAN'; inshade.location = (-380, -520)
-    L.new(norm.outputs[0], inshade.inputs[0]); inshade.inputs[1].default_value = 0.22
-    uf = N.new('ShaderNodeMix'); uf.data_type = 'FLOAT'; uf.location = (-200, -560)
+    under.inputs['To Min'].default_value, under.inputs['To Max'].default_value = LOOK['toonUnder'], 1.0
+    inshade = N.new('ShaderNodeMath'); inshade.operation = 'LESS_THAN'; inshade.location = (-380, -620)
+    L.new(norm.outputs[0], inshade.inputs[0]); inshade.inputs[1].default_value = b0
+    uf = N.new('ShaderNodeMix'); uf.data_type = 'FLOAT'; uf.location = (-200, -660)
     L.new(inshade.outputs[0], uf.inputs['Factor']); uf.inputs['A'].default_value = 1.0
     L.new(under.outputs['Result'], uf.inputs['B'])
     k = N.new('ShaderNodeVectorMath'); k.operation = 'SCALE'; k.location = (-20, -360)
-    L.new(ramp.outputs['Color'], k.inputs[0]); L.new(uf.outputs['Result'], k.inputs['Scale'])
+    L.new(rsel.outputs['Result'], k.inputs[0]); L.new(uf.outputs['Result'], k.inputs['Scale'])
     lit = N.new('ShaderNodeMix'); lit.data_type = 'RGBA'; lit.blend_type = 'MULTIPLY'; lit.location = (150, -100)
     lit.inputs['Factor'].default_value = 1.0
     L.new(gi.outputs['Albedo'], lit.inputs['A']); L.new(k.outputs[0], lit.inputs['B'])
     add = N.new('ShaderNodeMix'); add.data_type = 'RGBA'; add.blend_type = 'ADD'; add.location = (320, -100)
     add.inputs['Factor'].default_value = 1.0
     L.new(lit.outputs['Result'], add.inputs['A']); L.new(gi.outputs['Emission'], add.inputs['B'])
-    # linear fog to the golden haze, 90..330 m like the game
+    # aerial perspective: smoothstep(near, far) -> desaturate 35%, lean to the haze by at most FOG_MAX
     cam = N.new('ShaderNodeCameraData'); cam.location = (150, -420)
-    fog = N.new('ShaderNodeMapRange'); fog.location = (320, -420); fog.label = 'fog 90..330 m'
+    fog = N.new('ShaderNodeMapRange'); fog.interpolation_type = 'SMOOTHSTEP'; fog.location = (320, -420)
+    fog.label = f'fog {LOOK["fogNear"]:.0f}..{LOOK["fogFar"]:.0f} m'
     L.new(cam.outputs['View Distance'], fog.inputs['Value'])
-    fog.inputs['From Min'].default_value, fog.inputs['From Max'].default_value = 90.0, 330.0
+    fog.inputs['From Min'].default_value, fog.inputs['From Max'].default_value = float(LOOK['fogNear']), float(LOOK['fogFar'])
     fogk = N.new('ShaderNodeMath'); fogk.operation = 'MULTIPLY'; fogk.location = (480, -420)
     L.new(fog.outputs['Result'], fogk.inputs[0]); L.new(gi.outputs['Fog'], fogk.inputs[1])
     famt = N.new('ShaderNodeValue'); famt.name = famt.label = 'Fog amount (scene)'; famt.location = (320, -600)
     famt.outputs[0].default_value = 1.0
     fogk2 = N.new('ShaderNodeMath'); fogk2.operation = 'MULTIPLY'; fogk2.location = (480, -560)
     L.new(fogk.outputs[0], fogk2.inputs[0]); L.new(famt.outputs[0], fogk2.inputs[1])
-    fogk = fogk2
-    fmix = N.new('ShaderNodeMix'); fmix.data_type = 'RGBA'; fmix.location = (500, -100)
-    L.new(fogk.outputs[0], fmix.inputs['Factor']); L.new(add.outputs['Result'], fmix.inputs['A'])
-    fmix.inputs['B'].default_value = lhex(FOG)
-    em = N.new('ShaderNodeEmission'); em.location = (680, -100)
+    desat = N.new('ShaderNodeMath'); desat.operation = 'MULTIPLY'; desat.location = (640, -560)
+    L.new(fogk2.outputs[0], desat.inputs[0]); desat.inputs[1].default_value = 0.35
+    gray = N.new('ShaderNodeRGBToBW'); gray.location = (500, -220)
+    L.new(add.outputs['Result'], gray.inputs[0])
+    dmix = N.new('ShaderNodeMix'); dmix.data_type = 'RGBA'; dmix.location = (660, -100)
+    L.new(desat.outputs[0], dmix.inputs['Factor']); L.new(add.outputs['Result'], dmix.inputs['A']); L.new(gray.outputs[0], dmix.inputs['B'])
+    cap = N.new('ShaderNodeMath'); cap.operation = 'MULTIPLY'; cap.location = (640, -420); cap.label = 'FOG_MAX'
+    L.new(fogk2.outputs[0], cap.inputs[0]); cap.inputs[1].default_value = float(LOOK['fogMax'])
+    fmix = N.new('ShaderNodeMix'); fmix.data_type = 'RGBA'; fmix.location = (820, -100)
+    L.new(cap.outputs[0], fmix.inputs['Factor']); L.new(dmix.outputs['Result'], fmix.inputs['A'])
+    fmix.inputs['B'].default_value = lhex(LOOK['fog'])
+    em = N.new('ShaderNodeEmission'); em.location = (960, -100)
     L.new(fmix.outputs['Result'], em.inputs['Color'])
-    tr = N.new('ShaderNodeBsdfTransparent'); tr.location = (680, 60)
-    ms = N.new('ShaderNodeMixShader'); ms.location = (760, 0)
+    tr = N.new('ShaderNodeBsdfTransparent'); tr.location = (960, 60)
+    ms = N.new('ShaderNodeMixShader'); ms.location = (1040, 0)
     L.new(gi.outputs['Alpha'], ms.inputs['Fac']); L.new(tr.outputs[0], ms.inputs[1]); L.new(em.outputs[0], ms.inputs[2])
     L.new(ms.outputs[0], go.inputs['Shader'])
     return ng
@@ -238,9 +304,9 @@ def new_mat(name):
     return m, nt, g
 
 
-def set_transparent(m):
+def set_transparent(m, blended=False):
     try:
-        m.surface_render_method = 'DITHERED'
+        m.surface_render_method = 'BLENDED' if blended else 'DITHERED'
     except Exception:
         pass
 
@@ -290,11 +356,11 @@ def outline_mat():
     global OUTLINE
     if OUTLINE:
         return OUTLINE
-    m = bpy.data.materials.new('Outline (#2a1a14)')
+    m = bpy.data.materials.new(f'Outline ({LOOK["outline"]})')
     nt = m.node_tree
     nt.nodes.clear()
     o = nt.nodes.new('ShaderNodeOutputMaterial')
-    e = nt.nodes.new('ShaderNodeEmission'); e.inputs['Color'].default_value = lhex('#2a1a14')
+    e = nt.nodes.new('ShaderNodeEmission'); e.inputs['Color'].default_value = lhex(LOOK['outline'])
     nt.links.new(e.outputs[0], o.inputs['Surface'])
     m.use_backface_culling = True
     try:
@@ -306,10 +372,8 @@ def outline_mat():
 
 
 def add_outline(obj, th=0.03):
-    """Inverted-hull outline (viewport); renders also get 1-pixel Freestyle lines."""
+    """Inverted-hull outline (viewport and renders), sized like the game's 2 to 3 cm line."""
     me = obj.data
-    if me.users > 1 and me.get('lr_outlined'):
-        pass
     if outline_mat().name not in [m.name for m in me.materials if m]:
         me.materials.append(outline_mat())
     md = obj.modifiers.new('Outline', 'SOLIDIFY')
@@ -318,24 +382,31 @@ def add_outline(obj, th=0.03):
     md.use_flip_normals = True
     md.use_rim = False
     md.material_offset = len(me.materials) - 1
-    me['lr_outlined'] = True
 
 
 # ---------- images ----------
-def load_png(path, name):
-    img = bpy.data.images.load(path)
+_imgs = {}
+
+
+def load_png(rel, name):
+    if rel in _imgs:
+        return _imgs[rel]
+    img = bpy.data.images.load(os.path.join(EXP, rel))
     img.name = name
     img.colorspace_settings.name = 'sRGB'
     img.pack()
+    _imgs[rel] = img
     return img
 
 
-TILES = [load_png(os.path.join(EXP, m['tile']), f'tile_{m["layer"]}') for m in W['materials']]
+TILES = [load_png(l['tile'], f'tile_{l["name"]}') for l in W['layers']]
+LAYER_BOULDER = next(i for i, l in enumerate(W['layers']) if l['name'] == 'boulder')
 
 
 def tex_node(nt, img, vec, loc, ext='REPEAT'):
     t = nt.nodes.new('ShaderNodeTexImage'); t.image = img; t.interpolation = 'Closest'; t.extension = ext; t.location = loc
-    nt.links.new(vec, t.inputs['Vector'])
+    if vec is not None:
+        nt.links.new(vec, t.inputs['Vector'])
     return t
 
 
@@ -363,15 +434,15 @@ def vmath(nt, op, a, b=None, loc=(0, 0)):
     return n.outputs[0]
 
 
-def tile_projection(nt, loc=(-1400, 0)):
-    """World-space tile coordinates like terrain_look.js: top-down, or from the side on steep faces
-    (dominant axis, no blend). 4 m per tile; v flipped so PNG rows match the game's texture rows."""
+def tile_projection(nt, loc=(-1400, 0), top_thr=0.55, normal=None):
+    """World-space tile coordinates like terrain_look.js: top-down (|n.up| > top_thr), else from the side
+    on the dominant axis, no blend. 4 m per tile; v flipped so PNG rows match the game's texture rows."""
     x0, y0 = loc
     geo = nt.nodes.new('ShaderNodeNewGeometry'); geo.location = (x0, y0)
     pos = nt.nodes.new('ShaderNodeSeparateXYZ'); pos.location = (x0 + 180, y0)
     nt.links.new(geo.outputs['Position'], pos.inputs[0])
     nrm = nt.nodes.new('ShaderNodeSeparateXYZ'); nrm.location = (x0 + 180, y0 - 200)
-    absn = vmath(nt, 'ABSOLUTE', geo.outputs['Normal'], loc=(x0 + 60, y0 - 200))
+    absn = vmath(nt, 'ABSOLUTE', normal if normal is not None else geo.outputs['Normal'], loc=(x0 + 60, y0 - 200))
     nt.links.new(absn, nrm.inputs[0])
 
     def comb(a, b, l):
@@ -383,61 +454,85 @@ def tile_projection(nt, loc=(-1400, 0)):
     top = comb(pos.outputs['X'], pos.outputs['Y'], (x0 + 540, y0 + 60))
     side_x = comb(negy, negz, (x0 + 540, y0 - 40))      # three.js wp.zy
     side_z = comb(pos.outputs['X'], negz, (x0 + 540, y0 - 140))  # three.js wp.xy
-    mxy = mathn(nt, 'MAXIMUM', nrm.outputs['X'], nrm.outputs['Y'], (x0 + 360, y0 - 220))
-    thr = mathn(nt, 'MULTIPLY', mxy, 0.9, (x0 + 540, y0 - 220))
-    is_top = mathn(nt, 'GREATER_THAN', nrm.outputs['Z'], thr, (x0 + 720, y0 - 220))
+    if top_thr is None:   # rocks: top when up is the largest component
+        mxy = mathn(nt, 'MAXIMUM', nrm.outputs['X'], nrm.outputs['Y'], (x0 + 360, y0 - 220))
+        is_top = mathn(nt, 'GREATER_THAN', nrm.outputs['Z'], mxy, (x0 + 720, y0 - 220))
+    else:
+        is_top = mathn(nt, 'GREATER_THAN', nrm.outputs['Z'], top_thr, (x0 + 720, y0 - 220))
     is_x = mathn(nt, 'GREATER_THAN', nrm.outputs['X'], nrm.outputs['Y'], (x0 + 720, y0 - 300))
     m1 = nt.nodes.new('ShaderNodeMix'); m1.data_type = 'VECTOR'; m1.location = (x0 + 720, y0 - 80)
     nt.links.new(is_x, m1.inputs['Factor']); nt.links.new(side_z, m1.inputs[4]); nt.links.new(side_x, m1.inputs[5])
     m2 = nt.nodes.new('ShaderNodeMix'); m2.data_type = 'VECTOR'; m2.location = (x0 + 900, y0)
     nt.links.new(is_top, m2.inputs['Factor']); nt.links.new(m1.outputs[1], m2.inputs[4]); nt.links.new(top, m2.inputs[5])
-    return vmath(nt, 'SCALE', m2.outputs[1], loc=(x0 + 1080, y0)), geo, pos
-
-
-def scale_in(nt, sock, k):
-    sock.node.inputs['Scale'].default_value = k
+    out = vmath(nt, 'SCALE', m2.outputs[1], loc=(x0 + 1080, y0))
+    out.node.inputs['Scale'].default_value = 0.25   # 4 m per tile
+    return out, geo, pos
 
 
 def terrain_material():
-    # per grid vertex: R = material id / 255, G = trail tread, B = slow tone drift (terrain_look.js)
-    img = bpy.data.images.new('terrain_grid (material id, tread, tone)', N1, N1, alpha=True, float_buffer=False)
+    # the game's ground lookup grid, one pixel per grid vertex: R = shown surface id, G = trail tread,
+    # B = slow tone drift, A = 255 - rut / churned-mud tone (gfx/terrain_look.js terrainMaterial)
+    img = bpy.data.images.new('terrain_grid (surface, tread, tone, ruts)', N1, N1, alpha=True, float_buffer=False)
     img.colorspace_settings.name = 'Non-Color'
-    ix, iz = np.meshgrid(np.arange(N1), np.arange(N1), indexing='ij')
-    n = np.sin(ix * 0.071 + np.sin(iz * 0.05) * 2.1) * np.sin(iz * 0.063 + np.sin(ix * 0.045) * 1.7)
-    tread = (PATH >= W['map']['nRoads']) & (MAT != 3)
-    px = np.zeros((N1, N1, 4), np.float32)   # [row = iz, col = ix]
-    px[..., 0] = MAT.T / 255.0
-    px[..., 1] = tread.T.astype(np.float32)
-    px[..., 2] = np.round((n.T * 0.5 + 0.5) * 255) / 255
-    px[..., 3] = 1
+    img.alpha_mode = 'CHANNEL_PACKED'
+    px = LOOKG.transpose(1, 0, 2).astype(np.float32) / 255.0   # [row = iz, col = ix]
     img.pixels.foreach_set(px.ravel())
     img.update()
     img.pack()
     m, nt, g = new_mat('Terrain (pixel ground)')
-    tp, geo, pos = tile_projection(nt)
-    scale_in(nt, tp, 0.25)  # 4 m per tile
-    # pixel-stepped, ragged material borders: snap to a 1/16 m lattice, jitter by noise, nearest vertex
+    g.inputs['Soft'].default_value = 1.0
+    # the game's terrain shading normals (softened heightfield, sharper on the dunes) and the desert's
+    # painted dune light, one texel per grid vertex, read bilinearly like the game's vertex attributes
+    def grid_image(name, rgb):
+        im = bpy.data.images.new(name, N1, N1, alpha=False, float_buffer=False)
+        im.colorspace_settings.name = 'Non-Color'
+        p4 = np.concatenate([rgb, np.ones(rgb.shape[:2] + (1,), np.float32)], 2).transpose(1, 0, 2)
+        im.pixels.foreach_set(np.clip(p4, 0, 1).astype(np.float32).ravel())
+        im.update()
+        im.pack()
+        return im
+    nb = np.stack([NRM[..., 0], -NRM[..., 2], NRM[..., 1]], -1)
+    nimg = grid_image('terrain_normals (game shading normals)', nb * 0.5 + 0.5)
+    geo0 = nt.nodes.new('ShaderNodeNewGeometry'); geo0.location = (-2000, -900)
+    p0 = nt.nodes.new('ShaderNodeSeparateXYZ'); p0.location = (-1850, -900)
+    nt.links.new(geo0.outputs['Position'], p0.inputs[0])
+    guv = nt.nodes.new('ShaderNodeCombineXYZ'); guv.location = (-1500, -900)
+    nt.links.new(mathn(nt, 'DIVIDE', mathn(nt, 'ADD', mathn(nt, 'DIVIDE', mathn(nt, 'ADD', p0.outputs['X'], SIZE / 2, (-1750, -880)), CELL, (-1650, -880)), 0.5, (-1600, -880)), N1, (-1550, -880)), guv.inputs[0])
+    nt.links.new(mathn(nt, 'DIVIDE', mathn(nt, 'ADD', mathn(nt, 'DIVIDE', mathn(nt, 'SUBTRACT', SIZE / 2, p0.outputs['Y'], (-1750, -960)), CELL, (-1650, -960)), 0.5, (-1600, -960)), N1, (-1550, -960)), guv.inputs[1])
+    ntex = nt.nodes.new('ShaderNodeTexImage'); ntex.image = nimg; ntex.interpolation = 'Linear'; ntex.extension = 'EXTEND'; ntex.location = (-1350, -900)
+    nt.links.new(guv.outputs[0], ntex.inputs['Vector'])
+    n2 = vmath(nt, 'SCALE', ntex.outputs['Color'], loc=(-1150, -900))
+    n2.node.inputs['Scale'].default_value = 2.0
+    ndec = vmath(nt, 'NORMALIZE', vmath(nt, 'SUBTRACT', n2, (1, 1, 1), (-1050, -900)), loc=(-950, -900))
+    nt.links.new(ndec, g.inputs['Normal'])
+    tint_out = None
+    if HAS_TINT:
+        timg = grid_image('terrain_tint (painted dune light, x2)', TINT * 0.5)
+        ttex = nt.nodes.new('ShaderNodeTexImage'); ttex.image = timg; ttex.interpolation = 'Linear'; ttex.extension = 'EXTEND'; ttex.location = (-1350, -1200)
+        nt.links.new(guv.outputs[0], ttex.inputs['Vector'])
+        tint_out = vmath(nt, 'SCALE', ttex.outputs['Color'], loc=(-1150, -1200))
+        tint_out.node.inputs['Scale'].default_value = 2.0
+    tp, geo, pos = tile_projection(nt, normal=ndec)
+    # pixel-stepped, ragged surface borders: snap to the game's 1/8 m world lattice, wobble by two
+    # noise scales, then the nearest grid vertex
     xy = nt.nodes.new('ShaderNodeCombineXYZ'); xy.location = (-1200, 500)
     nt.links.new(pos.outputs['X'], xy.inputs[0]); nt.links.new(pos.outputs['Y'], xy.inputs[1])
-    s16 = vmath(nt, 'SCALE', xy.outputs[0], loc=(-1050, 500))
-    s16.node.inputs['Scale'].default_value = 16.0
-    lat = vmath(nt, 'DIVIDE', vmath(nt, 'FLOOR', s16, loc=(-900, 500)), (16, 16, 16), (-750, 500))
-    noise = nt.nodes.new('ShaderNodeTexNoise'); noise.location = (-600, 650)
-    noise.inputs['Scale'].default_value = 0.9; noise.inputs['Detail'].default_value = 0.0
-    nt.links.new(lat, noise.inputs['Vector'])
-    jit = vmath(nt, 'SCALE', vmath(nt, 'SUBTRACT', noise.outputs['Color'], (0.5, 0.5, 0.5), (-420, 650)), loc=(-260, 650))
-    jit.node.inputs['Scale'].default_value = 2.6   # Blender noise has less contrast than the game's pxNoise
-    grain = nt.nodes.new('ShaderNodeTexWhiteNoise'); grain.noise_dimensions = '3D'; grain.location = (-600, 420)
-    gs = vmath(nt, 'SCALE', lat, loc=(-750, 380))
-    gs.node.inputs['Scale'].default_value = 16.0
-    nt.links.new(gs, grain.inputs['Vector'])
-    gr = vmath(nt, 'SCALE', vmath(nt, 'SUBTRACT', grain.outputs['Color'], (0.5, 0.5, 0.5), (-420, 420)), loc=(-260, 420))
-    gr.node.inputs['Scale'].default_value = 0.35
-    # grid coords: gx = x + 200, gz = -y + 200 (three.js z = -Blender y)
+    s8 = vmath(nt, 'SCALE', xy.outputs[0], loc=(-1050, 500))
+    s8.node.inputs['Scale'].default_value = 8.0
+    lat = vmath(nt, 'DIVIDE', vmath(nt, 'ADD', vmath(nt, 'FLOOR', s8, loc=(-900, 500)), (0.5, 0.5, 0), (-820, 500)), (8, 8, 8), (-750, 500))
+    jit = None
+    for sc_, amp, off, y in ((0.32, 1.2, 0.0, 650), (1.1, 0.45, 5.0, 420)):
+        nz = nt.nodes.new('ShaderNodeTexNoise'); nz.location = (-600, y)
+        nz.inputs['Scale'].default_value = sc_; nz.inputs['Detail'].default_value = 0.0
+        nt.links.new(vmath(nt, 'ADD', lat, (off, off * 7, 0), (-700, y)), nz.inputs['Vector'])
+        j = vmath(nt, 'SCALE', vmath(nt, 'SUBTRACT', nz.outputs['Color'], (0.5, 0.5, 0.5), (-420, y)), loc=(-260, y))
+        j.node.inputs['Scale'].default_value = amp * 2.2 / CELL   # Blender noise has less contrast than pxNoise
+        jit = j if jit is None else vmath(nt, 'ADD', jit, j, (-120, y))
+    # grid coords: gx = (x + size/2) / cell, gz = (-y + size/2) / cell (three.js z = -Blender y)
     gxy = nt.nodes.new('ShaderNodeCombineXYZ'); gxy.location = (-420, 260)
-    nt.links.new(mathn(nt, 'ADD', pos.outputs['X'], SIZE / 2, (-600, 280)), gxy.inputs[0])
-    nt.links.new(mathn(nt, 'SUBTRACT', SIZE / 2, pos.outputs['Y'], (-600, 220)), gxy.inputs[1])
-    g1 = vmath(nt, 'ADD', vmath(nt, 'ADD', gxy.outputs[0], jit, (-100, 500)), gr, (40, 500))
+    nt.links.new(mathn(nt, 'DIVIDE', mathn(nt, 'ADD', pos.outputs['X'], SIZE / 2, (-700, 280)), CELL, (-560, 280)), gxy.inputs[0])
+    nt.links.new(mathn(nt, 'DIVIDE', mathn(nt, 'SUBTRACT', SIZE / 2, pos.outputs['Y'], (-700, 220)), CELL, (-560, 220)), gxy.inputs[1])
+    g1 = vmath(nt, 'ADD', gxy.outputs[0], jit, (40, 500))
     gi = vmath(nt, 'FLOOR', vmath(nt, 'ADD', g1, (0.5, 0.5, 0), (180, 500)), loc=(320, 500))
     gi = vmath(nt, 'MINIMUM', vmath(nt, 'MAXIMUM', gi, (0, 0, 0), (460, 500)), (RES, RES, 0), (600, 500))
     uv = vmath(nt, 'DIVIDE', vmath(nt, 'ADD', gi, (0.5, 0.5, 0), (740, 500)), (N1, N1, 1), (880, 500))
@@ -446,8 +541,9 @@ def terrain_material():
     nt.links.new(cell.outputs['Color'], cs.inputs[0])
     mid = mathn(nt, 'ROUND', mathn(nt, 'MULTIPLY', cs.outputs[0], 255.0, (1350, 560)), None, (1500, 560))
     col = None
-    for i, t in enumerate(TILES):
-        tn = tex_node(nt, t, tp, (1200, -200 - i * 260))
+    used = sorted(set(np.unique(LOOKG[..., 0]).tolist()))
+    for i in used:
+        tn = tex_node(nt, TILES[i], tp, (1200, -200 - i * 260))
         if col is None:
             col = tn.outputs['Color']
             continue
@@ -456,23 +552,30 @@ def terrain_material():
         mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.location = (1700, -200 - i * 260)
         nt.links.new(eq, mx.inputs['Factor']); nt.links.new(col, mx.inputs['A']); nt.links.new(tn.outputs['Color'], mx.inputs['B'])
         col = mx.outputs['Result']
-    # worn trail tread one step darker; stepped slow tone drift
-    tread_k = mathn(nt, 'SUBTRACT', 1.0, mathn(nt, 'MULTIPLY', mathn(nt, 'GREATER_THAN', cs.outputs[1], 0.5, (1500, 380)), 0.16, (1650, 380)), (1800, 380))
-    tone_k = mathn(nt, 'ADD', 0.94, mathn(nt, 'MULTIPLY', mathn(nt, 'FLOOR', mathn(nt, 'MULTIPLY', cs.outputs[2], 3.0, (1500, 300)), None, (1650, 300)), 0.04, (1800, 300)), (1950, 300))
-    k = mathn(nt, 'MULTIPLY', tread_k, tone_k, (2100, 340))
+    # worn trail tread one step darker (0.86); slow stepped tone drift (0.95 + 0.035 * floor(b * 3));
+    # ruts and churned mud two calm steps (tone > 0.45: 0.88, > 0.2: 0.94)
+    tread_k = mathn(nt, 'SUBTRACT', 1.0, mathn(nt, 'MULTIPLY', mathn(nt, 'GREATER_THAN', cs.outputs[1], 0.5, (1500, 380)), 0.14, (1650, 380)), (1800, 380))
+    tone_k = mathn(nt, 'ADD', 0.95, mathn(nt, 'MULTIPLY', mathn(nt, 'FLOOR', mathn(nt, 'MULTIPLY', cs.outputs[2], 3.0, (1500, 300)), None, (1650, 300)), 0.035, (1800, 300)), (1950, 300))
+    alpha = tex_node(nt, img, uv, (1020, 760), 'EXTEND')
+    tn_ = mathn(nt, 'SUBTRACT', 1.0, alpha.outputs['Alpha'], (1200, 760))
+    rut = mathn(nt, 'SUBTRACT', 1.0, mathn(nt, 'ADD', mathn(nt, 'MULTIPLY', mathn(nt, 'GREATER_THAN', tn_, 0.45, (1350, 800)), 0.06, (1500, 800)),
+                                           mathn(nt, 'MULTIPLY', mathn(nt, 'GREATER_THAN', tn_, 0.2, (1350, 720)), 0.06, (1500, 720)), (1650, 760)), (1800, 760))
+    k = mathn(nt, 'MULTIPLY', mathn(nt, 'MULTIPLY', tread_k, tone_k, (2100, 340)), rut, (2200, 400))
     sc = vmath(nt, 'SCALE', col, loc=(2250, 0))
     nt.links.new(k, sc.node.inputs['Scale'])
-    nt.links.new(sc, g.inputs['Albedo'])
+    res = sc
+    if tint_out is not None:   # the desert's painted dune light
+        res = vmath(nt, 'MULTIPLY', sc, tint_out, (2400, -100))
+    nt.links.new(res, g.inputs['Albedo'])
     out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
-    g.location, out.location = (2450, 0), (2650, 0)
+    g.location, out.location = (2600, 0), (2800, 0)
     return m
 
 
 def rock_material():
-    m, nt, g = new_mat('Gameplay rock (pixel rock tile x tone)')
-    tp, geo, pos = tile_projection(nt)
-    scale_in(nt, tp, 0.25)
-    t = tex_node(nt, TILES[2], tp, (-200, 0))
+    m, nt, g = new_mat('Gameplay rock (pixel boulder tile x tone)')
+    tp, geo, pos = tile_projection(nt, top_thr=None)
+    t = tex_node(nt, TILES[LAYER_BOULDER], tp, (-200, 0))
     ca = nt.nodes.new('ShaderNodeVertexColor'); ca.layer_name = 'tone'; ca.location = (-200, -250)
     mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'MULTIPLY'; mx.location = (0, 0)
     mx.inputs['Factor'].default_value = 1.0
@@ -482,33 +585,52 @@ def rock_material():
 
 
 _flat = {}
+SIGN_GLOW = '#8c8c8c'   # src/art/signs.js: emissive = the face itself x this
 
 
-def flat_mat(rec, inst_color=False, obj_color=False):
+def flat_mat(rec, inst_color=False, obj_color=False, water=False):
     """Material for the game's procedural parts (MeshStandardMaterial colour / emissive / opacity /
-    vertex colours); per-instance colours via the instancer attribute or the object colour."""
-    key = (json.dumps(rec, sort_keys=True), inst_color, obj_color)
+    vertex colours / canvas maps); per-instance colours via the instancer attribute or the object colour."""
+    key = (json.dumps(rec, sort_keys=True), inst_color, obj_color, water)
     if key in _flat:
         return _flat[key]
     nm = rec.get('name') or ''
-    label = nm if nm and not nm.startswith('dressing') else f'Paint {rec["color"]}'
-    if rec.get('texts'):
-        label = 'Sign board ' + rec.get('bg', '')
-    if rec.get('check'):
-        label = 'Chequered'
+    label = nm if nm and not nm.startswith('dressing') and not nm.startswith('gate-') else f'Paint {rec["color"]}'
+    if rec.get('sign'):
+        label = 'Sign face ' + rec['sign']['title'] + (f' {rec["sign"]["sub"]}' if rec['sign'].get('sub') else '')
+    elif rec.get('map'):
+        label = 'Texture ' + os.path.basename(rec['map'])
+    if water:
+        label = 'Water ' + label
     m, nt, g = new_mat(label)
-    base = lhex(rec['bg'] if rec.get('bg') else rec['color'])
-    src = None
-    if rec.get('check'):
-        ck = nt.nodes.new('ShaderNodeTexChecker'); ck.location = (-300, 0)
-        tc = nt.nodes.new('ShaderNodeTexCoord'); tc.location = (-500, 0)
-        nt.links.new(tc.outputs['Generated'], ck.inputs['Vector'])
-        ck.inputs['Color1'].default_value = lhex('#111111'); ck.inputs['Color2'].default_value = lhex('#f2efe6')
-        ck.inputs['Scale'].default_value = 24.0
-        src = ck.outputs['Color']
+    base = lhex(rec['color'])
+    col = None
+    if rec.get('map'):
+        tn = tex_node(nt, load_png(rec['map'], 'canvas_' + os.path.basename(rec['map'])), None, (-500, 0))
+        uvn = nt.nodes.new('ShaderNodeUVMap'); uvn.location = (-700, 0)
+        nt.links.new(uvn.outputs[0], tn.inputs['Vector'])
+        col = tn.outputs['Color']
+        if rec.get('emissiveMap') and rec.get('emissive', '#000000') != '#000000':
+            em = nt.nodes.new('ShaderNodeMix'); em.data_type = 'RGBA'; em.blend_type = 'MULTIPLY'; em.inputs['Factor'].default_value = 1; em.location = (-200, -250)
+            nt.links.new(col, em.inputs['A']); em.inputs['B'].default_value = lhex(rec['emissive'])
+            nt.links.new(em.outputs['Result'], g.inputs['Emission'])
+        if rec['color'].lower() != '#ffffff':
+            mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'MULTIPLY'; mx.inputs['Factor'].default_value = 1
+            nt.links.new(col, mx.inputs['A']); mx.inputs['B'].default_value = base
+            col = mx.outputs['Result']
     elif rec.get('vertexColors'):
         vc = nt.nodes.new('ShaderNodeVertexColor'); vc.layer_name = 'Col'; vc.location = (-300, 0)
-        src = vc.outputs['Color']
+        col = vc.outputs['Color']
+        if rec['color'].lower() != '#ffffff':
+            mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'MULTIPLY'; mx.inputs['Factor'].default_value = 1
+            nt.links.new(col, mx.inputs['A']); mx.inputs['B'].default_value = base
+            col = mx.outputs['Result']
+        if water:   # depth-stepped water: alpha in the vertex colour
+            am = mathn(nt, 'MULTIPLY', vc.outputs['Alpha'], float(rec.get('opacity', 1)), (-100, -300))
+            nt.links.new(am, g.inputs['Alpha'])
+    if col is None:
+        rgb = nt.nodes.new('ShaderNodeRGB'); rgb.outputs[0].default_value = base; rgb.location = (-300, 150)
+        col = rgb.outputs[0]
     tint = None
     if inst_color:
         at = nt.nodes.new('ShaderNodeAttribute'); at.attribute_type = 'INSTANCER'; at.attribute_name = 'inst_color'; at.location = (-300, -200)
@@ -516,24 +638,24 @@ def flat_mat(rec, inst_color=False, obj_color=False):
     elif obj_color:
         oi = nt.nodes.new('ShaderNodeObjectInfo'); oi.location = (-300, -200)
         tint = oi.outputs['Color']
-    col = src
-    if col is None:
-        rgb = nt.nodes.new('ShaderNodeRGB'); rgb.outputs[0].default_value = base; rgb.location = (-300, 150)
-        col = rgb.outputs[0]
-    elif not rec.get('check') and rec['color'].lower() != '#ffffff':
-        mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'MULTIPLY'; mx.inputs['Factor'].default_value = 1
-        nt.links.new(col, mx.inputs['A']); mx.inputs['B'].default_value = base
-        col = mx.outputs['Result']
     if tint is not None:
         mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'MULTIPLY'; mx.inputs['Factor'].default_value = 1; mx.location = (-80, 0)
         nt.links.new(col, mx.inputs['A']); nt.links.new(tint, mx.inputs['B'])
         col = mx.outputs['Result']
-    nt.links.new(col, g.inputs['Albedo'])
-    if rec.get('emissive', '#000000') != '#000000':
-        g.inputs['Emission'].default_value = lhex(rec['emissive'])
-    if rec.get('transparent') and rec.get('opacity', 1) < 1:
-        g.inputs['Alpha'].default_value = rec['opacity']
-        set_transparent(m)
+    if rec.get('basic'):   # unlit (MeshBasicMaterial): the colour as it is, no fog unless it asks for it
+        em = nt.nodes.new('ShaderNodeEmission'); em.location = (150, -200)
+        nt.links.new(col, em.inputs['Color'])
+        out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+        nt.nodes.remove(g)
+        nt.links.new(em.outputs[0], out.inputs['Surface'])
+    else:
+        nt.links.new(col, g.inputs['Albedo'])
+        if rec.get('emissive', '#000000') != '#000000' and not rec.get('emissiveMap'):
+            g.inputs['Emission'].default_value = lhex(rec['emissive'])
+        if rec.get('transparent') and rec.get('opacity', 1) < 1 and not (water and rec.get('vertexColors')):
+            g.inputs['Alpha'].default_value = rec['opacity']
+    if rec.get('transparent') and (rec.get('opacity', 1) < 1 or water):
+        set_transparent(m, blended=water)
     m.use_backface_culling = not rec.get('doubleSided')
     _flat[key] = m
     return m
@@ -542,30 +664,55 @@ def flat_mat(rec, inst_color=False, obj_color=False):
 # ---------- mesh helpers ----------
 def mesh_from(name, v, tris, mat_idx=None):
     me = bpy.data.meshes.new(name)
-    me.from_pydata([tuple(p) for p in v], [], [tuple(t) for t in tris])
+    v = np.asarray(v, np.float32).reshape(-1, 3)
+    tris = np.asarray(tris, np.int32).reshape(-1, 3)
+    me.vertices.add(len(v)); me.vertices.foreach_set('co', v.ravel())
+    me.loops.add(tris.size); me.loops.foreach_set('vertex_index', tris.ravel())
+    me.polygons.add(len(tris)); me.polygons.foreach_set('loop_start', np.arange(0, tris.size, 3, dtype=np.int32))
     if mat_idx is not None:
         me.polygons.foreach_set('material_index', np.asarray(mat_idx, dtype=np.int32))
-    me.update()
+    me.update(calc_edges=True)
+    me.validate(clean_customdata=False)
     return me
 
 
-def geom_mesh(gi, name, nmats=1):
+SMOOTH_TYPES = ('CylinderGeometry', 'SphereGeometry', 'ConeGeometry', 'CapsuleGeometry', 'TorusGeometry', 'LatheGeometry')
+
+
+def geom_mesh(gi, name, mats_):
     gr = W['geoms'][gi]
     if gr.get('_mesh'):
         return bpy.data.meshes[gr['_mesh']]
-    v = verts3(gr['v'])
+    v = verts3(arr(gr['v']))
     n = len(v)
-    idx = np.asarray(gr['i'] if gr['i'] is not None else range(n), dtype=np.int64).reshape(-1, 3)
+    idx = (arr(gr['i']).astype(np.int64) if gr['i'] is not None else np.arange(n)).reshape(-1, 3)
+    col_ = arr(gr['color']).reshape(n, -1) if gr.get('color') else None
+    uv_ = arr(gr['uv']).reshape(n, 2) if gr.get('uv') else None
+    if gr['i'] is None and n > 3000:
+        # big triangle soups (the sea grid, road paint): weld vertices that share position and colour
+        key = np.concatenate([np.round(v, 4)] + ([np.round(col_, 3)] if col_ is not None else []) + ([np.round(uv_, 4)] if uv_ is not None else []), 1)
+        _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
+        v = v[first]
+        col_ = col_[first] if col_ is not None else None
+        uv_ = uv_[first] if uv_ is not None else None
+        idx = inv.reshape(-1)[idx]
+        n = len(v)
     mi = np.zeros(len(idx), np.int32)
     for start, count, m in gr['groups']:
-        mi[start // 3:(start + count) // 3] = m if m < nmats else 0   # a box with one material still has 6 groups
+        mi[start // 3:(start + count) // 3] = m if m < len(mats_) else 0   # a box with one material still has 6 groups
     me = mesh_from(name, v, idx, mi)
-    if gr.get('color'):
+    loops = idx.ravel()
+    if col_ is not None:
+        c = col_.astype(np.float32)
+        if c.shape[1] == 3:
+            c = np.concatenate([c, np.ones((len(c), 1), np.float32)], 1)
         ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'POINT')
-        c = np.asarray(gr['color'], np.float32).reshape(-1, 3)
-        ca.data.foreach_set('color', np.concatenate([c, np.ones((len(c), 1), np.float32)], 1).ravel())
-    if gr['type'] not in ('BoxGeometry', 'PlaneGeometry'):
-        me.shade_smooth() if gr['type'] in ('CylinderGeometry',) else None
+        ca.data.foreach_set('color', c.ravel())
+    if uv_ is not None:
+        lay = me.uv_layers.new(name='UVMap')
+        lay.data.foreach_set('uv', uv_[loops].astype(np.float32).ravel())
+    if gr['type'] in SMOOTH_TYPES and not all(m.get('flat') for m in mats_):
+        me.shade_smooth()
     gr['_mesh'] = me.name
     return me
 
@@ -603,8 +750,8 @@ def scatter(name, src_obj, mats, colors, collection):
     me.from_pydata(pts, [], [])
     me.attributes.new('rot', 'FLOAT_VECTOR', 'POINT').data.foreach_set('vector', rot)
     me.attributes.new('scl', 'FLOAT_VECTOR', 'POINT').data.foreach_set('vector', scl)
-    if colors:
-        c = np.asarray([lhex(h) for h in colors], np.float32)
+    if colors is not None:
+        c = np.asarray([(*lin(list(cc / 255.0)), 1.0) for cc in colors], np.float32)
         me.attributes.new('inst_color', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', c.ravel())
     ob = link(bpy.data.objects.new(name, me), collection)
     md = ob.modifiers.new('Scatter', 'NODES')
@@ -618,46 +765,55 @@ def scatter(name, src_obj, mats, colors, collection):
 
 # ======================================================================================
 # Terrain
-log('terrain')
-cell = SIZE / RES
-xs = -SIZE / 2 + np.arange(N1) * cell
+log(f'terrain ({N1}^2 at {CELL:g} m)')
+xs = -SIZE / 2 + np.arange(N1) * CELL
 gx, gz = np.meshgrid(xs, xs, indexing='ij')                          # [ix, iz]
 V = np.stack([gx, -gz, VIS], -1).reshape(-1, 3)                      # vertex id = ix * N1 + iz
 ix, iz = np.meshgrid(np.arange(RES), np.arange(RES), indexing='ij')
 a = (ix * N1 + iz).ravel(); b = (ix * N1 + iz + 1).ravel(); c_ = ((ix + 1) * N1 + iz + 1).ravel(); d = ((ix + 1) * N1 + iz).ravel()
 # same diagonal as three.js PlaneGeometry: (ix, iz+1)-(ix+1, iz); winding facing +Z in Blender
 TRI = np.concatenate([np.stack([a, b, d], 1), np.stack([b, c_, d], 1)])
-me = bpy.data.meshes.new('Terrain')
-me.vertices.add(len(V)); me.vertices.foreach_set('co', V.astype(np.float32).ravel())
-me.loops.add(TRI.size); me.loops.foreach_set('vertex_index', TRI.astype(np.int32).ravel())
-me.polygons.add(len(TRI)); me.polygons.foreach_set('loop_start', np.arange(0, TRI.size, 3, dtype=np.int32))
-me.update(calc_edges=True)
-me.validate()
-me.shade_smooth()
-# shading normals from a softened heightfield (terrain_look.softenTerrainNormals, 2 box-blur passes)
-h = VIS.astype(np.float64)
-for _ in range(2):
-    p = np.pad(h, 1, mode='edge')
-    h = sum(p[1 + dx:1 + dx + N1, 1 + dz:1 + dz + N1] for dx in (-1, 0, 1) for dz in (-1, 0, 1)) / 9
-p = np.pad(h, 1, mode='edge')
-nx = p[0:N1, 1:N1 + 1] - p[2:N1 + 2, 1:N1 + 1]     # h(ix-1) - h(ix+1)
-nz = p[1:N1 + 1, 0:N1] - p[1:N1 + 1, 2:N1 + 2]     # h(iz-1) - h(iz+1)
-nrm = np.stack([nx, np.full_like(nx, 2 * cell), nz], -1)
-nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
-nrm_b = np.stack([nrm[..., 0], -nrm[..., 2], nrm[..., 1]], -1).reshape(-1, 3)
-me.normals_split_custom_set_from_vertices(nrm_b.astype(np.float32))
-me.materials.append(terrain_material())
+me = mesh_from('Terrain', V, TRI)
+del TRI, a, b, c_, d
 terrain = link(bpy.data.objects.new('Terrain', me), COL['Terrain'])
+decimated = False
+if len(V) > TERRAIN_MAX_VERTS:
+    # Coralume Island: 1 M vertices at 1 m. Collapse the plain ground (sea floor, flat jungle) and keep
+    # the detail where the ground changes; the material still reads the full 1 m surface grid
+    ratio = TERRAIN_MAX_VERTS / len(V)
+    log(f'decimating terrain to {ratio:.2f} ({len(V)} -> ~{TERRAIN_MAX_VERTS} vertices)')
+    bpy.context.view_layer.objects.active = terrain
+    md = terrain.modifiers.new('Decimate', 'DECIMATE')
+    md.decimate_type = 'COLLAPSE'
+    md.ratio = ratio
+    md.use_collapse_triangulate = True
+    bpy.ops.object.modifier_apply(modifier=md.name)
+    me = terrain.data
+    decimated = True
+del V
+for nm in ('.select_vert', '.select_edge', '.select_poly', 'sharp_face'):
+    if nm in me.attributes:
+        me.attributes.remove(me.attributes[nm])
+me.shade_smooth()   # (the shading normals and the desert's dune tint come from the game's grids, in the material)
+me.materials.append(terrain_material())
 terrain['map'] = W['map']['name']
 terrain['note'] = 'Regenerated from the game. Edits here do NOT flow back to the game (see art/blender/README.md).'
-# surface material as a face attribute too, for selecting / inspecting in the viewport
-fm = me.attributes.new('surface', 'INT', 'FACE')
-fm.data.foreach_set('value', MAT.ravel()[TRI[:, 0]].astype(np.int32))
-terrain['surface_names'] = ', '.join(f'{m["id"]} {m["name"]}' for m in W['materials'])
+if decimated:
+    terrain['decimated'] = f'collapse to {len(me.vertices)} vertices from {N1 * N1} (1 m grid); the material reads the full grid'
+# shown surface per face (the game's ground lookup grid at the face centre), for selecting / inspecting
+fc = np.empty(len(me.polygons) * 3, np.float32); me.polygons.foreach_get('center', fc); fc = fc.reshape(-1, 3)
+fix = np.clip(np.round((fc[:, 0] + SIZE / 2) / CELL), 0, RES).astype(np.int64)
+fiz = np.clip(np.round((-fc[:, 1] + SIZE / 2) / CELL), 0, RES).astype(np.int64)
+fm = me.attributes.new('surface', 'INT8', 'FACE')
+fm.data.foreach_set('value', LOOKG[fix, fiz, 0].astype(np.int8))
+terrain['surface_names'] = ', '.join(f'{i} {l["name"]}' for i, l in enumerate(W['layers']))
+del fc
+log(f'terrain: {len(me.vertices)} vertices, {len(me.polygons)} faces')
 
 # ======================================================================================
 # Paths
 log('paths')
+PATH_COLORS = {'road': '#f4ead2', 'access': '#f4ead2', 'track': '#d9c7a6', 'creek': '#5bb0cc', 'course': '#d9c7a6'}
 for pth in W['paths']:
     cu = bpy.data.curves.new(pth['name'], 'CURVE')
     cu.dimensions = '3D'
@@ -666,15 +822,18 @@ for pth in W['paths']:
     sp.points.add(len(pts) - 1)
     sp.points.foreach_set('co', np.array([(x, -z, y + 0.25, 1) for x, y, z in pts], np.float32).ravel())
     sp.use_cyclic_u = pth['closed']
-    cu.bevel_depth = 0.12
-    ob = link(bpy.data.objects.new(f'{pth["kind"].title()} {pth["name"]}', cu), COL['Paths'])
-    colr = pth['diffColor'] or ('#f4ead2' if pth['kind'] == 'road' else '#d9c7a6')
-    m, nt, g = new_mat(f'Path {pth["diffLabel"] or pth["kind"]}')
+    cu.bevel_depth = 0.12 if SIZE <= 400 else 0.25
+    kind = pth['kind']
+    title = {'access': 'Access track', 'creek': 'Creek'}.get(kind, kind.title())
+    ob = link(bpy.data.objects.new(f'{title} {pth["name"]}', cu), COL['Paths'])
+    colr = pth['diffColor'] or PATH_COLORS.get(kind, '#d9c7a6')
+    m, nt, g = new_mat(f'Path {pth["diffLabel"] or kind}')
     g.inputs['Albedo'].default_value = lhex(colr if colr not in ('#000000', '#1a1a1a') else '#2b2b2b')
+    g.inputs['Fog'].default_value = 0.0
     cu.materials.append(m)
     ob.hide_render = True
-    for k in ('kind', 'diff', 'diffLabel', 'width', 'length', 'shoulder'):
-        if pth[k] is not None:
+    for k in ('kind', 'surface', 'diff', 'diffLabel', 'width', 'length', 'shoulder'):
+        if pth.get(k) is not None:
             ob[k] = pth[k]
     ob.color = (*lin(srgb(colr)), 1)
 
@@ -683,22 +842,23 @@ for pth in W['paths']:
 log(f'rocks ({len(W["rocks"])})')
 rmat = rock_material()
 for i, r in enumerate(W['rocks']):
-    v = verts3(r['v'])
-    me = mesh_from(('Ledge' if r['ledge'] else 'Rock') + f' {i:03d}', v, np.asarray(r['i']).reshape(-1, 3))
+    v = verts3(arr(r['v']))
+    kind = 'Ledge' if r['ledge'] else 'Embedded rock' if r.get('embedded') else 'Rock'
+    me = mesh_from(f'{kind} {i:04d}', v, arr(r['i']).reshape(-1, 3))
     ca = me.color_attributes.new('tone', 'FLOAT_COLOR', 'POINT')
-    t = np.asarray(r['tone'], np.float32)
+    t = arr(r['tone']).astype(np.float32)
     ca.data.foreach_set('color', np.stack([t, t, t * 0.98, np.ones_like(t)], 1).ravel())
     me.shade_smooth()
     me.materials.append(rmat)
     ob = link(bpy.data.objects.new(me.name, me), COL['Rocks'])
     ob.location = P(r['x'], r['y'], r['z'])
     ob.rotation_euler = (0, 0, r['rotY'])
-    add_outline(ob, 0.04)
+    if not r.get('embedded'):
+        add_outline(ob, 0.04)
 
 # ======================================================================================
 # Prop library: one collection per glTF model, instanced everywhere
 log('prop library')
-lib_layer = None
 PROPLIB = {}
 
 
@@ -710,7 +870,8 @@ def import_glb(path, target):
     return [o for o in bpy.data.objects if o not in before]
 
 
-prop_keys = sorted({k for k in W['dressing']['assets']} | {f[:-4] for f in W['modelFiles'] if not f.startswith('vehicles/')})
+used_assets = {a['asset'] for s in (W['dressing'], W['markers'], W['structures']) for a in s['assets'].values()}
+prop_keys = sorted(used_assets | ({f[:-4] for f in W['modelFiles'] if not f.startswith('vehicles/')} if used_assets else set()))
 for key in prop_keys:
     c = coll(f'PROP {key}', LIB)
     objs = import_glb(os.path.join(MODELS, key + '.glb'), c)
@@ -735,170 +896,225 @@ for key, (c, objs) in PROPLIB.items():
             add_outline(o, 0.025)
 
 # ======================================================================================
-# Dressing: trees + props (dressing.js placements)
-log('dressing')
+# Dressing, markers, structures, water
 DRESS = {
-    'trees_round': ('Trees', 'Round trees'), 'trees_pine': ('Trees', 'Pine trees'), 'bushes': ('Props', 'Bushes'),
-    'tufts': ('Props', 'Grass tufts'), 'flowers': ('Props', 'Flowering tufts'), 'stones': ('Props', 'Stones'),
+    'trees_round': ('Trees', 'Round trees'), 'trees_pine': ('Trees', 'Pine trees'), 'trees_palm': ('Trees', 'Palms'),
+    'trees_broad': ('Trees', 'Broadleaf trees'), 'trees_giant': ('Trees', 'Emergent trees'), 'plants': ('Trees', 'Cacti, yuccas & snags'),
+    'bushes': ('Props', 'Bushes'), 'tufts': ('Props', 'Grass tufts'), 'flowers': ('Props', 'Flowering tufts'), 'stones': ('Props', 'Stones'),
     'logs': ('Props', 'Logs & stumps'), 'stumps': ('Props', 'Logs & stumps'), 'fences': ('Props', 'Fences'),
-    'misc': ('Markers', 'Signs & gates'),
+    'ferns': ('Props', 'Ferns'), 'bananas': ('Props', 'Banana plants'), 'hibiscus': ('Props', 'Hibiscus'),
+    'misc': ('Markers', 'Signs & gates'), 'road-signs': ('Markers', 'Signs & gates'), 'place-signs': ('Markers', 'Signs & gates'),
+    'crawl-loose': ('Props', 'Stones'),
 }
 NICE = {'signpost': 'Trailhead fingerpost'}
-for key, rec in W['dressing']['assets'].items():
-    top, name = DRESS.get(rec['category'], ('Props', rec['category']))
-    target = sub(top, name)
-    mats = [M(it['m']) for it in rec['items']]
-    if key.startswith('grass_tuft'):
-        src = next(o for o in PROPLIB[key][1] if o.type == 'MESH')
-        scatter(f'Grass tufts {key[-1].upper()}', src, mats, None, target)
-        continue
-    lc = PROPLIB[key][0]
-    for n, mw in enumerate(mats):
-        e = bpy.data.objects.new(f'{NICE.get(key, key)} {n + 1:03d}', None)
-        e.instance_type = 'COLLECTION'
-        e.instance_collection = lc
-        e.empty_display_size = 0.5
-        e.matrix_world = mw
-        link(e, target)
+NICE_PART = {'trees_palm': 'Palm', 'trees_broad': 'Broadleaf tree', 'trees_giant': 'Emergent tree', 'plants': 'Desert plant', 'ferns': 'Fern',
+             'bushes': 'Bush', 'bananas': 'Banana plant', 'hibiscus': 'Hibiscus', 'tufts': 'Tuft', 'stones': 'Stone'}
+
+
+def place_assets(assets, mapper):
+    for rec in assets.values():
+        key = rec['asset']
+        top, name = mapper(rec)
+        target = sub(top, name)
+        mats = mats_of(rec['items'])
+        if key.startswith('grass_tuft'):
+            src = next(o for o in PROPLIB[key][1] if o.type == 'MESH')
+            scatter(f'Grass tufts {key[-1].upper()}', src, mats, None, target)
+            continue
+        lc = PROPLIB[key][0]
+        for n, mw in enumerate(mats):
+            e = bpy.data.objects.new(f'{NICE.get(key, key)} {n + 1:03d}', None)
+            e.instance_type = 'COLLECTION'
+            e.instance_collection = lc
+            e.empty_display_size = 0.5
+            e.matrix_world = mw
+            link(e, target)
+
+
 lib_proc = coll('PROC procedural parts', LIB)
+_srcs = {}
 
 
-def place_meshes(recs, top_default, name_map):
-    """Procedural parts from the game's view code: single parts as objects (grouped under their
-    sign / gate / stand), repeated parts as geometry-node instances of one source mesh."""
+def place_meshes(sec, mapper, outline=True):
+    """Procedural parts from the game's view code: single parts as objects (parented to their sign /
+    gate / hut group), repeated parts as geometry-node instances of one source mesh."""
     groups = {}
-    for r in recs:
-        top, subname = name_map(r)
+    count = {}
+    for r in sec['meshes']:
+        top, subname = mapper(r)
         target = sub(top, subname)
         mats_ = [W['mats'][k] for k in r['mats']]
-        many = len(r['items']) >= 8
-        cols = [it.get('c') for it in r['items']] if any('c' in it for it in r['items']) else None
-        me = geom_mesh(r['geom'], r['name'], len(r['mats']))
+        items = r['items']
+        many = items['n'] >= 8
+        cols = colors_of(items)
+        water = r.get('water') or top == 'Water'
+        nice = NICE_PART.get(r['name'], r['name'])
+        k = (nice, r['category'])
+        count[k] = count.get(k, 0) + 1
+        label = nice if count[k] == 1 else f'{nice} part {count[k]}'
+        me = geom_mesh(r['geom'], label, mats_)
         if not me.materials:
             for mm in mats_:
-                me.materials.append(flat_mat(mm, inst_color=bool(cols) and many, obj_color=bool(cols) and not many))
+                me.materials.append(flat_mat(mm, inst_color=cols is not None and many, obj_color=cols is not None and not many, water=water))
+        mws = mats_of(items)
         if many:
-            src = link(bpy.data.objects.new(r['name'] + ' (source)', me), lib_proc)
-            if r['category'] not in ('tufts', 'flowers'):
-                add_outline(src, 0.02)
-            scatter(r['name'], src, [M(it['m']) for it in r['items']], cols, target)
+            sk = (r['geom'], tuple(r['mats']))
+            src = _srcs.get(sk)
+            if not src:
+                src = link(bpy.data.objects.new(label + ' (source)', me), lib_proc)
+                if outline and r['category'] not in ('tufts', 'flowers', 'ferns') and not water:
+                    add_outline(src, 0.02)
+                _srcs[sk] = src
+            scatter(label, src, mws, cols, target)
             continue
         parent = None
-        if r.get('groupM'):
-            gk = r['category']
-            if gk not in groups:
-                ge = link(bpy.data.objects.new(gk, None), target)
+        gid = r.get('group')
+        if gid:
+            if gid not in groups:
+                gr = sec['groups'][gid]
+                ge = link(bpy.data.objects.new(gr['name'], None), target)
                 ge.empty_display_size = 1.0
-                ge.matrix_world = M(r['groupM'])
-                groups[gk] = ge
-            parent = groups[gk]
-        for n, it in enumerate(r['items']):
-            ob = link(bpy.data.objects.new(r['name'] + (f' {n + 1:03d}' if len(r['items']) > 1 else ''), me), target)
-            ob.matrix_world = M(it['m'])
+                ge.matrix_world = M(gr['m'])
+                if gr.get('sign'):
+                    ge['sign_title'] = gr['sign']['title']
+                    if gr['sign'].get('sub'):
+                        ge['sign_sub'] = gr['sign']['sub']
+                groups[gid] = ge
+            parent = groups[gid]
+        for n, mw in enumerate(mws):
+            ob = link(bpy.data.objects.new(label + (f' {n + 1:03d}' if len(mws) > 1 else ''), me), parent.users_collection[0] if parent else target)
+            ob.matrix_world = mw
             if parent:
-                mw = ob.matrix_world.copy()
                 ob.parent = parent
-                ob.matrix_world = mw
-            if it.get('c'):
-                ob.color = lhex(it['c'])
-            if not any(mm.get('transparent') for mm in mats_) and W['geoms'][r['geom']]['type'] != 'PlaneGeometry':
+                ob.matrix_parent_inverse = parent.matrix_world.inverted()
+            if cols is not None:
+                ob.color = (*lin(list(cols[n] / 255.0)), 1)
+            gt = W['geoms'][r['geom']]
+            if outline and not water and not any(mm.get('transparent') for mm in mats_) and gt['type'] != 'PlaneGeometry' and not top == 'Terrain' and 'paint' not in r['category']:
                 add_outline(ob, 0.02)
-            add_texts(ob, r)
 
 
-def add_texts(ob, r):
-    """Sign boards and banners: the game draws their text on a canvas; here it is a text object on
-    the part's +Z face (three.js), sized to the face."""
-    for k in r['mats']:
-        mr = W['mats'][k]
-        if not mr.get('texts'):
-            continue
-        bb = W['geoms'][r['geom']]['bbox']
-        w, hgt, zmax = bb[3] - bb[0], bb[4] - bb[1], bb[5]
-        lines = [t['text'] for t in mr['texts']]
-        cu = bpy.data.curves.new(ob.name + ' text', 'FONT')
-        cu.body = '\n'.join(lines)
-        cu.align_x, cu.align_y = 'CENTER', 'CENTER'
-        longest = max(len(s) for s in lines)
-        cu.size = min(hgt * 0.75 / max(1, len(lines)), w * 0.9 / max(1, longest * 0.55))
-        cu.space_line = 1.1
-        tm, nt, g = new_mat('Sign text ' + mr['texts'][0]['color'])
-        g.inputs['Albedo'].default_value = lhex(mr['texts'][0]['color'])
-        cu.materials.append(tm)
-        t = link(bpy.data.objects.new(ob.name + ' text', cu), ob.users_collection[0])
-        t.parent = ob
-        t.location = (0, -(zmax + 0.012), 0)   # three.js +z face of the part, in Blender local space
-        t.rotation_euler = (math.pi / 2, 0, 0)
-        if mr.get('doubleSided'):   # race arches show their banner from behind too (readable here)
-            t2 = link(bpy.data.objects.new(ob.name + ' text (back)', cu), ob.users_collection[0])
-            t2.parent = ob
-            t2.location = (0, -(bb[2] - 0.012), 0)
-            t2.rotation_euler = (math.pi / 2, 0, math.pi)
-        break
+log('dressing')
+place_assets(W['dressing']['assets'], lambda rec: DRESS.get(rec['category'], ('Props', rec['category'].replace('-', ' ').capitalize())))
+place_meshes(W['dressing'], lambda r: ('Markers', 'Signs & gates') if r.get('group') and r['category'] in ('road-signs', 'place-signs') else DRESS.get(r['category'], ('Props', r['category'].replace('-', ' ').capitalize())))
 
-
-place_meshes(W['dressing']['meshes'], 'Props', lambda r: DRESS.get(r['category'], ('Props', r['category'])))
-
-# ======================================================================================
-# Markers / race venue
 log('markers')
 if W['map']['kind'] == 'race':
-    MARK = ('Arch', 'Start-finish', 'Marker post', 'Apex cone', 'Start line', 'Grid line', 'Start light')
+    MARK = ('Marker post', 'Apex cone', 'Start line', 'Grid line', 'Start light', 'Edge post', 'Trail marker')
 
     def race_map(r):
-        n, c = r['name'], r['category']
-        if c.startswith('Arch') or c.startswith('Start-finish') or any(n.startswith(k) for k in MARK):
-            return ('Markers', 'Checkpoints, posts & start' if not c.startswith('Arch') else 'Checkpoint arches')
-        if c.startswith('Grandstand') or n.startswith('Spectator') or n in ('Catch fence', 'Pole', 'Spectator tape'):
+        n = r['name']
+        g = W['markers']['groups'].get(r.get('group')) if r.get('group') else None
+        gname = g['name'] if g else ''
+        if r.get('water'):
+            return ('Water', 'Water splash')
+        if gname.startswith('Arch'):
+            return ('Markers', 'Checkpoint arches')
+        if gname.startswith('Start-finish') or any(n.startswith(k) for k in MARK):
+            return ('Markers', 'Checkpoints, posts & start')
+        if gname.startswith('Grandstand') or n.startswith('Spectator') or n in ('Catch fence', 'Pole', 'Spectator tape'):
             return ('Props', 'Race venue: stands & crowd')
         if n in ('Concrete barrier', 'Barrier stripe', 'Tyre wall', 'White tyre / paint'):
             return ('Props', 'Race venue: barriers & tyre walls')
         return ('Props', 'Race venue: paddock, flags & signs')
-    place_meshes(W['markers']['meshes'], 'Props', race_map)
+    place_meshes(W['markers'], race_map)
 else:
-    def park_map(r):
-        c = r['category']
-        if c.startswith('Sign') or c.startswith('Gate'):
+    def marker_map(r):
+        if r.get('water'):
+            return ('Water', 'Ford')
+        if r.get('group'):
             return ('Markers', 'Signs & gates')
+        if r['name'] in ('Flag pole', 'Cairn stone') or r['name'].startswith('Gate lamp'):
+            return ('Markers', 'Summit flag & cairn')
         return ('Markers', 'Road & trail posts')
-    place_meshes(W['markers']['meshes'], 'Markers', park_map)
+    place_meshes(W['markers'], marker_map)
+place_assets(W['markers']['assets'], lambda rec: DRESS.get(rec['category'], ('Props', 'Loose stones & logs')))
 
+if W['structures']['meshes']:
+    log('structures')
+
+    def struct_map(r):
+        g = W['structures']['groups'].get(r.get('group')) if r.get('group') else None
+        if g:
+            n = g['name'].rstrip('0123456789 ')
+            return ('Structures', {'Stilt hut': 'Huts', 'Canopy post': 'Camp', 'Fuel pump': 'Camp', 'Water tank': 'Camp', 'Old trailer': 'Camp', 'Camp shack': 'Camp'}.get(n, n))
+        if 'paint' in r['category']:
+            return ('Structures', 'Road paint')
+        if r['name'].startswith('Deck') or r['name'] == 'Trail marker post':
+            return ('Structures', 'Bridges & dock')
+        if r['name'] == 'Guard rail':
+            return ('Structures', 'Guard rails')
+        if r['category'] == 'camp':
+            return ('Structures', 'Camp')
+        return ('Structures', r['category'].capitalize())
+    place_meshes(W['structures'], struct_map)
+    # the post mesh under the bridges / dock is the shared post colour: name it for what it is
+    for o in COL['Structures'].all_objects:
+        if o.name.startswith('Trail marker post'):
+            o.name = 'Pilings'
+
+if W['water']['meshes']:
+    log('water')
+    place_meshes(W['water'], lambda r: ('Water', {'sea': 'Sea', 'creek': 'Creek, pool & falls'}.get(r['category'], r['category'].capitalize())), outline=False)
+
+if W.get('backdrop') and W['backdrop']['meshes']:
+    place_meshes(W['backdrop'], lambda r: ('Terrain', 'Distant ranges'), outline=False)
+    # a flat ground ring between the map edge and the distant ranges (Blender only: the game's camera
+    # never looks past the edge; without it the overview shows sky under the map's corners)
+    # inner loop: the terrain's own edge (a hair lower), outer loop: a circle well past it, flat
+    step = max(1, RES // 64)
+    ring_pts = ([(0, k) for k in range(0, RES, step)] + [(k, RES) for k in range(0, RES, step)]
+                + [(RES, k) for k in range(RES, 0, -step)] + [(k, 0) for k in range(RES, 0, -step)])
+    h0 = float(np.percentile(np.concatenate([VIS[0], VIS[-1], VIS[:, 0], VIS[:, -1]]), 10)) - 0.5
+    R1 = SIZE * 1.6
+    rv = []
+    for i_, k_ in ring_pts:
+        x_, z_ = -SIZE / 2 + i_ * CELL, -SIZE / 2 + k_ * CELL
+        rv.append((x_, -z_, float(VIS[i_, k_]) - 0.05))
+    for i_, k_ in ring_pts:
+        x_, z_ = -SIZE / 2 + i_ * CELL, -SIZE / 2 + k_ * CELL
+        L_ = math.hypot(x_, z_) or 1
+        rv.append((x_ / L_ * R1, -z_ / L_ * R1, h0))
+    RS = len(ring_pts)
+    rf = [(k, (k + 1) % RS, RS + (k + 1) % RS, RS + k) for k in range(RS)]
+    rme = bpy.data.meshes.new('Outer ground')
+    rme.from_pydata(rv, [], rf)
+    ring = link(bpy.data.objects.new('Outer ground (beyond the map, Blender only)', rme), sub('Terrain', 'Distant ranges'))
+    rm = flat_mat({'color': LOOK['backdrop'][0], 'basic': True, 'name': 'Outer ground', 'doubleSided': True})
+    rme.materials.append(rm)
+
+# ======================================================================================
+# Gameplay points
 mk = sub('Markers', 'Gameplay points')
-
-
-def point(name, x, z, kind='PLAIN_AXES', size=1.0, yaw=None, y=None, **props):
-    e = link(bpy.data.objects.new(name, None), mk)
-    e.empty_display_type = kind
-    e.empty_display_size = size
-    e.location = P(x, height(x, z) if y is None else y, z)
-    if yaw is not None:
-        e.rotation_euler = (0, 0, yaw)
-    for k, v in props.items():
-        e[k] = v
-    return e
-
-
-sp = W['spawn']
-point('Spawn', sp['x'], sp['z'], 'SINGLE_ARROW', 3, yaw=sp['yaw'] + math.pi)  # arrow (+Z) tipped to point forward below
-mk.objects['Spawn'].rotation_euler = (-math.pi / 2, 0, sp['yaw'])
-if W['trailhead']:
-    th = W['trailhead']
-    e = point('Trailhead lot', th['x'], th['z'], 'CIRCLE', th['r'])
-    e.rotation_euler = (0, 0, 0)
-for te in W['trailEnds']:
-    for end in ('start', 'end'):
-        q = te[end]
-        point(f'{te["name"]} {end} point', q['x'], q['z'], 'CONE', 1.5, y=q['y'] + 4, diff=te['diff'])
-for cp in W['checkpoints']:
-    e = point(f'Checkpoint {cp["i"]} point' + (' (start-finish)' if cp['i'] == 0 else ''), cp['x'], cp['z'], 'ARROWS', 2, yaw=math.atan2(cp['tx'], cp['tz']), s=cp['s'])
+spk = sub('Markers', 'Spawn points')
+POINT_LOOK = {'spawn': ('SINGLE_ARROW', 3), 'lot': ('CIRCLE', 1), 'trail-end': ('CONE', 1.5), 'stage-gate': ('CONE', 1.5), 'course-gate': ('CONE', 1.5),
+              'checkpoint': ('ARROWS', 2), 'place': ('SPHERE', 2), 'landmark': ('SPHERE', 4), 'spawn-point': ('SINGLE_ARROW', 2.5)}
+for p in W['points']:
+    kind = p['kind']
+    disp, size = POINT_LOOK.get(kind, ('PLAIN_AXES', 1))
+    e = link(bpy.data.objects.new(p['name'], None), spk if kind == 'spawn-point' else mk)
+    e.empty_display_type = disp
+    e.empty_display_size = p.get('r') or size
+    lift = 4 if kind in ('trail-end', 'stage-gate', 'course-gate') else 0
+    e.location = P(p['x'], p['y'] + lift, p['z'])
+    if disp == 'SINGLE_ARROW' and p.get('yaw') is not None:
+        # the arrow (+Z) tipped forward along the truck's heading (three.js forward = -z rotated by yaw)
+        e.rotation_euler = (-math.pi / 2, 0, p['yaw'])
+    elif p.get('yaw') is not None:
+        e.rotation_euler = (0, 0, p['yaw'])
+    for k_ in ('diff', 'group', 'note', 'trail', 'course', 'stage', 's'):
+        if p.get(k_) is not None:
+            e[k_] = p[k_]
+    e['kind'] = kind
 
 # ======================================================================================
 # Vehicles, parked at the spawn (wheels placed at Marker_Wheel*, left side mirrored like the game)
 log('vehicles')
+sp = W['spawn']
 VEH = [f[:-4] for f in W['modelFiles'] if f.startswith('vehicles/')]
 yaw = sp['yaw']
-fwd = (-math.sin(yaw), -math.cos(yaw))            # three.js x, z
 right = (math.cos(yaw), -math.sin(yaw))
+spawn_y = next((p['y'] for p in W['points'] if p['kind'] == 'spawn'), None)
 for n, key in enumerate(VEH):
     vid = key.split('/')[1]
     c = sub('Vehicles', f'Vehicle {vid}')
@@ -933,80 +1149,66 @@ for n, key in enumerate(VEH):
     root['source'] = f'public/models/{key}.glb'
 
 # ======================================================================================
-# Sun, world, cameras
+# Sun, sky, cameras
 log('lights & cameras')
 lc = COL['Lights & Cameras']
 sd = bpy.data.lights.new('Sun', 'SUN')
 sd.energy = SUN_ENERGY
-sd.color = lin(srgb('#fff0d4'))
+sd.color = lin(srgb(LOOK['sun']))
 sd.angle = math.radians(0.5)
 sun = link(bpy.data.objects.new('Sun', sd), lc)
-sdir = P(-0.45, 0.8, 0.35).normalized()            # main.js SUN_DIR (towards the sun)
+sdir = P(*LOOK['sunDir']).normalized()            # main.js SUN_DIR (towards the sun)
 sun.location = sdir * 150
 sun.rotation_euler = (-sdir).to_track_quat('-Z', 'Y').to_euler()
 
-world = bpy.data.worlds.new('Golden haze')
+# sky: the pipeline's stepped bands, horizon (= the haze) up to the zenith, seen by the camera only
+world = bpy.data.worlds.new('Sky (stepped bands)')
 SC.world = world
 wn = world.node_tree
 wn.nodes.clear()
-wo = wn.nodes.new('ShaderNodeOutputWorld')
-bg = wn.nodes.new('ShaderNodeBackground'); bg.inputs['Color'].default_value = lhex(SKY)
-lp = wn.nodes.new('ShaderNodeLightPath')
-blk = wn.nodes.new('ShaderNodeBackground'); blk.inputs['Strength'].default_value = 0.0
-mx = wn.nodes.new('ShaderNodeMixShader')
+wo = wn.nodes.new('ShaderNodeOutputWorld'); wo.location = (600, 0)
+tc = wn.nodes.new('ShaderNodeTexCoord'); tc.location = (-600, 0)
+sxyz = wn.nodes.new('ShaderNodeSeparateXYZ'); sxyz.location = (-400, 0)
+wn.links.new(tc.outputs['Generated'], sxyz.inputs[0])
+band = wn.nodes.new('ShaderNodeValToRGB'); band.location = (-200, 0); band.label = 'sky bands (palette.js SKY_BANDS)'
+br = band.color_ramp
+br.interpolation = 'CONSTANT'
+bands = LOOK['skyBands']
+br.elements[0].position, br.elements[0].color = 0.0, lhex(bands[0])
+br.elements[1].position, br.elements[1].color = 0.62, lhex(bands[-1])
+for i, h in enumerate(bands[1:-1]):
+    e = br.elements.new(0.07 + i * 0.16); e.color = lhex(h)
+wn.links.new(sxyz.outputs['Z'], band.inputs['Fac'])
+bg = wn.nodes.new('ShaderNodeBackground'); bg.location = (100, 100)
+wn.links.new(band.outputs['Color'], bg.inputs['Color'])
+lp = wn.nodes.new('ShaderNodeLightPath'); lp.location = (100, 300)
+blk = wn.nodes.new('ShaderNodeBackground'); blk.inputs['Strength'].default_value = 0.0; blk.location = (100, -100)
+mx = wn.nodes.new('ShaderNodeMixShader'); mx.location = (400, 0)
 wn.links.new(lp.outputs['Is Camera Ray'], mx.inputs['Fac'])
 wn.links.new(blk.outputs[0], mx.inputs[1]); wn.links.new(bg.outputs[0], mx.inputs[2])
 wn.links.new(mx.outputs[0], wo.inputs['Surface'])
-# distant ground beyond the map edge (main.js `outer` ring)
-RS, R0, R1 = 48, SIZE * 0.68, 900.0     # THREE.RingGeometry(SIZE * 0.68, 900, 32)
-rv = [(r * math.cos(2 * math.pi * k / RS), r * math.sin(2 * math.pi * k / RS), 0) for r in (R0, R1) for k in range(RS)]
-rf = [(RS + k, RS + (k + 1) % RS, (k + 1) % RS, k) for k in range(RS)]   # facing up
-ring = link(bpy.data.objects.new('Outer ground (beyond the map)', mesh_from('Outer ground', rv, rf)), COL['Terrain'])
-ring.location = (0, 0, 18)
-rm, rnt, rg = new_mat('Outer ground')
-rg.inputs['Albedo'].default_value = lhex('#c89a48')
-rm.use_backface_culling = True   # front side only, like the game (it sits above the camera at the edges)
-ring.data.materials.append(rm)
 
 CAMS = []
-
-
-def camera(name, eye, target, lens_fov=62.0, ortho=None):
-    cd = bpy.data.cameras.new(name)
+CLIP = max(2000.0, SIZE * 3.5)
+for cd_ in W['cameras']:
+    cd = bpy.data.cameras.new(cd_['name'])
     cd.sensor_fit = 'VERTICAL'
-    if ortho:
-        cd.type = 'ORTHO'; cd.ortho_scale = ortho
+    if cd_.get('ortho'):
+        cd.type = 'ORTHO'; cd.ortho_scale = cd_['ortho']
     else:
-        cd.angle_y = math.radians(lens_fov)
-    cd.clip_start, cd.clip_end = 0.1, 2000
-    ob = link(bpy.data.objects.new(name, cd), lc)
+        cd.angle_y = math.radians(cd_['fov'])
+    cd.clip_start, cd.clip_end = 0.1, CLIP
+    clash = bpy.data.objects.get(cd_['name'])   # a point or path of the same name keeps it with a suffix
+    if clash:
+        clash.name = cd_['name'] + (' (path)' if clash.type == 'CURVE' else ' (point)')
+    ob = link(bpy.data.objects.new(cd_['name'], cd), lc)
+    eye, tgt = P(*cd_['eye']), P(*cd_['target'])
     ob.location = eye
-    ob.rotation_euler = (target - eye).to_track_quat('-Z', 'Y').to_euler()
+    ob.rotation_euler = (tgt - eye).to_track_quat('-Z', 'Y').to_euler()
+    ob['fog'] = bool(cd_.get('fog', True))
+    ob['preview'] = bool(cd_.get('render', True))
     CAMS.append(ob)
-    return ob
-
-
-def chase(name, x, z, fx, fz, back=11.0, up=5.0, ahead=8.0):
-    gy = height(x, z)
-    eye = P(x - fx * back, max(gy, height(x - fx * back, z - fz * back)) + up, z - fz * back)
-    tgt = P(x + fx * ahead, height(x + fx * ahead, z + fz * ahead) + 1.0, z + fz * ahead)
-    return camera(name, eye, tgt)
-
-
-if W['map']['kind'] == 'race':
-    chase('Race grid', sp['x'], sp['z'], fwd[0], fwd[1], back=16, up=6, ahead=18)
-    cp0 = W['checkpoints'][0]
-    camera('Start-finish view', P(cp0['x'] - cp0['tz'] * 22 + cp0['tx'] * 18, cp0['y'] + 9, cp0['z'] + cp0['tx'] * 22 + cp0['tz'] * 18), P(cp0['x'], cp0['y'] + 3, cp0['z']))
-    for cp in W['checkpoints'][1:]:
-        chase(f'Checkpoint {cp["i"]}', cp['x'], cp['z'], cp['tx'], cp['tz'], back=20, up=7, ahead=4)
-else:
-    chase('Trailhead', sp['x'], sp['z'], fwd[0], fwd[1], back=13, up=6, ahead=12)
-    for te in W['trailEnds']:
-        q = te['start']
-        chase(f'Trail start {te["name"]}', q['x'], q['z'], q['tx'], q['tz'], back=12, up=6, ahead=14)
-camera('Overview', Vector((0, -300, 230)), Vector((0, 10, 0)), 50)
-camera('Top (ortho)', Vector((0, 0, 400)), Vector((0, 0.001, 0)), ortho=420)
-SC.camera = CAMS[0]
+SC.camera = next(c for c in CAMS if c.name == 'Overview')
 
 # ======================================================================================
 # Render / viewport look
@@ -1024,13 +1226,16 @@ try:
 except Exception:
     pass
 try:
+    SC.eevee.shadow_pool_size = '1024'   # thousands of instanced plants cast shadows
+except Exception:
+    pass
+try:
     SC.view_settings.view_transform = 'Standard'
 except TypeError as e:
     log('view transform:', e)
 SC.view_settings.look = 'None'
-# 1-pixel dark warm outlines at the low render resolution, like the game's outline pass. Set up but
-# OFF by default: Freestyle over the full map (400k-tri terrain + ~10k instances) ran out of memory
-# (15 GB+). Tick Render > Freestyle for close-up shots, or pass --freestyle.
+# 1-pixel dark warm outlines, like the game's outline pass. Set up but OFF by default: Freestyle over
+# a whole map runs out of memory. Tick Render > Freestyle for close-up shots, or pass --freestyle.
 SC.render.use_freestyle = '--freestyle' in ARGS
 SC.render.line_thickness_mode = 'ABSOLUTE'
 SC.render.line_thickness = 1.0
@@ -1043,7 +1248,7 @@ ls.select_by_visibility = True
 ls.select_by_edge_types = True
 ls.select_by_collection = True
 ls.collection = coll('Outlined (Freestyle)', None)
-for k in ('Terrain', 'Rocks', 'Trees', 'Props', 'Markers', 'Vehicles'):
+for k in ('Terrain', 'Rocks', 'Trees', 'Props', 'Structures', 'Markers', 'Vehicles'):
     ls.collection.children.link(COL[k])
 SC.collection.children.unlink(ls.collection)
 ls.select_silhouette = True
@@ -1053,18 +1258,28 @@ ls.select_material_boundary = True
 ls.select_external_contour = True
 if ls.linestyle is None:
     ls.linestyle = bpy.data.linestyles.new('Outline')
-ls.linestyle.color = lin(srgb('#2a1a14'))
+ls.linestyle.color = lin(srgb(LOOK['outline']))
 ls.linestyle.thickness = 1.0
 ls.linestyle.chaining = 'PLAIN'
-# exclude the library sources from the view layer (they render through their instances)
+# exclude the library sources from the view layer (they render through their instances); drop empty tops
 find_layer(vl.layer_collection, LIB).exclude = True
-# viewport: rendered shading with the scene world, looking through the first camera
+for n in TOP:
+    c = COL[n]
+    if not c.all_objects:
+        bpy.data.collections.remove(c)
+# viewport: opens looking through the Overview camera, material preview lit by the scene's sun and sky
 for scr in bpy.data.screens:
     for area in scr.areas:
         if area.type == 'VIEW_3D':
-            area.spaces.active.shading.type = 'MATERIAL'
-            area.spaces.active.clip_end = 3000
-SC['how_to'] = 'Regenerate: node tools/export/export_world.mjs <map>; blender --background --python tools/blender/world/build_world.py -- <map>'
+            spc = area.spaces.active
+            spc.shading.type = 'MATERIAL'
+            spc.shading.use_scene_lights = True
+            spc.shading.use_scene_world = True
+            spc.clip_end = CLIP
+            spc.clip_start = 0.1
+            r3d = spc.region_3d
+            r3d.view_perspective = 'CAMERA'
+SC['how_to'] = f'Regenerate: node tools/export/export_world.mjs {MAP}; blender --background --factory-startup --python tools/blender/world/build_world.py -- {MAP}'
 
 # ======================================================================================
 # Save (textures packed), then preview stills
@@ -1078,6 +1293,10 @@ sys.path.insert(0, os.path.dirname(HERE))
 import blend_save  # noqa: E402
 blend_save.save(OUT, log=log)   # compressed, no .blend1, no local paths / file-browser state
 log(f'saved {OUT} ({os.path.getsize(OUT) / 1e6:.1f} MB)')
+STATS = {'objects': len(bpy.data.objects), 'meshes': len(bpy.data.meshes), 'materials': len(bpy.data.materials), 'images': len(bpy.data.images),
+         'instances': sum(o.get('instances', 0) for o in bpy.data.objects) + sum(1 for o in bpy.data.objects if o.instance_type == 'COLLECTION'),
+         'collections': {c.name: len(c.all_objects) for c in SC.collection.children}}
+log('stats', json.dumps(STATS))
 
 
 def upscale(src, dst, k=4):
@@ -1100,10 +1319,13 @@ if RENDER:
     for cam in CAMS:
         if want and cam.name not in want.split(','):
             continue
+        if not want and not cam['preview'] and not os.environ.get('LR_ALL_CAMS'):
+            continue
         SC.camera = cam
-        # far views would be all haze: the game never sees the map from 300 m away
-        toon_group().nodes['Fog amount (scene)'].outputs[0].default_value = 0.0 if cam.name in ('Overview', 'Top (ortho)') else 1.0
-        slug = cam.name.lower().replace(' (ortho)', '').replace('-', ' ').replace(' ', '_')
+        # far views would be all haze: the game never sees the map from that far away
+        toon_group().nodes['Fog amount (scene)'].outputs[0].default_value = 1.0 if cam['fog'] else 0.0
+        slug = cam.name.lower().replace(' (ortho)', '').replace('-', ' ').replace('&', 'and').replace(' ', '_')
+        slug = ''.join(ch for ch in slug if ch.isalnum() or ch == '_').strip('_')
         small = os.path.join(bpy.app.tempdir, f'world_{MAP}_{slug}_small.png')
         SC.render.filepath = small
         t = time.time()

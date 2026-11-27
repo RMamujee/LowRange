@@ -23,12 +23,42 @@ Open items to start from: the "Needs playtesting" checklists below; the Pickup's
 | Physics | Custom tyre and drivetrain solver on Rapier. Solid axles and independent suspension, manual gearbox, high/low range, lockers, LSD and traction control, damage. Verified by the `test/*.mjs` suite. |
 | Maps | **Trail Park** (graded roads plus 5 rated trails) and **Race Track** ("Dust Bowl Circuit": laps, checkpoints, countdown, best laps). Select in the menu; the `?map=race` URL parameter loads the track directly. **The Gauntlet** (`?map=crawl`, `src/maps/crawl.js`): one 783 m, 12-stage test trail that keeps getting harder, with stage gates, splits, per-rig bests, a bypass track with spurs, and Y back to the current stage's gate (`src/crawl_course.js`, `src/crawl_view.js`). Plus three **side courses** on the same map (`src/maps/crawl_courses.js`): Broken Slab (blue, pick-your-line slab face), Camber Ridge (black, off-camber traverse to 29 degrees), Cobble Gully (double black, boulder gully down and out), each with sections, gates, per-rig bests and an access track; see *Gauntlet side courses* below. |
 | Desert | **Sunfall Basin** (`?map=desert`): dune sea with deep-sand physics, 5 km of desert tracks and a dry lake, four rated crawls plus a marked dune route, mesas, canyon, arch, hoodoos, camp. See the section below. |
-| Spawn points | BeamNG-style teleport: J / pause menu / map signposts. `src/spawns.js` derives the points from map data (trailhead, both trail ends outside the gates, Gauntlet stage gates + summit + bypass, each side course's start / section gates / finish, race grid / paddock / checkpoints) and footprint-checks them at load (grade, bumpiness, water/bog, rock/tree/prop/loose-prop discs; nudged along the path, skipped with a console warning if nothing is safe). Teleport = `spawnAt` in `src/main.js` (respawnFresh, park brake, neutral, cancels runs, camera snap, last point per map in localStorage). Tests: `node test/spawns.mjs`, `test/spawnsbrowser.mjs`. |
+| Spawn points | Teleport: J / pause menu / map signposts. `src/spawns.js` derives the points from map data (trailhead, both trail ends outside the gates, Gauntlet stage gates + summit + bypass, each side course's start / section gates / finish, race grid / paddock / checkpoints) and footprint-checks them at load (grade, bumpiness, water/bog, rock/tree/prop/loose-prop discs; nudged along the path, skipped with a console warning if nothing is safe). Teleport = `spawnAt` in `src/main.js` (respawnFresh, park brake, neutral, cancels runs, camera snap, last point per map in localStorage). Tests: `node test/spawns.mjs`, `test/spawnsbrowser.mjs`. |
 | Garage | Tyres, tread, lift, springs, damping, travel, engine, gearing, diffs, armour and paint, saved per rig (`src/garage.js`, `src/garage_ui.js`). |
 | Loading screen | Pixel-art "LowRange" title scene with staged boot (`src/boot.js`, `src/ui/`). |
 | Desktop | Electron offline game. `npm run desktop` runs it; `npm run dist:win` builds the installer and portable exe into `release/`. The builds are unsigned. F10 opens settings. |
 | Crash damage | `src/damage/`: impact energy per contact event (impulse x closing speed, per kg), a free-form deformation cage the glTF bodies follow (zone travel caps, no-inversion, buckling), glass / lamps / tear-off parts, location-based mechanical damage (radiator + overheating, engine, corner suspension, fender drag, driveshaft, oil pan, diffs, roof). Wheel damage is windowed AND gated on closing speed (wheel or the body above it): slow crawling can't bend or snap anything. `node test/crash.mjs`, `node test/slowcrawl.mjs`, `test/crashshots.mjs`, `test/lib/damage_watch.mjs`. The HUD's engine board (above the cluster) reads `car.crash.mech` + `car.dt.dead` / `powerScale` through the pure `engineStatus` in `src/hud/engine_state.js`: temperature strip with NORMAL / HOT (> 0.75, steam) / OVERHEATING (> 1.0, engine wear) zones, POWER % once heat (> 0.85) or engine damage costs power, OIL / COOL lamps (amber leaking with level, red under 25%, NO OIL / NO COOL), NO DRIVE F / R, and ENGINE SEIZED with its cause. Warnings blink for 2.4 s when they come on or get worse; a repair clears it all. `node test/enginehud.mjs`. |
 | Art | Interim procedural vehicles styled after the reference (`src/vehicle_view.js`). Set dressing: trees, bushes, flowers, fences, log edging and stumps (`src/art/`). The glTF loader picks up `public/models/**.glb` automatically (`docs/MODELING_SPEC.md`, `docs/ASSETS.md`). |
+
+## Blender world files (updated 2026-11-27)
+
+`art/blender/` has one world file per map, regenerated from the current game: `world_park.blend` (10.2 MB),
+`world_race.blend` (9.3 MB), `world_crawl.blend` (11.2 MB, The Gauntlet with its three side courses),
+`world_jungle.blend` (21.4 MB) and `world_desert.blend` (18.5 MB). Same collections in each: Terrain, Water,
+Paths, Rocks, Trees, Props, Structures, Markers (incl. every spawn point as a named arrow empty), Vehicles,
+Lights & Cameras, Library. Previews: `docs/previews/world_<map>_*.png`. Commands, contents and the known
+differences are in `art/blender/README.md`. In short:
+
+```
+npm ci --omit=dev --ignore-scripts                 # once per checkout
+node tools/export/export_world.mjs <map>           # park | race | crawl | jungle | desert | all
+"C:\Program Files\Blender Foundation\Blender 5.3\blender.exe" --background --factory-startup --python tools/blender/world/build_world.py -- <map>
+```
+
+- `tools/export/export_world.mjs` runs the game's own view builders headless (world, race, crawl, jungle and
+  desert views, spawns), with a small software canvas so the sign faces are the game's pixels. It found two
+  stale bugs from before: the old exporter crashed on the current sign code, and its ground tiles were read
+  at the wrong offset since pixeltex.js gained detail levels (every surface but grass showed the wrong tile).
+- `tools/blender/world/compare_world.py` reports how far an open world file is from a fresh export
+  (read-only). Before this update `world_park.blend` was behind on terrain (75% of vertices moved over
+  2 cm, 15% over 10 cm, up to 5 m at the old trail ends), rocks (426 then, 788 now: relief rocks), log
+  edging (70 logs then, 27 now) and the sign faces (Blender text then, the game's pixel font now), and both
+  old files still had the golden-haze sky. `world_race.blend` had only small terrain changes (max 10 cm).
+- The build and preview scripts for the props and vehicles still reproduce `public/models/*.glb` and their
+  `docs/previews/<id>_*.png` (checked by running them into a scratch copy, never into `public/`).
+- Run Blender for these scripts only as a separate background process with `--factory-startup` (without
+  it the user's add-ons, the MCP add-on included, load into that process). Never drive the open GUI
+  session from a build script.
 
 ## Next: Blender pipeline (start here)
 
