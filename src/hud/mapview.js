@@ -65,7 +65,8 @@ function bakeBase(ppm, trees) {
     const c0 = CHECKPOINTS[0], hw = TRACK.width / 2 + 2;
     for (let k = -hw; k <= hw; k += 0.5 / ppm) { const X = P2(c0.x + c0.tz * k), Z = P2(c0.z - c0.tx * k); px(g, Math.round(X), Math.round(Z), ((Math.round(k * ppm) & 1) ? P.cream : P.ol)); }
   }
-  for (const r of ROADS) { const w = Math.max(2, (r.width || 8) * ppm * 0.7); stamp(r, w + 2, P.w2); stamp(r, w, '#f4dfa8'); }
+  // (paved roads, where a map has them: dark asphalt with a pale centre line) [jungle]
+  for (const r of ROADS) { const w = Math.max(2, (r.width || 8) * ppm * 0.7); stamp(r, w + 2, P.w2); stamp(r, w, r.surface === 'paved' ? '#5a554e' : '#f4dfa8'); if (r.surface === 'paved' && w >= 4) stamp(r, 1, '#e0b84a'); }
   const coreOf = (diff) => (diff === 'green' ? P.green : diff === 'blue' ? P.blue : P.m1);
   for (const t of TRAILS) {
     const w = Math.max(1, (t.width || 5) * ppm * 0.55);
@@ -194,7 +195,7 @@ export class BigMap {
     Object.assign(this, { bases, waypoints, isRace, mapName, spawns });
     this.VW = 300; this.VH = 200; this.SB = 116;
     this.W = 6 + this.VW + 4 + this.SB + 6; this.H = 6 + 14 + this.VH + 6;
-    this.zooms = [0.5, 1, 2, 4]; this.zi = 0; this.cx = 0; this.cz = 0;
+    this.zooms = SIZE > 600 ? [0.25, 0.5, 1, 2, 4] : [0.5, 1, 2, 4]; this.zi = 0; this.cx = 0; this.cz = 0; // (a big map starts zoomed out to fit) [jungle]
     this.mx = 6; this.my = 20; this.hits = [];
     // [spawns] sidebar tab ('info' | 'spawn'), list selection / hover / scroll, the confirm prompt
     this.tab = 'info'; this.sel = -1; this.hover = -1; this.rowHover = -1; this.scroll = 0; this.prompt = -1; this.lastId = null;

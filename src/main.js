@@ -25,6 +25,7 @@ import { COURSES } from './terrain.js'; // [crawl] the Gauntlet's side courses
 import { buildSpawnPoints, loadLastSpawn, saveLastSpawn, liftFor } from './spawns.js'; // [spawns] named spawn points
 import { CamClear } from './cam_clear.js';
 import { materialAt } from './terrain.js'; // [tyre fx]
+import { surfaceAt } from './terrain.js'; // [jungle] trucks are placed on the top surface (a bridge deck, not the creek under it)
 import { getSettings } from './settings.js'; // [tyre fx]
 import { TyreFx } from './fx/tyre_fx.js'; // [tyre fx]
 import { MudView } from './fx/mud_view.js'; // [tyre fx] the bogs' rutted surface
@@ -73,10 +74,13 @@ sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 const SUN_DIR = new THREE.Vector3(-0.45, 0.8, 0.35).normalize();
 
-scene.add(buildTerrainMesh());
+// [jungle] Coralume Island draws its own ground (chunked, two levels of detail), sea, creek, jungle
+// dressing, trail gates and structures (src/art/jungle/view.js)
+const jungleView = MAP_ID === 'jungle' ? await import('./art/jungle/view.js') : null;
+scene.add(jungleView ? jungleView.buildTerrain(scene, camera) : buildTerrainMesh());
 const mudView = new MudView(scene, terrain.mud); // [tyre fx] ruts drawn over the bogs (src/fx/mud_view.js)
 scene.add(buildRocks(rocks));
-scene.add(buildTrees(trees));
+scene.add(jungleView ? jungleView.buildDressing(trees) : buildTrees(trees));
 // [physics props] loose stones and logs near the truck become real bodies (src/physics_props.js)
 const looseProps = new PropPhysics(RAPIER, world, terrain, { heightAt });
 adoptDressing(scene.getObjectByName('dressing'), looseProps);
@@ -86,11 +90,11 @@ scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutlin
 const isRace = MAP_KIND === 'race';
 const isCrawl = MAP_ID === 'crawl'; // [crawl] The Gauntlet brings its own stage gates and signs
 const crawlView = isCrawl ? buildCrawlView(scene, looseProps) : null;
-const gates = isRace ? [] : isCrawl ? crawlView.gates : buildMarkers(scene); // [start0, end0, start1, end1, ...]
+const gates = isRace ? [] : isCrawl ? crawlView.gates : jungleView ? jungleView.buildMarkers(scene) : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
 const camClear = new CamClear({ RAPIER, world, trees, scene, groundAt: visualHeightAt }); // keeps the camera out of canopies, signs, rocks
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
-scene.add(buildBackdrop());
+if (!jungleView) scene.add(buildBackdrop()); // [jungle] open sea all round the island
 // [gfx comfort] everything built so far is world: graded a step back so the vehicle (added
 // later, unmarked) stays the most saturated thing on screen (gfx/toon.js markWorld)
 markWorld(scene);
@@ -146,7 +150,7 @@ function updateTrails(p) {
         setGateDone(gates[i * 2]); setGateDone(gates[i * 2 + 1]);
         toast(`${t.name} complete in ${fmtT(a.t)}${first ? '' : ' (best ' + fmtT(st.best) + ')'}`, 4);
         game.active = null; game.finishGate = gate;
-        if (game.trails.every((x) => x.done) && !game.done) { game.done = true; toast(`All five trails conquered! Total ${fmtT(game.time)}`, 6); }
+        if (game.trails.every((x) => x.done) && !game.done) { game.done = true; toast(`All ${['', 'one', 'two', 'three', 'four', 'five', 'six'][TRAILS.length] ?? TRAILS.length} trails conquered! Total ${fmtT(game.time)}`, 6); }
       } else if (!a || a.trail !== i) {
         game.active = { trail: i, from: end, t: 0 };
         toast(`${t.name} · ${DIFF[t.diff].label}. Good luck!`, 2.5);
@@ -220,7 +224,7 @@ function spawn(i, opts) {
 function respawnFresh(x, z, yaw, lift = 0.3) {
   const old = car.dt, aired = car.airedDown, rsteer = car.rearSteerOn;
   car.destroy(); view.dispose();
-  const y = heightAt(x, z) + spec.tire.radius - spec.axleY + lift;
+  const y = surfaceAt(x, z) + spec.tire.radius - spec.axleY + lift;
   car = new Vehicle(RAPIER, world, spec, terrain, { x, y, z }, yaw);
   view = new VehicleView(scene, car);
   const d = car.dt;
@@ -337,7 +341,7 @@ let camSnap = false;                     // next camera update jumps behind the 
 // Teleport: a fresh, repaired truck at rest on the point (parking brake on, neutral, driver settings
 // kept by respawnFresh); any trail / stage / race run is cancelled so only driving through a gate
 // starts one, and nothing is credited for the jump.
-function spawnAt(sp) {
+function spawnAt(sp, tow = false) { // [jungle] tow: the same placement, not remembered as the last spawn point
   if (!car || !sp) return;
   terrain.mud.clear(); // [mud] a teleport is a fresh attempt: unrutted bogs
   respawnFresh(sp.x, sp.z, sp.yaw, liftFor(sp, spec));
@@ -360,10 +364,10 @@ function spawnAt(sp) {
     }
     shownCp = null;
   }
-  lastSpawn = sp; saveLastSpawn(sp);
+  if (!tow) { lastSpawn = sp; saveLastSpawn(sp); }
   hud.closeMap();
   updateSpawnButtons();
-  toast(`${sp.name}: repaired, parking brake on.${sp.note ? ' ' + sp.note : ''}`, 3.5);
+  toast(tow ? sp.note : `${sp.name}: repaired, parking brake on.${sp.note ? ' ' + sp.note : ''}`, 3.5);
 }
 
 // pause menu: "Spawn points" (opens the list on the map) and "Restart at <last spawn>"
@@ -664,6 +668,7 @@ const MAP_TAGS = {
   park: 'Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.',
   race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
   crawl: 'The Gauntlet: one 780 m rock trail in 12 stages that only gets harder, from a gentle two-track to the Waterfall. A physics and driving test course, with a bypass track and split times, plus three side courses: Broken Slab, Camber Ridge and Cobble Gully.', // [crawl]
+  jungle: 'Coralume Island: a jungle volcano in open sea. Paved coast and mountain roads, dirt tracks through the trees, sand beaches and surf, and four rated crawls up to the crater rim.', // [jungle]
 };
 let selectedMap = MAP_ID;
 const mapName = (id) => MAPS.find((m) => m.id === id).name;
@@ -785,6 +790,9 @@ function frame(now) {
     looseProps.update(car.chassis.translation()); looseProps.sync(); // [physics props]
     view.update(playing ? input : null);
     updateCamera(dt);
+    // [jungle] level of detail, water, and deep-sea recovery to the nearest road
+    const towed = jungleView?.update(camera, clock, car, dt);
+    if (towed && playing && !paused) spawnAt(towed, true); // (runs cancelled, camera snapped, parking brake on, neutral)
     // [crash] a brief, gentle camera shake proportional to the crash energy (smooth, not jitter)
     const shk = car.crash.shake;
     if (shk > 0.01) camera.position.add(_v.set(Math.sin(clock * 37), Math.sin(clock * 29 + 1) * 0.6, Math.sin(clock * 41 + 2)).multiplyScalar(shk * 0.06));

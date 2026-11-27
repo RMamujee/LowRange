@@ -30,7 +30,8 @@ export class CamClear {
     this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
     this.cells = new Map();
     // canopy: round trees ~2.4 m radius from 2.2 m up, pines 1.9 m from 1.4 m, both up to ~6.5 m (scale 1)
-    for (const t of trees) this.add(t.x, t.z, 2.6 * t.s, { cyl: true, x: t.x, z: t.z, y0: t.y - 0.5, y1: t.y + 1.3 * t.s, y2: t.y + 6.6 * t.s, r0: 0.45 * t.s, r1: 2.3 * t.s });
+    // (a map whose trees are shaped otherwise gives each one its own canopy at scale 1: { y1, y2, r1 })
+    for (const t of trees) { const C = t.canopy; this.add(t.x, t.z, (C ? C.r1 + 0.3 : 2.6) * t.s, { cyl: true, x: t.x, z: t.z, y0: t.y - 0.5, y1: t.y + (C ? C.y1 : 1.3) * t.s, y2: t.y + (C ? C.y2 : 6.6) * t.s, r0: 0.45 * t.s, r1: (C ? C.r1 : 2.3) * t.s }); }
     scene.updateMatrixWorld(true);
     const m = new THREE.Matrix4(), bb = new THREE.Box3();
     scene.traverse((o) => {
