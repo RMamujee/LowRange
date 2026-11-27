@@ -237,6 +237,7 @@ export class Drivetrain {
       if (throttle >= 0.03 || (G0 !== 0 && G0 * w[1] > w[0] * 1.04)) this.creepBlock = false;
       else if ((this.lastClutchAcc || 0) < -1e-4) this.creepBlock = true;
       if (this.creepBlock) engage = 0;
+      this.biteRpm = hiRpm; // full bite at this throttle: where a stalled truck holds the revs (below)
     }
     this.engagement = engage;
 
@@ -267,6 +268,42 @@ export class Drivetrain {
 
     // --- constraints ---
     const G = this.totalRatio();
+    // Stall assist (auto-clutch): wheels stopped against something (a ledge, a parking brake)
+    // with the throttle held. The bite curve alone settles where the slipping clutch takes all
+    // the engine makes at low revs (the Pickup's V6: about 1330 rpm and 0.16 engagement at 60%
+    // throttle, a third of its peak torque), so the truck sat there. A driver slips the clutch
+    // to keep the revs up: here, after 0.3 s of stall under at least 15% throttle, the clutch
+    // passes the engine's torque less what it takes to raise the revs (at most 15% held back),
+    // easing them up to the full-bite rpm for this throttle (biteRpm, which rises with
+    // throttle). The torque at the wheels then grows smoothly to the engine's torque at that rpm,
+    // until the tyres climb or break traction; it eases back out over about 0.25 s once they
+    // turn. It never pulls the revs below biteRpm, so it cannot stall the engine. It only starts when the
+    // engine's torque at biteRpm and the driver's throttle beats what the clutch passes now by
+    // 15%: at light throttle the lugging engine, propped up by the idle governor, gives more
+    // than the throttle would at higher revs (easing off there let a truck roll back on a hill
+    // start). Once started it stays on while the wheels stay stalled.
+    // driven wheels' mean spin in the gear's direction (rad/s): rolling back down a hill against
+    // the gear counts as stalled too (at 30% throttle the Pickup rolls back down a 10° slope,
+    // its engine held at 808 rpm and 39 N·m by the slipping clutch; this raises the revs, but
+    // 30% of the V6 at 1671 rpm is still too little to stop it: see HANDOFF)
+    const wheelW = (Math.sign(G) * w[1]) / s.final;
+    const stalled = this.autoClutch && this.running && G !== 0 && throttle >= 0.15 && this.clutchSlip && wheelW < 0.3;
+    this.stallT = stalled ? Math.min((this.stallT || 0) + dt, 2) : 0;
+    if (!stalled) this.assist = false;
+    else if (!this.assist && this.stallT >= 0.3 && this.biteRpm) {
+      const r = this.biteRpm, now = Math.abs(this.lastClutchAcc || 0) / dt; // N·m the clutch passes now
+      const atBite = throttle * this.maxTorqueAt(r) * (this.powerScale ?? 1) - e.friction * ((0.35 + r / 3000) * (1 - throttle * 0.8) + (1 - throttle) * (r / 1400));
+      this.assist = atBite > 1.15 * now;
+    }
+    this.assistK = clamp((this.assistK || 0) + (this.assist ? 2 : -4) * dt, 0, 1); // in over 0.5 s, out over 0.25 s
+    const ks = smooth(0, 1, this.assistK);
+    if (ks > 0 && engage > 0.001 && this.biteRpm) {
+      const T = Math.max(0, this.engineTorque);
+      const acc = (this.biteRpm - rpm) / RPM / 0.5; // rad/s², revs to biteRpm with a 0.5 s time constant
+      const cap = Math.max(0.85 * T, T - I[0] * acc);
+      engage += (clamp(cap / this.clutchMaxT, 0, 1) - engage) * ks;
+      this.engagement = engage;
+    }
     const C = this.linkConstraints(D);
     const nDrive = () => C.length;
     let clutchC = null;
