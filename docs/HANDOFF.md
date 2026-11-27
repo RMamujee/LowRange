@@ -59,6 +59,7 @@ To-do, roughly in order:
 ```bash
 node test/blocklist_names.mjs                   # instant: no fetchable file may be named like an ad/tracker (see below)
 node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/creep.mjs && node test/damage.mjs && node test/slowcrawl.mjs && node test/crash.mjs && node test/enginehud.mjs
+node test/waypoints.mjs && node test/camclear.mjs     # stored waypoints on every map; camera vs. trees / signs / ground
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
 node test/race.mjs                              # race autopilot

@@ -92,14 +92,15 @@ if (which === 'all' || which === 'park') {
     await page.mouse.click(pt[0], pt[1], { button });
     await sleep(page, 150);
   };
-  const ahead = await page.evaluate(() => { const g = window.__game, p = g.car.chassis.translation(), v = g.gfx.camera.getWorldDirection(new g.gfx.camera.position.constructor()); const l = Math.hypot(v.x, v.z); return [p.x + v.x / l * 60, p.z + v.z / l * 60]; });
+  // (both points straight ahead: a fixed world offset could land on a spawn marker, which opens its prompt)
+  const [ahead, far] = await page.evaluate(() => { const g = window.__game, p = g.car.chassis.translation(), v = g.gfx.camera.getWorldDirection(new g.gfx.camera.position.constructor()); const l = Math.hypot(v.x, v.z); return [60, 110].map((d) => [p.x + v.x / l * d, p.z + v.z / l * d]); });
   await clickAt(ahead[0], ahead[1]);
   d = await dbg(page);
   check(d.wps.length === 1, `click sets a waypoint (${JSON.stringify(d.wps)})`);
-  await clickAt(ahead[0] + 40, ahead[1] - 30);
+  await clickAt(far[0], far[1]);
   d = await dbg(page);
   check(d.wps.length === 2, 'a second click adds waypoint 2');
-  await clickAt(ahead[0] + 40, ahead[1] - 30, 'right');
+  await clickAt(far[0], far[1], 'right');
   d = await dbg(page);
   check(d.wps.length === 1, 'right-click removes it');
   await page.screenshot({ path: process.env.OUT ? `${process.env.OUT}/hud_map_wp.png` : 'test/shots/hud_map_wp.png' }).catch(() => {});

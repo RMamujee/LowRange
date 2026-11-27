@@ -9,7 +9,7 @@ import { buildSetDressing, gridClearance } from './art/dressing.js';
 import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals, visualSurface } from './gfx/terrain_look.js';
 import { BACKDROP } from './gfx/palette.js';
 import { cullBeyond } from './gfx/pipeline.js';
-import { fitFace, signpost, bannerBoard, faceYaw } from './art/signs.js';
+import { fitFace, signpost, bannerBoard, faceYaw, signMaterial } from './art/signs.js';
 const NROADS = ROADS.length;
 
 export function buildTerrainMesh() {
@@ -148,7 +148,10 @@ function gate(path, atEnd) {
   const mat = new THREE.MeshStandardMaterial({ color: col, flatShading: true });
   const hw = path.width / 2 + 0.9;
   // one big line; the banner may overhang the posts a little rather than shrink the letters
-  const face = fitFace({ title: path.name, sub: atEnd ? 'FINISH' : 'START', diff: path.diff, frame: 2 }, { m: BANNER_M, minW: hw * 2 + 0.4, maxW: hw * 2 + 2.4 });
+  // a run starts at whichever gate you drive in through, so every gate reads START from outside the
+  // trail and FINISH from inside it (the far end used to greet its spawn point with FINISH)
+  const fit = (sub) => fitFace({ title: path.name, sub, diff: path.diff, frame: 2 }, { m: BANNER_M, minW: hw * 2 + 0.4, maxW: hw * 2 + 2.4 });
+  const face = fit('START'), back = fit('FINISH');
   const y0 = 2.7; // banner's lower edge
   for (const sx of [-hw, hw]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, y0 + 0.4, 0.25), mat);
@@ -157,6 +160,11 @@ function gate(path, atEnd) {
     cap.position.set(sx, y0 + face.h + 0.15, 0); g.add(cap);
   }
   const banner = bannerBoard(face);
+  // the group's +z points along the trail: into it at the start, out of it at the far end; the
+  // +z plane is seen from the side +z points to
+  const inside = banner.children.find((o) => o.isMesh && o.geometry.type === 'PlaneGeometry' && (o.position.z > 0) === !atEnd);
+  inside.material = signMaterial(back.texture);
+  banner.userData.material.name = 'gate-start'; inside.material.name = 'gate-finish'; // for test/browser-qa.mjs
   banner.position.y = y0 + face.h / 2;
   g.add(banner);
   return g;
