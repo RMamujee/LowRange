@@ -116,11 +116,18 @@ Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete
 | Mouse drag | orbit the camera |
 | M | map: click to set waypoints, right-click to remove, drag / wheel to pan / zoom |
 | J | spawn points: the map opens on the list (arrows + Enter, or click a signpost); J again closes |
+| K | winch: tap to show the best anchor ahead (tree, big rock or recovery post) and again for the next; hold to hook up |
+| U / O | winch in / pay out (hold; the engine must be running; neutral, or in gear to help with the wheels) |
+| L | unhook and stow the winch line |
 | N | mute |
 | H | help |
 | Esc | pause (RESUME returns to the same truck; "Restart at trailhead" repairs; "Spawn points" and "Restart at <last spawn>") |
 
 A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch, A for the parking brake, R3 for the map.
+
+The winch board above the chassis board (bottom right) shows the line out, the load (red zone near the rated pull) and
+the state, and has clickable NEXT / HOOK and IN / OUT / OFF buttons. A run during which the winch pulled still counts,
+but as an assisted run with its own best.
 
 ## Tests
 
@@ -128,6 +135,8 @@ Headless physics checks run in Node, for example:
 
 - `node test/brake.mjs`: braking distances
 - `node test/slopehold.mjs`: parked on slopes (every rig, surfaces, brakes) must not creep; mud past the grip must slide
+- `node test/winch.mjs`: the winch (stuck at the Waterfall, bogged in Bog Run, tension cap and stall, holding and releasing a taut line, slack line, angled pull, clean-up)
+- `node test/recovery_points.mjs`: recovery points on every map (footprint check, every crux covered)
 - `node test/parkbrake.mjs`: the parking brake holds the engine in first (4-Low) without stalling
 - `node test/obstacle.mjs ledge`: ledge climbing
 - `node test/trails.mjs lc70,taco,wrx 240`: an autopilot drives each trail
