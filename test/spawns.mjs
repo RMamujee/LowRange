@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 if (!process.env.MAP) {
   let failed = 0;
-  for (const m of ['park', 'race', 'crawl', 'jungle']) {
+  for (const m of ['park', 'race', 'crawl', 'jungle', 'desert']) {
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], { env: { ...process.env, MAP: m }, stdio: 'inherit' });
     if (r.status !== 0) failed++;
   }
@@ -47,7 +47,7 @@ check(list.filter((s) => s.default).length === 1 && list[0].default, 'exactly on
 check(list.every((s) => typeof s.name === 'string' && s.name && Number.isFinite(s.x) && Number.isFinite(s.z) && Number.isFinite(s.yaw) && !s.unsafe), 'every point has a name and a finite, checked pose');
 const again = S.buildSpawnPoints({ rocks, trees, warn: () => {} });
 check(JSON.stringify(again) === JSON.stringify(list), 'deterministic: same list on a second build');
-const minimum = { park: 6, race: 7, crawl: 14, jungle: 20 }[T.MAP_ID];
+const minimum = { park: 6, race: 7, crawl: 14, jungle: 20, desert: 14 }[T.MAP_ID];
 check(list.length >= minimum, `at least ${minimum} spawn points (${list.length})`);
 if (T.MAP_ID === 'crawl') check(T.TRAILS[0].stages.every((st) => ids.includes(`stage-${st.n}`)) && ids.includes('summit') && ids.includes('bypass'), 'every stage gate, the summit and the bypass start');
 if (T.MAP_ID === 'race') check(T.CHECKPOINTS.slice(1).every((c) => ids.includes(`cp-${c.i}`)) && ids.includes('grid') && ids.includes('paddock'), 'grid, paddock and every checkpoint');

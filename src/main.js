@@ -76,11 +76,16 @@ const SUN_DIR = new THREE.Vector3(-0.45, 0.8, 0.35).normalize();
 
 // [jungle] Coralume Island draws its own ground (chunked, two levels of detail), sea, creek, jungle
 // dressing, trail gates and structures (src/art/jungle/view.js)
-const jungleView = MAP_ID === 'jungle' ? await import('./art/jungle/view.js') : null;
-scene.add(jungleView ? jungleView.buildTerrain(scene, camera) : buildTerrainMesh());
+// [map views] a map may bring its own view module, with any of these hooks: buildTerrain(scene, camera),
+// buildDressing(trees, { scene, camera, sun }), buildMarkers(scene), update(camera, t, car, dt) (which may
+// return a tow { x, z, yaw, msg }), clear() (a fresh attempt: start, restart, teleport). Coralume Island above; [desert] Sunfall Basin (src/desert/view.js):
+// desert dressing, sky and light, dune shading, sand tyre marks. Loaded only on their own map.
+const MAP_VIEWS = { jungle: () => import('./art/jungle/view.js'), desert: () => import('./desert/view.js') };
+const mapView = MAP_VIEWS[MAP_ID] ? await MAP_VIEWS[MAP_ID]() : null;
+scene.add(mapView?.buildTerrain ? mapView.buildTerrain(scene, camera) : buildTerrainMesh());
 const mudView = new MudView(scene, terrain.mud); // [tyre fx] ruts drawn over the bogs (src/fx/mud_view.js)
 scene.add(buildRocks(rocks));
-scene.add(jungleView ? jungleView.buildDressing(trees) : buildTrees(trees));
+scene.add(mapView?.buildDressing ? mapView.buildDressing(trees, { scene, camera, sun }) : buildTrees(trees));
 // [physics props] loose stones and logs near the truck become real bodies (src/physics_props.js)
 const looseProps = new PropPhysics(RAPIER, world, terrain, { heightAt });
 adoptDressing(scene.getObjectByName('dressing'), looseProps);
@@ -90,11 +95,11 @@ scene.traverse((o) => { if (o.name === 'tufts' || o.name === 'flowers') noOutlin
 const isRace = MAP_KIND === 'race';
 const isCrawl = MAP_ID === 'crawl'; // [crawl] The Gauntlet brings its own stage gates and signs
 const crawlView = isCrawl ? buildCrawlView(scene, looseProps) : null;
-const gates = isRace ? [] : isCrawl ? crawlView.gates : jungleView ? jungleView.buildMarkers(scene) : buildMarkers(scene); // [start0, end0, start1, end1, ...]
+const gates = isRace ? [] : isCrawl ? crawlView.gates : mapView?.buildMarkers ? mapView.buildMarkers(scene) : buildMarkers(scene); // [start0, end0, start1, end1, ...]
 const raceView = isRace ? buildRaceDressing(scene) : null;
 const camClear = new CamClear({ RAPIER, world, trees, scene, groundAt: visualHeightAt }); // keeps the camera out of canopies, signs, rocks
 // distant ranges beyond the map edge (layered silhouettes, world_view.js)
-if (!jungleView) scene.add(buildBackdrop()); // [jungle] open sea all round the island
+if (MAP_ID !== 'jungle') scene.add(buildBackdrop()); // [jungle] open sea all round the island ([desert] keeps it: recoloured as distant rimrock)
 // [gfx comfort] everything built so far is world: graded a step back so the vehicle (added
 // later, unmarked) stays the most saturated thing on screen (gfx/toon.js markWorld)
 markWorld(scene);
@@ -205,6 +210,7 @@ const buildKey = (s) => s.id + JSON.stringify(s.build);
 function spawn(i, opts) {
   if (car) { car.destroy(); view.dispose(); }
   terrain.mud.clear(); // [mud] a fresh truck at the trailhead: unrutted bogs
+  mapView?.clear?.(); // [map views] and the map's own ground marks (the desert's sand tyre marks)
   spec = builtSpec(i);
   const y = heightAt(SPAWN.x, SPAWN.z) + spec.tire.radius - spec.axleY + 0.15;
   car = new Vehicle(RAPIER, world, spec, terrain, { x: SPAWN.x, y, z: SPAWN.z }, SPAWN.yaw);
@@ -261,6 +267,7 @@ function recover() {
 function restartTrail() {
   if (!car) return;
   terrain.mud.clear(); // [mud] a restart (trail, Gauntlet stage, race) gets fresh, unrutted bogs
+  mapView?.clear?.(); // [map views]
   if (isRace) { raceRestart(); return; }
   if (courses) { // [crawl] back to the gate of the stage / section you're in (the start before the second)
     const r = courses.restartPose(), c = r.course;
@@ -344,6 +351,7 @@ let camSnap = false;                     // next camera update jumps behind the 
 function spawnAt(sp, tow = false) { // [jungle] tow: the same placement, not remembered as the last spawn point
   if (!car || !sp) return;
   terrain.mud.clear(); // [mud] a teleport is a fresh attempt: unrutted bogs
+  mapView?.clear?.(); // [map views]
   respawnFresh(sp.x, sp.z, sp.yaw, liftFor(sp, spec));
   parkBrake = true;
   keys.clear(); input.throttle = 0; input.brake = 0; input.steer = 0;
@@ -668,6 +676,7 @@ const MAP_TAGS = {
   park: 'Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.',
   race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
   crawl: 'The Gauntlet: one 780 m rock trail in 12 stages that only gets harder, from a gentle two-track to the Waterfall. A physics and driving test course, with a bypass track and split times, plus three side courses: Broken Slab, Camber Ridge and Cobble Gully.', // [crawl]
+  desert: 'Sunfall Basin: an open desert. A dune sea (air down, keep your momentum), fast dirt tracks and a dry lake, and four rated rock crawls on slickrock, a slot canyon and a mesa stairway.', // [desert]
   jungle: 'Coralume Island: a jungle volcano in open sea. Paved coast and mountain roads, dirt tracks through the trees, sand beaches and surf, and four rated crawls up to the crater rim.', // [jungle]
 };
 let selectedMap = MAP_ID;
@@ -790,8 +799,8 @@ function frame(now) {
     looseProps.update(car.chassis.translation()); looseProps.sync(); // [physics props]
     view.update(playing ? input : null);
     updateCamera(dt);
-    // [jungle] level of detail, water, and deep-sea recovery to the nearest road
-    const towed = jungleView?.update(camera, clock, car, dt);
+    // [map views] jungle: level of detail, water, and deep-sea recovery to the nearest road; desert: sand tyre marks
+    const towed = mapView?.update?.(camera, clock, car, dt);
     if (towed && playing && !paused) spawnAt(towed, true); // (runs cancelled, camera snapped, parking brake on, neutral)
     // [crash] a brief, gentle camera shake proportional to the crash energy (smooth, not jitter)
     const shk = car.crash.shake;
