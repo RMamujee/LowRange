@@ -16,3 +16,4 @@ tools/blender/__pycache__/
 *.pfx
 *.p12
 *.blend1
+.vercel
