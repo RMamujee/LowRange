@@ -85,7 +85,7 @@ Measured from the game today. The "frame bottom" is the lowest point of the chas
 |---|---|---|---|---|---|---|---|---|---|---|
 | `taco` | lifted Tacoma-style double-cab pickup | IFS front, solid rear axle (leaf springs look) | 0.465 / 0.32 | 1.62 | 3.24 | 0.465 | 0.83 | 0.53 | 5.35 × 1.85 × 2.08 | 0.12 / 0.16 |
 | `lc70` | 70-series-style 4-door wagon | solid axles both ends | 0.455 / 0.30 | 1.56 | 2.73 | 0.455 | 0.86 | 0.53 | 4.90 × 1.80 × 2.42 | 0.13 / 0.18 |
-| `wrx` | WRX-style rally sedan | independent all round (struts) | 0.33 / 0.21 | 1.52 | 2.62 | 0.33 | 0.59 | 0.39 | 4.40 × 1.70 × 1.69 | 0.11 / 0.12 |
+| `wrx` | WRX-style rally sedan | independent all round (struts) | 0.33 / 0.21 | 1.52 | 2.62 | 0.33 | 0.59 | 0.25 (floor pan; frame box 0.39) | 4.40 × 1.70 × 1.69 | 0.11 / 0.12 |
 | `goat` | tube-chassis rock buggy | solid axles both ends | 0.51 / 0.38 | 1.78 | 2.75 | 0.51 | 0.89 | 0.64 | 3.40 × 1.50 × 2.24 | 0.16 / 0.26 |
 | `mule` | expedition truck with camper box | solid axles both ends | 0.60 / 0.45 | 2.00 | 3.90 | 0.60 | 1.10 | 0.65 | 6.40 × 2.10 × 2.85 | 0.15 / 0.20 |
 

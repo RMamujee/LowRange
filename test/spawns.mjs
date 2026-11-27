@@ -1,7 +1,7 @@
 // Spawn points (src/spawns.js), checked in a headless physics world: for the map, build the spawn
 // list exactly as the game does, then for every rig drop a fresh truck at every spawn point (the
 // same height and pose main.js respawnFresh uses), hold it on the parking brake in neutral for 3 s
-// and assert: not flipped, at rest (under 3 cm in the last 0.5 s: the Cruiser idles with a few cm/s of chassis shimmy even on flat ground), no damage, all four wheels on the ground. Before that, a
+// and assert: not flipped, at rest (under 1.5 cm in the last 0.5 s: 2.5 s after the drop the Cruiser's soft solid axles still sway a few mm; the long hold on slopes is test/slopehold.mjs), no damage, all four wheels on the ground. Before that, a
 // Rapier shape query over the footprint asserts no rock / tree / prop collider is in the way.
 // Also: the list is deterministic, ids are unique, saved ids are validated, and 40 teleports leave
 // the body / collider counts where they started (no leaks).
@@ -100,7 +100,7 @@ for (const id of rigs) {
     const h = car.health, healthy = h.engine === 1 && h.body === 1 && h.tire.every((x) => x === 1) && h.susp.every((x) => x === 1) && !car.broken.some(Boolean);
     const grounded = car.wheelState.filter((w) => w.grounded).length;
     const drift = Math.hypot(p1.x - sp.x, p1.z - sp.z);
-    const ok = !car.upsideDown() && Math.abs(att.roll) < 0.3 && Math.abs(att.pitch) < 0.3 && moved < 0.03 && speed < 0.08 && healthy && grounded === 4 && drift < 1.0;
+    const ok = !car.upsideDown() && Math.abs(att.roll) < 0.3 && Math.abs(att.pitch) < 0.3 && moved < 0.015 && speed < 0.08 && healthy && grounded === 4 && drift < 1.0;
     check(ok, `${id} @ ${sp.name}: roll ${(att.roll * 57.3).toFixed(1)}° pitch ${(att.pitch * 57.3).toFixed(1)}° moved ${moved.toFixed(3)} m in the last 0.5 s, speed ${speed.toFixed(3)}, wheels down ${grounded}/4, healthy ${healthy ? 'yes' : JSON.stringify(h)}, ${drift.toFixed(2)} m from the point`);
     rows.push([id, sp.id, (att.roll * 57.3).toFixed(1), (att.pitch * 57.3).toFixed(1), moved.toFixed(3), grounded]);
     car.destroy();

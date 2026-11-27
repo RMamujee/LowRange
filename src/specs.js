@@ -53,7 +53,8 @@ export const ALL_VEHICLES = [
     blurb: 'Gravel-spec turbo AWD rally sedan. Independent all round, permanent AWD, no low range. Flies on roads, suffers on rock.',
     body: 'wrx',
     color: 0x1f4fa8,
-    chassis: { mass: 1180, size: [1.7, 0.4, 4.4], comY: -0.12 },
+    // floor: chassis-local height of the floor pan, below the frame box (0.25 m off the ground)
+    chassis: { mass: 1180, size: [1.7, 0.4, 4.4], comY: -0.12, floor: -0.34 },
     wheelbase: 2.62, track: 1.52,
     axleY: -0.26,
     tire: { radius: 0.33, width: 0.21, mass: 20 },

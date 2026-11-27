@@ -14,6 +14,10 @@ import { CrashModel } from './damage/crash.js';
 const G = 9.81;
 const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
 const WHEEL_V0 = 3.0, WHEEL_V1 = 5.0; // wheel closing speed (m/s): no wheel damage below V0, full above V1
+// Standing tyres (postPhysics): a patch slower than STICK_V (m/s, ground and tread speed) holds
+// its spot: HOLD_BETA of the slide since it stopped is taken back per step (at most HOLD_MAX m),
+// and its grip rows get a little compliance, HOLD_CFM (m/s per N·s), like the tread's.
+const STICK_V = 0.04, HOLD_BETA = 0.1, HOLD_MAX = 0.05, HOLD_CFM = 1e-4;
 
 // ---- tiny vector/quaternion helpers (plain objects, no three.js) ----
 const v = (x, y, z) => ({ x, y, z });
@@ -91,7 +95,22 @@ export class Vehicle {
     if (spec.body === 'pickup') { box(cw * 0.5, 0.5, 0.95, 0, ch / 2 + 0.5, -0.35, 0.4); box(cw * 0.5, 0.22, cl * 0.2, 0, ch / 2 + 0.22, cl * 0.3, 0.4); }
     if (spec.body === 'taco') { box(cw * 0.5, 0.48, 0.95, 0, ch / 2 + 0.48, -0.25, 0.4); box(cw * 0.5, 0.3, cl * 0.17, 0, ch / 2 + 0.2, -cl * 0.33, 0.4); box(cw * 0.5, 0.25, cl * 0.17, 0, ch / 2 + 0.25, cl * 0.3, 0.4); }
     if (spec.body === 'lc70') { box(cw * 0.5, 0.62, 1.55, 0, ch / 2 + 0.62, 0.55, 0.4); box(cw * 0.48, 0.3, 0.6, 0, ch / 2 + 0.3, -cl * 0.36, 0.4); }
-    if (spec.body === 'wrx') { box(cw * 0.5, 0.3, cl * 0.48, 0, ch / 2 + 0.2, 0, 0.4); box(cw * 0.44, 0.28, 1.15, 0, ch / 2 + 0.62, 0.15, 0.4); }
+    if (spec.body === 'wrx') {
+      box(cw * 0.5, 0.3, cl * 0.48, 0, ch / 2 + 0.2, 0, 0.4); box(cw * 0.44, 0.28, 1.15, 0, ch / 2 + 0.62, 0.15, 0.4);
+      // The sedan's underside hangs below the frame box (0.39 m up). In the model
+      // (public/models/vehicles/wrx.glb) the floor pan is 0.25 m off the ground from bumper to
+      // bumper, the sills 0.30 m between the arches and the front bumper 0.26-0.29 m, 0.4-0.7 m
+      // ahead of the front tyres. Without these boxes the physics cleared 0.14 m more than the
+      // car you see, so its belly and bumper never met a ledge and it walked 0.45 m ones.
+      // (The 0.19 m splitter lip under the bumper is flexible trim: it scrapes, it doesn't
+      // hold the car up, so it has no box.)
+      // Chassis-local, so a lift or bigger tyres raise them with the body.
+      const f = spec.chassis.floor; // floor pan underside (0.25 m up on the stock car)
+      const under = (hx, yb, hz, oz) => box(hx, (-ch / 2 - yb) / 2, hz, 0, (-ch / 2 + yb) / 2, oz);
+      under(0.5, f, 2.22, -0.08);         // floor pan, inside the wheels, bumper to bumper
+      under(0.8, f + 0.05, 0.8, 0);       // sills, between the wheel arches
+      under(0.78, f + 0.02, 0.25, -2.05); // front bumper
+    }
     if (spec.body === 'truck') { box(cw * 0.5, 0.65, 0.9, 0, ch / 2 + 0.65, -cl * 0.35, 0.4); box(cw * 0.5, 0.55, cl * 0.3, 0, ch / 2 + 0.55, cl * 0.17, 0.4); }
     this.chassis = cb;
     this.chassisI = v(M / 12 * ((ch * 2.4) ** 2 + cl ** 2) * 0.8 * 1.15, M / 12 * (cw ** 2 + cl ** 2) * 0.8 * 1.15, M / 12 * ((ch * 2.4) ** 2 + cw ** 2) * 0.8 * 1.15);
@@ -205,6 +224,7 @@ export class Vehicle {
       }
     }
     this.grace = 1.5; // no damage while a fresh spawn / recovery settles
+    this.hold = null; // standing tyres' anchors (postPhysics): none after a rebuild
     this.wheelHandles = this.wheelColliders.map((c) => c.handle);
     this.bodyHandles = [];
     this.partOf = new Map(); // damage collider handle -> { part: 'body' | 'axle0' | 'axle1', body }
@@ -499,7 +519,7 @@ export class Vehicle {
         // a loose prop under the tyre (physics_props.js): see step 2
         const ob = ev.other.parent();
         const dyn = ob && ob.isDynamic() && this.terrain.propInfo && this.terrain.propInfo.get(ev.other.handle);
-        patches.push({ wheel: i, p, n, d, e, k, vp, N: len0, mat: this.matOf(ev.other, p), ob: dyn ? ob : null, prop: dyn || null });
+        patches.push({ wheel: i, p, n, d, e, k, vp, N: len0, mat: this.matOf(ev.other, p), ob: dyn ? ob : null, prop: dyn || null, oh: ev.other.handle }); // oh: what it stands on (static-hold anchor key)
         this.wheelState[i].contact = true;
       }
     }
@@ -629,6 +649,22 @@ export class Vehicle {
       extra.rows.push({ pairs: [k + 3, ty.x, k + 4, ty.y, k + 5, ty.z], v0: wv.y, lo: -capY, hi: capY });
     }
     for (const pt of patches) if (pt.pr0 && !pt.pr0.held) { pt.pr = pt.pr0; pt.vp = sub(pt.vp, pt.ob.velocityAtPoint(pt.p)); }
+    // Standing tyres hold their spot (static friction). Without this a braked truck slid
+    // 1-2 cm/s down a few degrees of slope with its wheels locked, for two reasons:
+    //  - the engine's step applies gravity and moves the truck before these grip rows run (tyre
+    //    friction is zero in the engine), so rows that only cancel the slip they find always
+    //    leave g·sin(slope)·h per step of creep;
+    //  - four stiff patches over-constrain the rigid chassis: the solve has internal "squeeze"
+    //    modes (left against right, front against rear) that cost nothing, so millimetre
+    //    mismatches in the slip measured on the separately jointed wheel bodies drove them to
+    //    the full mu x N budget, flipping every step (a chatter that walked the truck).
+    // So a patch standing on fixed ground measures its slip on the chassis (one rigid motion,
+    // no mismatches), its rows get a tread-like compliance (the squeeze modes stay near zero),
+    // it also cancels the velocity gravity is about to add, and it takes back a share of how far
+    // that point of the truck has slid since it stopped. All out of the same mu x N budget: a
+    // slope too steep or slippery still slides (the patch then moves too fast to count as
+    // standing and forgets its anchor). Rolling and spinning tyres are unchanged.
+    const gw = world.gravity, hold = new Map(), held0 = this.hold || new Map();
     for (const pt of patches) {
       const s = spins[pt.wheel];
       const slipL = dot(pt.vp, pt.d) + pt.k * s;
@@ -637,18 +673,48 @@ export class Vehicle {
       if (this.health.tire[pt.wheel] < 0.35) { mu *= 0.6; rr *= 3; } // flat tyre
       pt.mu = mu;
       pt.cap = mu * pt.N * h;
-      pt.rowL = rowFor(pt, pt.d, slipL, pt.cap);
+      let vL = slipL, vA = slipLat;
+      // (standing: ignoring the downslope gravity kick the engine's step just added, 1-2 cm/s on a slope)
+      const gt = sub(gw, scale(pt.n, dot(gw, pt.n)));
+      if (!pt.pr0 && len(sub(pt.vp, scale(gt, h))) < STICK_V && Math.abs(pt.k * s) < STICK_V) {
+        const vc = this.chassis.velocityAtPoint(pt.p);
+        // anchor key: wheel + what it stands on (`oh`, the other collider's handle). A patch type
+        // without one is keyed by its place in this step's list, so two never share an anchor
+        const key = pt.wheel + ':' + (pt.oh ?? 'n' + patches.indexOf(pt)), cp = this.chassis.translation();
+        const ang = this.wheelState[pt.wheel].angle;
+        const a = held0.get(key) || { w: pt.p, lp: qrot(inv, sub(pt.p, cp)), ang }; // anchor: where it stopped
+        hold.set(key, a);
+        const off = sub(add(cp, qrot(cq, a.lp)), a.w); // how far that bit of the truck has moved since
+        // slide = that movement, less what the tyre rolled (a free wheel may roll, not slide)
+        const eL = Math.max(-HOLD_MAX, Math.min(HOLD_MAX, dot(off, pt.d) + pt.k * (ang - a.ang)));
+        const eA = Math.max(-HOLD_MAX, Math.min(HOLD_MAX, dot(off, pt.e)));
+        vL = dot(vc, pt.d) + pt.k * s + dot(gw, pt.d) * h + (HOLD_BETA * eL) / h;
+        vA = dot(vc, pt.e) + dot(gw, pt.e) * h + (HOLD_BETA * eA) / h;
+        pt.held = true;
+      }
+      pt.rowL = rowFor(pt, pt.d, vL, pt.cap);
       slips[pt.wheel] = Math.max(slips[pt.wheel], Math.hypot(slipL, slipLat));
-      pt.rowA = rowFor(pt, pt.e, slipLat, pt.cap);
+      pt.rowA = rowFor(pt, pt.e, vA, pt.cap);
+      if (pt.held) pt.rowL.cfm = pt.rowA.cfm = HOLD_CFM;
       loads[pt.wheel] += pt.N;
       rrs[pt.wheel] = Math.max(rrs[pt.wheel], rr);
     }
 
     // 3. brakes + rolling resistance (N·m capacity per wheel)
     const drag = this.crash.mech.wheelDrag; // a fender crushed onto the tyre rubs it
+    // Parking brake / handbrake: a drum on the driveline ahead of the transfer case, acting on
+    // the rear wheels (and, through a locked transfer case or centre coupling, the front). Its
+    // torque reaches the wheels through the range and axle ratios, as the engine's does, so
+    // low range multiplies both. Sized to hold the engine's full torque in first gear with a
+    // 10% margin, and never weaker than the old 1.5 x brakeT per rear wheel in high range
+    // (which it still is for the Pickup; the Cruiser's and Sedan's grew to match their engines).
+    // It used to be 1.5 x brakeT in every range, so first in 4-Low drove through it as if it
+    // was off.
+    const parkT = Math.max(1.1 * spec.engine.peakT * spec.gears[0], (3 * spec.brakeT) / spec.final); // N·m at the drum
+    const park = input.handbrake ? (parkT * (spec.ranges[this.dt.range] ?? 1) * spec.final) / 2 : 0;
     const brakes = [0, 1, 2, 3].map((i) => {
       let b = input.brake * spec.brakeT + rrs[i] * loads[i] * t.radius + drag[i];
-      if (input.handbrake && i >= 2) b += spec.brakeT * 1.5;
+      if (i >= 2) b += park;
       return b;
     });
 
@@ -708,6 +774,7 @@ export class Vehicle {
       ws.angle += spins[i] * h;
     }
     this.patches = patches;
+    this.hold = hold;
     // engine torque reaction rolls the chassis
     const fwd = qrot(cq, v(0, 0, -1));
     this.chassis.applyTorqueImpulse(scale(fwd, -this.dt.engineTorque * h * 0.8), true);
