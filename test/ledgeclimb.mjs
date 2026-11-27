@@ -142,12 +142,16 @@ for (const cs of cases) {
 }
 console.log(`(a height counts with ${MAJORITY}/${START_OFFSETS.length} start offsets clear; ${((Date.now() - t0) / 1000).toFixed(0)} s, ${JOBS} jobs)`);
 if (process.env.LEDGE_ASSERT) {
-  // expected limits (m): [min, max] tallest single ledge cleared by the majority. The Rally
-  // Sedan's floor pan and bumper sit 0.25-0.27 m up, so it stops at about its tyre radius.
+  // expected limits (m): [min, max] tallest single ledge cleared by the majority (measured with
+  // the auto-clutch's stall assist). The Rally Sedan's floor pan and bumper sit 0.25-0.27 m up,
+  // so it stops at about its tyre radius (max 0.35). Lowered from the old one-start limits only
+  // where the old number was luck: Cruiser square crawl 0.45 m cleared 3/8 starts before the
+  // stall assist (1/8 after; it hangs up with all four tyres spinning, a grip limit), Sedan
+  // square crawl 0.25 m 3/8 (5/8 after).
   const expect = {
-    'wrx/square/crawl': [0.2, 0.35], 'wrx/chamfer/crawl': [0.2, 0.35], 'wrx/square/speed': [0.2, 0.35], 'wrx/chamfer/speed': [0.2, 0.35],
-    'lc70/square/crawl': [0.45, 9], 'lc70/chamfer/crawl': [0.65, 9], 'lc70/square/speed': [0.55, 9], 'lc70/chamfer/speed': [0.7, 9],
-    'taco/square/crawl': [0.3, 9], 'taco/chamfer/crawl': [0.55, 9], 'taco/square/speed': [0.3, 9], 'taco/chamfer/speed': [0.55, 9],
+    'wrx/square/crawl': [0.2, 0.35], 'wrx/chamfer/crawl': [0.3, 0.35], 'wrx/square/speed': [0.25, 0.35], 'wrx/chamfer/speed': [0.35, 0.35],
+    'lc70/square/crawl': [0.4, 9], 'lc70/chamfer/crawl': [0.7, 9], 'lc70/square/speed': [0.6, 9], 'lc70/chamfer/speed': [0.75, 9],
+    'taco/square/crawl': [0.35, 9], 'taco/chamfer/crawl': [0.65, 9], 'taco/square/speed': [0.35, 9], 'taco/chamfer/speed': [0.65, 9],
   };
   let fail = 0;
   for (const [k, [a, b]] of Object.entries(expect)) {
