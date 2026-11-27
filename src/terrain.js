@@ -3,6 +3,7 @@
 // env var in Node) and re-exports it under one interface, so physics, views and tests
 // don't care which map they run on. Switching maps reloads the page with a new ?map=.
 import * as common from './maps/common.js';
+import { MudField } from './mud.js';
 export { MAT, MAT_INFO, MUD_SINK, DIFF, fbm, rng, pathPoint, GROUP_WORLD, GROUP_VEHICLE } from './maps/common.js';
 
 export const MAPS = [
@@ -36,6 +37,9 @@ export const PROPS = M.PROPS ?? [];       // box colliders (barriers, tyre walls
 export const generateRocks = M.generateRocks;
 export const generateTrees = M.generateTrees;
 
+// [mud] each physics world gets the map's deformable mud (src/mud.js): ruts, dug holes, churn
 export function buildTerrainPhysics(RAPIER, world, rocks, trees) {
-  return common.buildTerrainPhysics(RAPIER, world, M, rocks, trees, PROPS);
+  const t = common.buildTerrainPhysics(RAPIER, world, M, rocks, trees, PROPS);
+  t.mud = new MudField(M);
+  return t;
 }

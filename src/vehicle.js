@@ -10,6 +10,7 @@
 import { Drivetrain } from './drivetrain.js';
 import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE } from './terrain.js';
 import { CrashModel } from './damage/crash.js';
+import { MUD, mudDamping } from './mud.js'; // [mud]
 
 const G = 9.81;
 const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
@@ -398,13 +399,15 @@ export class Vehicle {
       }
       ws.grounded = grounded || !!ws.contact; ws.mat = mat;
       const info = MAT_INFO[mat];
-      // viscous drag through mud / sand
-      if (grounded && info.drag > 0) {
+      // viscous drag through mud / sand ([mud] bog mud is handled by mudPre below)
+      if (grounded && info.drag > 0 && !(this.terrain.mud && mat === MAT.MUD)) {
         const lv = wbody.linvel();
         const k = info.drag * (t.width / 0.35) * h;
         this.chassis.applyImpulseAtPoint(v(-lv.x * k, -lv.y * k * 0.3, -lv.z * k), p, true);
       }
     }
+
+    if (this.terrain.mud) { this.mudPre(h); this.mudBelly(h); } // [mud]
 
     // aero drag
     const lv = this.chassis.linvel();
@@ -523,6 +526,8 @@ export class Vehicle {
         this.wheelState[i].contact = true;
       }
     }
+
+    if (this.terrain.mud) this.mudPatches(patches, axes); // [mud] tyres held up by soft mud grip on it too
 
     // body / axle contacts -> impact energy, deformation, mechanical damage (src/damage/crash.js)
     for (const hit of hits) {
@@ -775,9 +780,120 @@ export class Vehicle {
     }
     this.patches = patches;
     this.hold = hold;
+    if (this.terrain.mud) this.mudWork(h, patches); // [mud] ruts, digging, churn
     // engine torque reaction rolls the chassis
     const fwd = qrot(cq, v(0, 0, -1));
     this.chassis.applyTorqueImpulse(scale(fwd, -this.dt.engineTorque * h * 0.8), true);
+  }
+
+  // ---------------------------------------------------------------- [mud] soft mud
+  // Bog mud (src/mud.js) between the shown mud surface and the firm floor the physics engine
+  // collides with. Each tyre in it is held up by the mud's bearing force at its sinkage (applied
+  // to the wheel, like a ground contact), pays compaction resistance and viscous drag for it
+  // (on the chassis at the tyre's lowest point, against the tyre's motion), grips through a
+  // contact patch carrying that force (mudPatches), and works the mud: ruts, churn, digging when
+  // it spins (mudWork). The belly and solid-axle diffs drag through it once the truck sinks
+  // that far (mudBelly). Everything outside the bogs is untouched.
+  mudPre(h) {
+    const { spec } = this, t = spec.tire, mud = this.terrain.mud;
+    const Wst = (this.mass * G) / 4;
+    this.mudState ||= [0, 1, 2, 3].map(() => ({ N: 0, z: 0 }));
+    for (let i = 0; i < 4; i++) {
+      const st = this.mudState[i], ws = this.wheelState[i];
+      st.N = 0; ws.sink = 0;
+      if (this.broken[i]) continue;
+      const w = this.wheels[i], c = w.translation(), ax = this.wheelAxis(i);
+      // the tyre's lowest point: straight down, square to the axle
+      let dx = ax.x * ax.y, dy = ax.y * ax.y - 1, dz = ax.z * ax.y;
+      const dl = Math.hypot(dx, dy, dz);
+      if (dl < 0.35) continue; // on its side
+      dx /= dl; dy /= dl; dz /= dl;
+      const bx = c.x + dx * t.radius, by = c.y + dy * t.radius, bz = c.z + dz * t.radius;
+      mud.tyre(bx, bz, by, t.radius, t.width, this.airedDown, st);
+      if (st.F <= 0) continue;
+      const lv = w.linvel();
+      const N = Math.max(0, Math.min(6 * Wst, st.F - mudDamping(st.A, t.mass, h) * lv.y));
+      w.applyImpulse(v(0, N * h, 0), true);
+      st.N = N; st.x = bx; st.zz = bz; st.y = by;
+      ws.sink = st.z; ws.grounded = true; ws.mat = MAT.MUD;
+      // compaction resistance + viscous drag against the tyre's motion over the ground
+      const sp = Math.hypot(lv.x, lv.z);
+      if (sp > 1e-4) {
+        // the tyre model already charges the surface's rolling resistance (MAT_INFO mud rr) on
+        // this load: compaction only adds what it costs beyond that (total: max(rr N, plough + floor N))
+        const rr0 = MAT_INFO[MAT.MUD].rr * this.treadMul[MAT.MUD][1];
+        const plough = Math.max(0, st.plough - (rr0 - MUD.RR_FLOOR) * N);
+        const R = plough * (sp / (sp + 0.15)) + st.visc * sp;
+        this.chassis.applyImpulseAtPoint(v((-lv.x / sp) * R * h, 0, (-lv.z / sp) * R * h), v(bx, by, bz), true);
+      }
+    }
+  }
+
+  // Belly and diffs in the mud: points on the frame's underside (and under each solid axle's
+  // diff) that sink below the mud's bearing surface are held up by it (taking weight off the
+  // tyres: high-centred) and drag through it.
+  mudBelly(h) {
+    const { spec } = this, mud = this.terrain.mud;
+    const [cw, ch, cl] = spec.chassis.size;
+    const q = this.chassis.rotation(), c0 = this.chassis.translation();
+    const s = this._mudS ||= {};
+    const pts = this._mudPts ||= [];
+    pts.length = 0;
+    const aBelly = (cw * 0.6 * cl * 0.8) / 6;
+    // the underside: the frame box's bottom, or the floor pan where the spec gives a lower one
+    // (spec.chassis.floor, chassis-local: a low car's floor sits well under its frame box)
+    const yb = Math.min(-ch / 2, spec.chassis.floor ?? -ch / 2);
+    for (const sx of [-0.3, 0.3]) for (const sz of [-0.35, 0, 0.35]) pts.push([this.chassis, add(c0, qrot(q, v(sx * cw, yb, sz * cl))), aBelly]);
+    // the nose: a low front bumper ploughs into the mud ahead of the front wheels
+    pts.push([this.chassis, add(c0, qrot(q, v(0, yb + 0.06, -cl * 0.48))), cw * 0.6 * 0.25]);
+    for (const ax of this.axles) if (!ax.independent && ax.body) { const p = ax.body.translation(); pts.push([ax.body, v(p.x, p.y - spec.tire.radius * 0.53, p.z), 0.12]); }
+    for (const [body, p, area] of pts) {
+      mud.sample(p.x, p.z, s);
+      if (s.m < 0.01) continue;
+      const pz = this.terrain.mud.grid.visualHeightAt(p.x, p.z) - s.e + s.berm - p.y;
+      if (pz <= 0) continue;
+      const vp = body.velocityAtPoint(p);
+      const Fv = Math.max(0, (MUD.BELLY_K * s.m * Math.min(pz, 0.5) * area) / (1 + s.w) - MUD.DAMP * area * vp.y);
+      const sp = Math.hypot(vp.x, vp.z);
+      const Fh = (MUD.BELLY_MU * Fv + MUD.VISC * 4 * area * sp) * (sp / (sp + 0.15));
+      const k = sp > 1e-4 ? (Fh * h) / sp : 0;
+      body.applyImpulseAtPoint(v(-vp.x * k, Fv * h, -vp.z * k), p, true);
+    }
+  }
+
+  // contact patches for tyres the mud holds up: same geometry as an engine contact, with the
+  // mud's bearing force as the normal load (grip and rolling resistance follow from it)
+  mudPatches(patches, axes) {
+    const t = this.spec.tire, n = v(0, 1, 0);
+    for (let i = 0; i < 4; i++) {
+      const st = this.mudState && this.mudState[i];
+      if (!st || st.N <= 0 || this.broken[i]) continue;
+      const ax = axes[i], c = this.wheels[i].translation();
+      const radial = sub(n, scale(ax, dot(ax, n))), rl = len(radial);
+      if (rl < 0.35) continue;
+      const p = sub(c, scale(radial, (t.radius * 0.97) / rl)), r = sub(p, c);
+      const d0 = scale(cross(ax, r), -1), d1 = sub(d0, scale(n, dot(n, d0))), k = len(d1);
+      if (k < 1e-6) continue;
+      const d = scale(d1, 1 / k);
+      // patch velocity in the contact plane only: the wheel bobbing on the soft mud is not slip
+      // (and must not stop a standing tyre counting as standing for the static hold)
+      const vp0 = add(this.wheels[i].linvel(), cross(this.knuckles[i].angvel(), r)), vp = sub(vp0, scale(n, dot(vp0, n)));
+      patches.push({ wheel: i, p, n, d, e: cross(n, d), k, vp, N: st.N, mat: MAT.MUD, ob: null, prop: null, mud: true, oh: 'mud' }); // oh: a stable id for per-patch state
+      this.wheelState[i].contact = true;
+    }
+  }
+
+  // after the solve: each tyre in the mud presses its rut, churns it, and digs when it spins
+  mudWork(h, patches) {
+    const mud = this.terrain.mud;
+    mud.clock += h;
+    for (const pt of patches) {
+      if (!pt.mud) continue;
+      const st = this.mudState[pt.wheel], dl = Math.hypot(pt.d.x, pt.d.z);
+      if (dl < 1e-3) continue;
+      const roll = dot(pt.vp, pt.d), slip = this.wheelState[pt.wheel].slip;
+      mud.work(st.x, st.zz, pt.d.x / dl, pt.d.z / dl, st.bw, st.L, st.z, roll, slip, h);
+    }
   }
 
   // violent: this hit may take the wheel off. Without it a wrecked corner stops at 'bent wheel'
