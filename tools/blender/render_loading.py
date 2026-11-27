@@ -41,6 +41,10 @@ def setup_render(sc):
         print('[render] view transform:', e)
     sc.view_settings.look = 'None'
     sc.render.fps = 8
+    # use_stamp only burns text in; the use_stamp_* fields still write File/Date/... into the PNG metadata
+    for k in dir(sc.render):
+        if k.startswith('use_stamp'):
+            setattr(sc.render, k, False)
 
 
 def read_png(path):
@@ -70,6 +74,10 @@ def render_frame(sc, frame, path):
 
 def render_scene(sc):
     vid = sc.name.split('_', 1)[1]
+    # frame_set only re-evaluates the animation of the window's scene: without this every scene but the
+    # active one rendered 8 identical settle frames
+    if bpy.context.window is not None:
+        bpy.context.window.scene = sc
     setup_render(sc)
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)

@@ -43,14 +43,15 @@ T_MID, T_LIT = 0.42, 0.90
 #   ('cube', height)            block under the tyre, top at `height`
 #   ('wedge', lift, angle_deg)  tyre resting on a ramp; hub raised by `lift`
 #   ('kerb', radius)            tyre on the crest of a half-cylinder lying across the path
+# ride: optional body lift (m) over the axles, so a tucked tyre clears its arch through the whole settle loop.
 # props: extra set dressing, placed relative to the camera: (screen-right m, depth-behind-car m) from the target.
 # az/el: camera azimuth (deg from +Y towards +X) and elevation; dist in m; shift: camera lens shift.
 SHOTS = {
     'lc70': dict(
-        front='solid', rear='solid', steer=0.32,
+        front='solid', rear='solid', steer=0.32, ride=0.02,
         corners={'FL': ('cube', 0.56)},
         props=[('cube', (-4.3, 3.4), (0.9, 0.9, 0.9), 0.5), ('cube', (-3.3, 3.9), (0.55, 0.55, 0.55), 0.2)],
-        az=-46, el=8, dist=11.5, focal=50, target=(0.0, 0.1, 0.95), shift=(-0.11, 0.04), sun=(-58, 50)),
+        az=-46, el=8, dist=11.5, focal=50, target=(0.0, 0.1, 0.95), shift=(-0.11, 0.06), sun=(-58, 50)),
     'taco': dict(
         front='ifs', rear='solid', steer=0.28,
         corners={'FL': ('wedge', 0.17, 20), 'RR': ('cube', 0.36)},
@@ -453,6 +454,9 @@ def import_vehicle(vid):
     for o in objs.values():
         for c in list(o.users_collection):
             c.objects.unlink(o)
+        # glTF imports in QUATERNION mode, which would silently ignore the axle tilt and the body's
+        # pitch/roll drivers (all set on rotation_euler): the tyres then rose into the arches.
+        o.rotation_mode = 'XYZ'
     return objs
 
 
@@ -619,7 +623,7 @@ def build_scene(vid, shot):
     fv, fmean, froll = end_vars('front', ('FL', 'FR'))
     rv, rmean, rroll = end_vars('rear', ('RL', 'RR'))
     pv = [('sz', 'PROP', rig, '["settle_z"]'), ('sr', 'PROP', rig, '["settle_roll"]')]
-    drive(body, 'location', 2, f'{BZ - R:.4f}+({fmean}+{rmean})/2+sz', fv + rv + pv)
+    drive(body, 'location', 2, f'{BZ - R + shot.get("ride", 0.0):.4f}+({fmean}+{rmean})/2+sz', fv + rv + pv)
     drive(body, 'rotation_euler', 0, f'({fmean}-{rmean})/{WB:.4f}', fv + rv)
     drive(body, 'rotation_euler', 1, f'({froll}+{rroll})/2+sr', fv + rv + pv)
 
