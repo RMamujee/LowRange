@@ -252,7 +252,7 @@ function updateCrawl(p, dt) {
     }
   }
   if (game.active) game.active.t = crawl.t;
-  game.guide = crawlSpawnGuide(crawl.guide()); // [spawns] after a stage spawn: point at that gate
+  game.guide = crawl.guide(); // [spawns] after a stage spawn it points at that gate (crawl.joinAt)
   game.crawl = crawl.snapshot();
 }
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
@@ -279,6 +279,7 @@ function spawn(i, opts) {
   car.dt.gear = 0;
   camState.heading = 0;
   parkBrake = true;
+  if (crawl) { crawl.reset(); crawlView.resetAll(); } // [crawl] fresh at the trailhead: no run, no stage join for Y
   if (isRace) raceOnSpawn();
   hud.setSpec(spec);
 }
@@ -325,7 +326,7 @@ function restartTrail() {
     const r = crawl.restartPose();
     respawnFresh(r.x, r.z, r.yaw);
     if (r.stage.n === 1) { game.active = null; crawlView.resetAll(); }
-    toast(r.stage.n === 1 ? `Back at the start of ${TRAILS[0].name}, fully repaired` : `Back at stage ${r.stage.n} · ${r.stage.name}, repaired. The run clock keeps going`, 2.5);
+    toast(r.stage.n === 1 ? `Back at the start of ${TRAILS[0].name}, fully repaired` : `Back at stage ${r.stage.n} · ${r.stage.name}, repaired.${r.joined ? '' : ' The run clock keeps going'}`, 2.5);
     return;
   }
   const on = trailUnderTruck();
@@ -396,11 +397,6 @@ function raceUpdate(dt) {
 const SPAWNS = buildSpawnPoints({ rocks, trees, extra: looseProps.items });
 let lastSpawn = loadLastSpawn(SPAWNS);   // validated: an unknown saved id falls back to the default
 let camSnap = false;                     // next camera update jumps behind the truck (no swoop)
-let crawlJoin = null;                    // Gauntlet: the stage gate a spawn faces, until a run starts
-function crawlSpawnGuide(gd) {
-  if (!crawlJoin || crawl.running || crawl.stage) { crawlJoin = null; return gd; }
-  return { ...gd, target: crawlJoin.gate, stage: 0, name: crawlJoin.name.toUpperCase(), next: `GATE ${crawlJoin.n}` };
-}
 
 // Teleport: a fresh, repaired truck at rest on the point (parking brake on, neutral, driver settings
 // kept by respawnFresh); any trail / stage / race run is cancelled so only driving through a gate
@@ -414,8 +410,8 @@ function spawnAt(sp) {
   game.active = null; game.finishGate = -1;
   if (crawl) {
     crawl.reset(); crawlView.resetAll();
-    crawlJoin = sp.kind === 'stage' && sp.stage > 1 ? TRAILS[0].stages[sp.stage - 1] : null;
-    game.guide = crawlSpawnGuide(crawl.guide()); game.crawl = crawl.snapshot();
+    crawl.joinAt(sp.kind === 'stage' ? sp.stage : 0); // Y and the HUD keep to that gate until a gate is crossed
+    game.guide = crawl.guide(); game.crawl = crawl.snapshot();
   }
   if (isRace) {
     const d = car.dt; d.range = 'high'; d.fourWD = true;
