@@ -11,12 +11,13 @@ export const MAPS = [
   { id: 'race', name: 'Race Track' },
   { id: 'crawl', name: 'The Gauntlet' },
   { id: 'jungle', name: 'Coralume Island' }, // [jungle] src/maps/jungle.js
+  { id: 'desert', name: 'Sunfall Basin' }, // [desert] src/maps/desert.js
 ];
 const want = (globalThis.location && new URLSearchParams(globalThis.location.search).get('map')) || globalThis.process?.env?.MAP || 'park';
 // only known ids map to fixed module paths; if the chosen map fails to load, fall back to the park
 let M;
 try {
-  M = want === 'race' ? await import('./maps/racetrack.js') : want === 'crawl' ? await import('./maps/crawl.js') : want === 'jungle' ? await import('./maps/jungle.js') : await import('./maps/trailpark.js');
+  M = want === 'race' ? await import('./maps/racetrack.js') : want === 'crawl' ? await import('./maps/crawl.js') : want === 'jungle' ? await import('./maps/jungle.js') : want === 'desert' ? await import('./maps/desert.js') : await import('./maps/trailpark.js');
 } catch (e) {
   console.warn(`Map "${want}" failed to load, falling back to the Trail Park`, e);
   M = await import('./maps/trailpark.js');
@@ -39,6 +40,7 @@ export const CHECKPOINTS = M.CHECKPOINTS ?? [];
 export const PROPS = M.PROPS ?? [];       // box colliders (barriers, tyre walls)
 export const generateRocks = M.generateRocks;
 export const generateTrees = M.generateTrees;
+export const sandDepthAt = M.sandDepthAt ?? null; // [deep sand] the desert's dune sand depth (src/deepsand.js); null on other maps
 
 // [mud] each physics world gets the map's deformable mud (src/mud.js): ruts, dug holes, churn
 export function buildTerrainPhysics(RAPIER, world, rocks, trees) {

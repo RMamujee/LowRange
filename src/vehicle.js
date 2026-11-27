@@ -8,9 +8,10 @@
 // the axle housing. Wheel spin is coupled to the Drivetrain each substep.
 
 import { Drivetrain } from './drivetrain.js';
-import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE } from './terrain.js';
+import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE, sandDepthAt } from './terrain.js';
 import { CrashModel } from './damage/crash.js';
 import { MUD, mudDamping } from './mud.js'; // [mud]
+import { DeepSand } from './deepsand.js'; // [deep sand] dunes on maps with a sand depth field (the desert)
 
 const G = 9.81;
 const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
@@ -57,6 +58,7 @@ export class Vehicle {
     this.GROUP_VEHICLE = GROUP_VEHICLE;
     // crash model (src/damage/crash.js): impact energy, the body's deformation cage, mechanical damage
     this.crash = new CrashModel(this);
+    this.deepSand = sandDepthAt ? new DeepSand(this, sandDepthAt) : null; // [deep sand] null on maps without dunes: no change there
     const t = spec.tire;
     this.wheelI = t.mass * t.radius * t.radius * 0.7;
     this.dt = new Drivetrain(spec, this.wheelI);
@@ -226,6 +228,7 @@ export class Vehicle {
     }
     this.grace = 1.5; // no damage while a fresh spawn / recovery settles
     this.hold = null; // standing tyres' anchors (postPhysics): none after a rebuild
+    this.deepSand?.sink.fill(0); // [deep sand] a rebuilt (repaired) truck is not dug in
     this.wheelHandles = this.wheelColliders.map((c) => c.handle);
     this.bodyHandles = [];
     this.partOf = new Map(); // damage collider handle -> { part: 'body' | 'axle0' | 'axle1', body }
@@ -399,10 +402,12 @@ export class Vehicle {
       }
       ws.grounded = grounded || !!ws.contact; ws.mat = mat;
       const info = MAT_INFO[mat];
+      // [deep sand] sinkage and motion resistance on dune sand; scales the viscous drag below
+      const deep = this.deepSand ? this.deepSand.wheel(i, mat, p, wbody.linvel(), ws, grounded, qrot(this.chassis.rotation(), v(0, 0, -1)), h) : 1;
       // viscous drag through mud / sand ([mud] bog mud is handled by mudPre below)
       if (grounded && info.drag > 0 && !(this.terrain.mud && mat === MAT.MUD)) {
         const lv = wbody.linvel();
-        const k = info.drag * (t.width / 0.35) * h;
+        const k = info.drag * deep * (t.width / 0.35) * h;
         this.chassis.applyImpulseAtPoint(v(-lv.x * k, -lv.y * k * 0.3, -lv.z * k), p, true);
       }
     }
@@ -675,6 +680,8 @@ export class Vehicle {
       const slipL = dot(pt.vp, pt.d) + pt.k * s;
       const slipLat = dot(pt.vp, pt.e);
       let { mu, rr } = this.tyreGrip(pt.mat, Math.hypot(slipL, slipLat) > 1.0);
+      const ds = this.deepSand && this.deepSand.grip(pt.wheel, pt.mat); // [deep sand] null off dune sand
+      if (ds) mu *= ds.mu;
       if (this.health.tire[pt.wheel] < 0.35) { mu *= 0.6; rr *= 3; } // flat tyre
       pt.mu = mu;
       pt.cap = mu * pt.N * h;
@@ -699,8 +706,8 @@ export class Vehicle {
       }
       pt.rowL = rowFor(pt, pt.d, vL, pt.cap);
       slips[pt.wheel] = Math.max(slips[pt.wheel], Math.hypot(slipL, slipLat));
-      pt.rowA = rowFor(pt, pt.e, vA, pt.cap);
-      if (pt.held) pt.rowL.cfm = pt.rowA.cfm = HOLD_CFM;
+      pt.rowA = rowFor(pt, pt.e, vA, ds ? pt.cap * ds.lat : pt.cap); // [deep sand] weaker sideways on dune sand (a held tyre too: past this it slides and the hold lets go)
+      if (pt.held || ds) pt.rowL.cfm = pt.rowA.cfm = HOLD_CFM; // [deep sand] soft sand is compliant too: no stiff squeeze modes eating the grip while a tyre slides
       loads[pt.wheel] += pt.N;
       rrs[pt.wheel] = Math.max(rrs[pt.wheel], rr);
     }

@@ -92,6 +92,7 @@ export function visualSurface({ GRID, RES, SIZE, MAT }) {
     else if (big * 0.9 + (s - 0.28) * 1.1 + mid * 0.12 - edge * 0.6 > 0.2) c = MAT.DIRT; // bare, steeper earth
     else c = MAT.GRASS;
     if (m === MAT.GRAVEL && s < 0.25) c = MAT.GRAVEL; // laid gravel (pits, pads) is flat: keep it
+    if (GRID.look && GRID.look[i] !== 255) c = GRID.look[i]; // a map's own shown surface (the desert: floor, pavement, slickrock; 255 = default)
     cls[i] = c;
   }
   // majority filter: no single-cell specks of one surface inside another

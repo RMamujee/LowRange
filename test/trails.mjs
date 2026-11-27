@@ -21,7 +21,7 @@ const ids=(process.argv[2]||'lc70,taco,wrx').split(',');
 const secs=+(process.argv[3]||120);
 for (const id of ids) {
   const spec=ALL_VEHICLES.find(v=>v.id===id); const res=[];
-  for (const t of TRAILS.filter(t=>!process.argv[4]||t.diff===process.argv[4])) {
+  for (const t of TRAILS.filter(t=>(!process.argv[4]||t.diff===process.argv[4]) && t.graded!==false)) { // (the desert's dune route runs in test/desert.mjs)
     const p0=pathPoint(t,4);
     const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));
     car.airedDown=true; const d=car.dt; d.range=spec.ranges.low?'low':'high'; d.gear=1; d.lockF=spec.lockers.front; d.lockR=true;

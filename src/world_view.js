@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint } from './terrain.js';
+import { SIZE, RES, MAT, MAT_INFO, GRID, fbm, heightAt, visualHeightAt, materialAt, ROADS, TRAILS, DIFF, TRAILHEAD, TRACK, CHECKPOINTS, pathPoint, MAP_NAME } from './terrain.js';
 import { buildSetDressing, gridClearance } from './art/dressing.js';
 import { terrainMaterial, rockMaterial, shapeRockGeometry, softenTerrainNormals, visualSurface } from './gfx/terrain_look.js';
 import { BACKDROP } from './gfx/palette.js';
@@ -222,7 +222,7 @@ export function buildMarkers(scene) {
     }
   }
   // trailhead sign
-  scene.add(signpost(TRAILHEAD.x + 6, TRAILHEAD.z - 10, Math.PI * 0.85, fitFace({ title: 'LOW RANGE', sub: 'Trail Park · Trailhead' }, { m: 0.06 })));
+  scene.add(signpost(TRAILHEAD.x + 6, TRAILHEAD.z - 10, Math.PI * 0.85, fitFace({ title: 'LOW RANGE', sub: `${MAP_NAME} · Trailhead` }, { m: 0.06 })));
   return gates;
 }
 
