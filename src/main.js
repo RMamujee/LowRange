@@ -19,8 +19,9 @@ import { createHud } from './hud/hud.js';
 import './platform.js';
 import { mountMenuChrome, rigRating, enableArrowNav } from './menu/menu.js';
 import { PropPhysics, adoptDressing } from './physics_props.js'; // [physics props]
-import { CrawlCourse } from './crawl_course.js'; // [crawl] The Gauntlet's stages, splits and guidance
+import { CrawlCourse, CourseSet } from './crawl_course.js'; // [crawl] The Gauntlet's stages, splits and guidance, plus its side courses
 import { buildCrawlView } from './crawl_view.js'; // [crawl]
+import { COURSES } from './terrain.js'; // [crawl] the Gauntlet's side courses
 import { buildSpawnPoints, loadLastSpawn, saveLastSpawn, liftFor } from './spawns.js'; // [spawns] named spawn points
 import { CamClear } from './cam_clear.js';
 import { materialAt } from './terrain.js'; // [tyre fx]
@@ -156,28 +157,34 @@ function updateTrails(p) {
 // [crawl] The Gauntlet: one timed run from the start gate to the summit, split at every stage
 // gate (src/crawl_course.js). game.active mirrors the run so the HUD's run clock works;
 // game.guide points the HUD arrow at the next gate; game.crawl feeds the big map's sidebar.
+// The side courses (Broken Slab, Camber Ridge, Cobble Gully) run on the same class, tied together
+// by a CourseSet: one run at a time, and the HUD / map / Y follow the course in focus.
 const crawl = isCrawl ? new CrawlCourse(TRAILS[0], TRAILS[0].stages) : null;
+const courses = isCrawl ? new CourseSet(crawl, COURSES.map((C) => new CrawlCourse(C, C.stages, { key: `lowrange.course.${C.id}`, unit: 'Section', finish: 'FINISH', id: C.id }))) : null;
+if (courses) courses.all.forEach((c, k) => { c.view = crawlView.views[k]; });
 function updateCrawl(p, dt) {
-  if (crawl.running && !game.active) { crawl.reset(); crawlView.resetAll(); } // respawned at the trailhead
-  crawl.setRig(spec.id);
-  for (const e of crawl.update(p, dt)) {
-    if (e.type === 'start') { crawlView.resetAll(); game.active = { trail: 0, from: 0, t: 0 }; toast(`${TRAILS[0].name}: the clock is running. Stage 1 · ${e.stage.name}`, 3); }
-    else if (e.type === 'split') { crawlView.setDone(e.stage.n); toast(`Stage ${e.stage.n} ${e.stage.name}: ${fmtT(e.split)}${e.best ? (e.prevBest != null ? ' · NEW BEST' : '') : ` (best ${fmtT(e.prevBest)})`}`, 2.5); }
+  if (courses.running && !game.active) { courses.reset(); for (const c of courses.all) c.view.resetAll(); } // respawned at the trailhead
+  courses.setRig(spec.id);
+  for (const e of courses.update(p, dt)) {
+    const c = e.course, name = c.trail.name, N = c.stages.length, U = c.unit, top = c === crawl ? 'Summit' : 'Finish';
+    if (e.type === 'cancel') { c.view.resetAll(); continue; }
+    if (e.type === 'start') { c.view.resetAll(); game.active = { trail: 0, from: 0, t: 0, course: c === crawl ? null : c.id }; toast(`${name}: the clock is running. ${U} 1 · ${e.stage.name}`, 3); }
+    else if (e.type === 'split') { c.view.setDone(e.stage.n); toast(`${U} ${e.stage.n} ${e.stage.name}: ${fmtT(e.split)}${e.best ? (e.prevBest != null ? ' · NEW BEST' : '') : ` (best ${fmtT(e.prevBest)})`}`, 2.5); }
     else if (e.type === 'stage') {
-      if (!game.active) game.active = { trail: 0, from: 0, t: crawl.t };
+      if (!game.active) game.active = { trail: 0, from: 0, t: c.t, course: c === crawl ? null : c.id }; // (course: a side course run, not The Gauntlet)
       const st = e.stage, d = DIFF[st.diff].label;
-      setTimeout(() => toast(`${e.retry ? 'Retry: ' : ''}Stage ${st.n}/${TRAILS[0].stages.length} · ${st.name} (${d}). ${st.blurb}`, 4), e.retry ? 0 : 1200);
+      setTimeout(() => toast(`${e.retry ? 'Retry: ' : ''}${U} ${st.n}/${N} · ${st.name} (${d}). ${st.blurb}`, 4), e.retry ? 0 : 1200);
     } else if (e.type === 'finish') {
-      crawlView.setDone(TRAILS[0].stages.length - 1); crawlView.setDone(TRAILS[0].stages.length);
+      c.view.setDone(N - 1); c.view.setDone(N);
       const st = game.trails[0];
-      if (e.clean) { st.done = true; st.best = st.best === null ? e.time : Math.min(st.best, e.time); }
+      if (e.clean && c === crawl) { st.done = true; st.best = st.best === null ? e.time : Math.min(st.best, e.time); }
       game.active = null;
-      setTimeout(() => toast(e.clean ? `Summit! ${TRAILS[0].name} in ${fmtT(e.time)}${e.best ? ' · NEW BEST for the ' + spec.name : ` (best ${fmtT(e.prevBest)})`}` : `Summit in ${fmtT(e.time)}. Stages were skipped, so it doesn't count as a best`, 6), 1500);
+      setTimeout(() => toast(e.clean ? `${top}! ${name} in ${fmtT(e.time)}${e.best ? ' · NEW BEST for the ' + spec.name : ` (best ${fmtT(e.prevBest)})`}` : `${top} in ${fmtT(e.time)}. ${U}s were skipped, so it doesn't count as a best`, 6), 1500);
     }
   }
-  if (game.active) game.active.t = crawl.t;
-  game.guide = crawl.guide(); // [spawns] after a stage spawn it points at that gate (crawl.joinAt)
-  game.crawl = crawl.snapshot();
+  if (game.active) game.active.t = courses.focus.t;
+  game.guide = courses.guide(); // [spawns] after a stage / section spawn it points at that gate (joinAt)
+  game.crawl = courses.snapshot();
 }
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 const keys = new Set();
@@ -204,7 +211,7 @@ function spawn(i, opts) {
   car.dt.gear = 0;
   camState.heading = 0;
   parkBrake = true;
-  if (crawl) { crawl.reset(); crawlView.resetAll(); } // [crawl] fresh at the trailhead: no run, no stage join for Y
+  if (courses) { courses.reset(); for (const c of courses.all) c.view.resetAll(); } // [crawl] fresh at the trailhead: no run, no stage join for Y
   if (isRace) raceOnSpawn();
   hud.setSpec(spec);
 }
@@ -251,11 +258,11 @@ function restartTrail() {
   if (!car) return;
   terrain.mud.clear(); // [mud] a restart (trail, Gauntlet stage, race) gets fresh, unrutted bogs
   if (isRace) { raceRestart(); return; }
-  if (crawl) { // [crawl] back to the gate of the stage you're in (the start before stage 2)
-    const r = crawl.restartPose();
+  if (courses) { // [crawl] back to the gate of the stage / section you're in (the start before the second)
+    const r = courses.restartPose(), c = r.course;
     respawnFresh(r.x, r.z, r.yaw);
-    if (r.stage.n === 1) { game.active = null; crawlView.resetAll(); }
-    toast(r.stage.n === 1 ? `Back at the start of ${TRAILS[0].name}, fully repaired` : `Back at stage ${r.stage.n} · ${r.stage.name}, repaired.${r.joined ? '' : ' The run clock keeps going'}`, 2.5);
+    if (r.stage.n === 1) { game.active = null; c.view.resetAll(); }
+    toast(r.stage.n === 1 ? `Back at the start of ${c.trail.name}, fully repaired` : `Back at ${c.unit.toLowerCase()} ${r.stage.n} · ${r.stage.name}, repaired.${r.joined ? '' : ' The run clock keeps going'}`, 2.5);
     return;
   }
   const on = trailUnderTruck();
@@ -338,10 +345,10 @@ function spawnAt(sp) {
   keys.clear(); input.throttle = 0; input.brake = 0; input.steer = 0;
   camState.yaw = 0; camState.spot = null; camTargetInit = false; camSnap = true;
   game.active = null; game.finishGate = -1;
-  if (crawl) {
-    crawl.reset(); crawlView.resetAll();
-    crawl.joinAt(sp.kind === 'stage' ? sp.stage : 0); // Y and the HUD keep to that gate until a gate is crossed
-    game.guide = crawl.guide(); game.crawl = crawl.snapshot();
+  if (courses) {
+    for (const c of courses.all) c.view.resetAll();
+    courses.spawnAt(sp); // runs cancelled; a stage / section gate spawn: Y and the HUD keep to that gate until a gate is crossed
+    game.guide = courses.guide(); game.crawl = courses.snapshot();
   }
   if (isRace) {
     const d = car.dt; d.range = 'high'; d.fourWD = true;
@@ -656,7 +663,7 @@ $('ctrlBtn').addEventListener('click', () => showTab('controls'));
 const MAP_TAGS = {
   park: 'Solid axles, lockers and crawl ratios up to 83:1. Five rated trails, from a gentle two-track to Widowmaker Falls. Pick a rig.',
   race: `${TRACK ? TRACK.name : 'Dust Bowl Circuit'}: 1.3 km of graded dirt with banked turns, whoops, a tabletop, a step-up, a rock garden and a splash. Set a best lap for every rig.`,
-  crawl: 'The Gauntlet: one 780 m rock trail in 12 stages that only gets harder, from a gentle two-track to the Waterfall. A physics and driving test course, with a bypass track and split times.', // [crawl]
+  crawl: 'The Gauntlet: one 780 m rock trail in 12 stages that only gets harder, from a gentle two-track to the Waterfall. A physics and driving test course, with a bypass track and split times, plus three side courses: Broken Slab, Camber Ridge and Cobble Gully.', // [crawl]
 };
 let selectedMap = MAP_ID;
 const mapName = (id) => MAPS.find((m) => m.id === id).name;

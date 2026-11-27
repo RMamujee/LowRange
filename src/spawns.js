@@ -1,8 +1,9 @@
 // Named spawn points for the current map (BeamNG-style: open the map, pick a point, drive from there).
 // Everything is derived from the map data in src/terrain.js: the trailhead / default spawn, BOTH ends
 // of every trail (a few metres outside the gate, facing in, so driving forward starts a run), every
-// Gauntlet stage gate plus the summit and the bypass track, and on the race track the grid, every
-// checkpoint (facing the racing direction) and the paddock.
+// Gauntlet stage gate plus the summit and the bypass track, the start, section gates and finish of
+// each Gauntlet side course, and on the race track the grid, every checkpoint (facing the racing
+// direction) and the paddock.
 //
 // Each candidate is checked numerically before it is offered: the ground under a vehicle-sized
 // footprint must be flat enough (plane fit grade and bumpiness), dry and firm (no water / bog), inside
@@ -10,7 +11,7 @@
 // caller passes, e.g. loose physics props). A candidate that fails is nudged along its path until it
 // is clear; one that can't be made safe is skipped with a console warning. Deterministic: same map
 // data, same list. No three.js and no DOM, so Node tests use it as is.
-import { MAP, MAP_ID, SIZE, SPAWN, TRAILS, ROADS, CHECKPOINTS, TRACK, PROPS, DIFF, MAT, heightAt, materialAt, pathPoint } from './terrain.js';
+import { MAP, MAP_ID, SIZE, SPAWN, TRAILS, ROADS, COURSES, CHECKPOINTS, TRACK, PROPS, DIFF, MAT, heightAt, materialAt, pathPoint } from './terrain.js';
 
 // Footprint checked under a spawn: covers the longest rig (6.4 m) with a margin.
 export const FOOT = { hl: 3.5, hw: 1.35, margin: 0.35 };
@@ -146,6 +147,23 @@ function candidates() {
     }
     add({ id: 'summit', name: 'Summit', short: 'SUMMIT', kind: 'summit', group: 'stages', diff: 'green', note: 'The top of The Gauntlet',
       pose: onPath(T, T.length - 13, range(-1, -6, -1), 1) });
+    // the side courses (src/maps/crawl_courses.js): the start (on the access track, facing the start
+    // gate), every later section gate but the finish (on the level bench before it), and the finish
+    // pad (past the finish gate, facing on along the exit track)
+    for (const K of COURSES) {
+      const N = K.stages.length, grp = `course-${K.id}`;
+      K.stages.forEach((st) => {
+        if (st.n === N) return;
+        const first = st.n === 1;
+        add({ id: `${K.id}-${first ? 'start' : st.n}`, name: first ? `${K.name}: start` : `${K.name} ${st.n}: ${st.name}`, short: first ? 'START' : `${st.n} ${st.name.toUpperCase()}`,
+          kind: 'course', group: grp, course: K.id, stage: st.n, diff: first ? K.diff : st.diff,
+          note: first ? `The start gate: a full, timed run. ${DIFF[K.diff].label}` : 'Joining here: sections are timed, but the run total does not count as a best',
+          pose: onPath(K, st.s0 - 2, [...range(-1, -10, -1), 0.5, 1], 1) });
+      });
+      const fin = K.stages[N - 1];
+      add({ id: `${K.id}-finish`, name: `${K.name}: finish`, short: 'FINISH', kind: 'course', group: grp, course: K.id, stage: 0, diff: K.diff,
+        note: 'Past the finish gate. Y takes you to the course start', pose: onPath(K, fin.gateS + 5.5, [1, 2, 3, 4, 5, 6, 7, 8], 1) });
+    }
     return C;
   }
   TRAILS.forEach((t, i) => {
@@ -199,7 +217,8 @@ function approachClear(p, obstacles, hw = FOOT.hw + 0.2) {
 const GATES = TRAILS.length === 1 && TRAILS[0].stages ? [] : TRAILS.flatMap((t) => [pathPoint(t, 3), pathPoint(t, t.length - 3)].map((p) => ({ x: p.x, z: p.z, r: t.width / 2 + 2.5 })));
 
 export const GROUP_LABEL = { start: MAP_ID === 'race' ? 'START' : 'TRAILHEAD', green: DIFF.green.label.toUpperCase() + ' TRAILS', blue: DIFF.blue.label.toUpperCase() + ' TRAILS', black: DIFF.black.label.toUpperCase() + ' TRAILS', dblack: DIFF.dblack.label.toUpperCase() + ' TRAILS', stages: 'STAGES', checkpoints: 'CHECKPOINTS' };
-const GROUP_ORDER = ['start', ...DIFF_ORDER, 'stages', 'checkpoints'];
+for (const K of COURSES) GROUP_LABEL[`course-${K.id}`] = K.name.toUpperCase(); // one group per side course
+const GROUP_ORDER = ['start', ...DIFF_ORDER, 'stages', ...COURSES.map((K) => `course-${K.id}`), 'checkpoints'];
 
 // Build the validated list. opts: { rocks, trees, extra, warn }
 export function buildSpawnPoints(opts = {}) {

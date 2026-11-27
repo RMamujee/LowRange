@@ -110,5 +110,131 @@ ok(!new CrawlCourse(t, STAGES).project({ x: leg.x, y: leg.y + 20, z: leg.z }).on
   const fin7 = ev.find((e) => e.type === 'finish');
   ok(fin7 && fin7.best && c7.rec.best === fin7.time && ev.filter((e) => e.type === 'split').every((e) => e.best), 'a clean run beats a junk record (total and every split)');
 }
+// ---- the side courses (src/maps/crawl_courses.js) on the same class, and the CourseSet ----
+{
+  const { COURSES } = await import('../src/terrain.js');
+  const { CourseSet } = await import('../src/crawl_course.js');
+  const atC = (C, s, lat = 0) => { const p = pathPoint(C, Math.max(0, Math.min(C.length, s))); const ext = s < 0 ? s : s > C.length ? s - C.length : 0; const x = p.x + p.tx * ext - p.tz * lat, z = p.z + p.tz * ext + p.tx * lat; return { x, y: heightAt(x, z) + 0.9, z }; };
+  const driveC = (c, C, s0, s1, v = 1, dt = 0.05) => { const out = []; for (let s = s0; s <= s1; s += v * dt) out.push(...c.update(atC(C, s), dt)); return out; };
+  const mk = (C) => new CrawlCourse(C, C.stages, { key: `lowrange.course.${C.id}`, unit: 'Section', finish: 'FINISH', id: C.id });
+  ok(COURSES.length >= 3 && COURSES.every((C) => C.stages.length >= 3 && C.stages.at(-1).finish), `${COURSES.length} side courses: ${COURSES.map((C) => `${C.name} (${C.diff}, ${C.stages.length - 1} sections)`).join(', ')}`);
+  const gauntletBefore = globalThis.localStorage.getItem('lowrange.crawl.testrig2');
+  for (const C of COURSES) {
+    const N = C.stages.length, c = mk(C); c.setRig('testrig2');
+    let e = driveC(c, C, -3, C.stages[0].gateS + 2);
+    ok(e.some((q) => q.type === 'start') && c.running && c.guide().unit === 'SECTION' && c.guide().stage === 1, `${C.name}: the start gate starts the run; HUD reads SECTION 1/${N}`);
+    e = driveC(c, C, C.stages[0].gateS + 2, C.stages[N - 1].gateS + 2);
+    const fin = e.find((q) => q.type === 'finish');
+    ok(fin && fin.clean && fin.best && e.filter((q) => q.type === 'split').length === N - 1, `${C.name}: a split per section, the finish gate ends a clean run (${fin && fin.time.toFixed(0)} s), first best`);
+    ok(c.guide().name === 'FINISH' && c.guide().next === 'COURSE DONE', `${C.name}: the HUD says FINISH, course done`);
+    const c2 = mk(C); c2.setRig('testrig2');
+    ok(c2.rec.best === fin.time && c2.rec.splits.length === N - 1, `${C.name}: best + splits saved for the rig (key lowrange.course.${C.id}.testrig2)`);
+    c2.setRig('otherrig2'); ok(c2.rec.best == null, `${C.name}: another rig has its own record`);
+    // Y mid-course: back to the gate of the section you're in; in section 1: the course start
+    const c3 = mk(C); c3.update(atC(C, -3), 0.05); driveC(c3, C, -3, C.stages[1].gateS + 3);
+    const r3 = c3.restartPose();
+    ok(r3.stage.n === 2 && c3.retry === 2, `${C.name}: Y in section 2 goes back to its gate`);
+    const c4 = mk(C); c4.update(atC(C, -3), 0.05); driveC(c4, C, -3, C.stages[0].gateS + 3);
+    const r4 = c4.restartPose(), p0 = atC(C, 0.5);
+    ok(r4.stage.n === 1 && Math.hypot(r4.x - p0.x, r4.z - p0.z) < 1 && !c4.running, `${C.name}: Y in section 1 goes back to the course start, run reset`);
+  }
+  ok(globalThis.localStorage.getItem('lowrange.crawl.testrig2') === gauntletBefore, 'side course runs leave the Gauntlet\'s saved bests alone');
+
+  // CourseSet: focus, one run at a time, spawns + Y
+  const G = new CrawlCourse(t, STAGES), sides = COURSES.map(mk), set = new CourseSet(G, sides);
+  set.setRig('testrig3');
+  const slab = COURSES[0], camber = COURSES.find((C) => C.id === 'camber') || COURSES[1];
+  set.update({ x: MAP.SPAWN.x, y: heightAt(MAP.SPAWN.x, MAP.SPAWN.z) + 0.9, z: MAP.SPAWN.z }, 0.05);
+  ok(set.focus === G && set.guide().unit === 'STAGE', 'at the trailhead the HUD follows The Gauntlet (STAGE n/12)');
+  set.update(at(0), 0.05); let ev2 = []; for (let s = 0; s <= 10; s += 0.1) ev2.push(...set.update(at(s), 0.05));
+  ok(G.running && ev2.some((q) => q.type === 'start' && q.course === G), 'a Gauntlet run starts at its gate');
+  // spawn at the Camber Ridge start: the Gauntlet run is cancelled, the HUD follows the course
+  set.spawnAt({ kind: 'course', course: camber.id, stage: 1 });
+  set.update(atC(camber, -2.5), 0.05);
+  ok(!G.running && set.focus.id === camber.id && set.guide().name === camber.name.toUpperCase() && set.guide().next === 'START GATE', 'a course start spawn: no run, the HUD points at its start gate and names it');
+  ok(set.restartPose().stage.n === 1 && set.restartPose().course.id === camber.id, 'Y right after the start spawn: the course start');
+  // a mid-course spawn, Y before driving: back to that section's gate (the playtest bug's class)
+  set.spawnAt({ kind: 'course', course: camber.id, stage: 3 });
+  set.update(atC(camber, camber.stages[2].s0 - 2), 0.05);
+  const r5 = set.restartPose();
+  ok(r5.course.id === camber.id && r5.stage.n === 3 && r5.joined && set.guide().next === 'GATE 3', 'a section 3 spawn, Y at once: back at section 3\'s gate, the HUD still points at gate 3');
+  // the finish spawn: Y goes to the course start
+  set.spawnAt({ kind: 'course', course: camber.id, stage: 0 });
+  set.update(atC(camber, camber.stages.at(-1).gateS + 5.5), 0.05);
+  ok(set.focus.id === camber.id && set.restartPose().stage.n === 1, 'the finish spawn: Y takes you to the course start');
+  // one run at a time: start the slab while a camber run is going
+  set.reset(); const sc = set.byId(camber.id), ss = set.byId(slab.id);
+  for (let s = -3; s < camber.stages[0].gateS + 4; s += 0.1) set.update(atC(camber, s), 0.05);
+  ok(sc.running, 'a Camber Ridge run is going');
+  ev2 = []; ss.s = null; for (let s = -3; s < slab.stages[0].gateS + 4; s += 0.1) ev2.push(...set.update(atC(slab, s), 0.05));
+  ok(ss.running && !sc.running && ev2.some((q) => q.type === 'cancel' && q.course === sc), 'starting Broken Slab cancels the Camber Ridge run');
+  const snap = set.snapshot();
+  ok(snap.course && snap.course.id === slab.id && snap.course.running && snap.of === STAGES.length, 'the map snapshot: The Gauntlet\'s stages plus the course in focus');
+  // regression (review): the whole Gauntlet driven through the CourseSet stays The Gauntlet's: the
+  // trailhead (Camber Track starts at its lot) and the summit (Gully Track starts at its pad) must
+  // not hand the HUD or Y to a side course
+  {
+    const G2 = new CrawlCourse(t, STAGES), set2 = new CourseSet(G2, COURSES.map(mk)); set2.setRig('testrig4');
+    const evs = [], foci = new Set();
+    for (let x = MAP.SPAWN.x; x < t.pts[0].x; x += 0.1) { evs.push(...set2.update({ x, y: heightAt(x, MAP.SPAWN.z) + 0.9, z: MAP.SPAWN.z }, 0.05)); foci.add(set2.focus.id); }
+    ok(set2.focus === G2 && set2.guide().unit === 'STAGE', 'leaving the trailhead: The Gauntlet in focus');
+    for (let s = 0; s <= STAGES[N - 1].gateS + 8; s += 0.1) { evs.push(...set2.update(at(s), 0.05)); foci.add(set2.focus.id); }
+    ok(evs.some((e) => e.type === 'start' && e.course === G2) && evs.every((e) => e.course === G2) && evs.some((e) => e.type === 'finish' && e.course === G2), 'a full Gauntlet run: every event is The Gauntlet\'s, start to finish');
+    ok(foci.size === 1 && foci.has('gauntlet'), `focus never left The Gauntlet (${[...foci].join(', ')})`);
+    const gd = set2.guide();
+    ok(set2.focus === G2 && gd.name === 'SUMMIT' && gd.next === 'COURSE DONE' && gd.unit === 'STAGE', 'at the summit: HUD says SUMMIT, COURSE DONE');
+    for (const [x, z] of [[MAP.SUMMIT.x, MAP.SUMMIT.z], [MAP.SUMMIT.x + 12, MAP.SUMMIT.z - 8], [MAP.SUMMIT.x - 10, MAP.SUMMIT.z - 10]]) set2.update({ x, y: heightAt(x, z) + 0.9, z }, 0.05);
+    const r = set2.restartPose();
+    ok(set2.focus === G2 && r.course === G2 && r.stage.n === 1, 'driving round the summit pad: still The Gauntlet, Y goes to its start');
+  }
+  // review: after a side course's finish, driving off along its exit track, Y still goes to that
+  // course's start until the truck is well away
+  {
+    const set3 = new CourseSet(new CrawlCourse(t, STAGES), COURSES.map(mk)), cam = set3.byId(camber.id); set3.setRig('testrig5');
+    for (let s = -3; s <= camber.stages.at(-1).gateS + 3; s += 0.1) set3.update(atC(camber, s), 0.05);
+    ok(cam.done, 'Camber Ridge driven to its finish');
+    const exit = MAP.ACCESS.find((r) => r.course === camber.id && r.access === 'out');
+    for (let s = 0; s <= exit.length * 0.8; s += 0.5) { const p = pathPoint(exit, s); set3.update({ x: p.x, y: heightAt(p.x, p.z) + 0.9, z: p.z }, 0.05); }
+    const r3 = set3.restartPose();
+    ok(r3.course.id === camber.id && r3.stage.n === 1, 'off along Camber Exit: Y goes to the Camber Ridge start');
+    set3.update({ x: MAP.SPAWN.x, y: heightAt(MAP.SPAWN.x, MAP.SPAWN.z) + 0.9, z: MAP.SPAWN.z }, 0.05);
+    ok(set3.focus === set3.gauntlet, 'back at the trailhead, far away: The Gauntlet again');
+  }
+  // re-review: back on The Gauntlet after a side course, The Gauntlet wins over the held course
+  {
+    const finishThen = (C, where, label) => {
+      const set4 = new CourseSet(new CrawlCourse(t, STAGES), COURSES.map(mk)); set4.setRig('testrig6');
+      for (let s = -3; s <= C.stages.at(-1).gateS + 3; s += 0.1) set4.update(atC(C, s), 0.05);
+      const done = set4.byId(C.id).done;
+      set4.update(where, 0.05); set4.update(where, 0.05);
+      const r = set4.restartPose();
+      ok(done && set4.focus === set4.gauntlet && r.course === set4.gauntlet && r.stage.n === 1, `${label}: The Gauntlet in focus, Y to its start`);
+    };
+    const slabC = COURSES.find((C) => C.id === 'slab'), gullyC = COURSES.find((C) => C.id === 'gully');
+    finishThen(slabC, at(STAGES[10].s0 + 20), 'Broken Slab finished, then mid-stage on stage 11');
+    finishThen(gullyC, at(STAGES[11].s0 + 15), 'Cobble Gully finished, then on stage 12');
+    finishThen(camber, at(STAGES[0].s0 + 30), 'Camber Ridge finished, then on stage 1');
+    // after a Gauntlet finish, round the summit pad and over the mouth of the Slab Track
+    const set5 = new CourseSet(new CrawlCourse(t, STAGES), COURSES.map(mk)); set5.setRig('testrig7');
+    for (let s = 0; s <= STAGES[N - 1].gateS + 8; s += 0.1) set5.update(at(s), 0.05);
+    const track = MAP.ACCESS.find((r) => r.name === 'Slab Track'), foci5 = new Set();
+    for (let a = 0; a < Math.PI * 2; a += 0.2) { const x = MAP.SUMMIT.x + Math.cos(a) * 15, z = MAP.SUMMIT.z + Math.sin(a) * 15; set5.update({ x, y: heightAt(x, z) + 0.9, z }, 0.05); foci5.add(set5.focus.id); }
+    const upd = (p) => set5.update({ x: p.x, y: heightAt(p.x, p.z) + 0.9, z: p.z }, 0.05);
+    for (let s = 0; s <= 2; s += 0.5) { upd(pathPoint(track, s)); foci5.add(set5.focus.id); }
+    const hud5 = set5.guide().name, r5b = set5.restartPose(); // (Y resets the finished run: read the HUD first)
+    ok(foci5.size === 1 && foci5.has('gauntlet') && r5b.course === set5.gauntlet && r5b.stage.n === 1 && hud5 === 'SUMMIT', `after the summit, 15 m round the pad and over the Slab Track's mouth: still The Gauntlet (${[...foci5].join(', ')}; HUD ${hud5}), Y to its start`);
+    // ...but heading on down the Slab Track does mean Broken Slab, and back on the pad The Gauntlet again
+    for (let s = 2; s <= 12; s += 0.5) upd(pathPoint(track, s));
+    const onTrack = set5.focus.id;
+    upd(MAP.SUMMIT);
+    ok(onTrack === 'slab' && set5.focus === set5.gauntlet, `10 m down the Slab Track: ${onTrack}; back on the summit pad: The Gauntlet`);
+  }
+  // regression: past a course's last point (out along its line, at its height) is not "on" it; the
+  // last point has no next one, which used to make every such spot read as dead centre
+  for (const C of COURSES) {
+    const e = pathPoint(C, C.length), x = e.x + e.tx * 40, z = e.z + e.tz * 40;
+    ok(!mk(C).project({ x, y: e.h + 0.9, z }).on, `${C.name}: 40 m past its end is off the course`);
+  }
+}
 console.log(fails ? `${fails} failure(s)` : 'all crawl course checks passed');
 process.exit(fails ? 1 : 0);

@@ -297,7 +297,8 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
       row('BEST', fmtLap(r.best), r.best != null ? P.redDark : P.inkSoft);
     } else if (gd && gd.of) {
       // [crawl] stage progress: STAGE 7/12 + distance to the next gate, stage name, run clock
-      tiny(g, gd.stage ? `STAGE ${gd.stage}/${gd.of}` : `${gd.of} STAGES`, x0, y, P.redDark);
+      const unit = gd.unit || 'STAGE'; // side courses: SECTION n/N
+      tiny(g, gd.stage ? `${unit} ${gd.stage}/${gd.of}` : `${gd.of} ${unit}S`, x0, y, P.redDark);
       tiny(g, `${Math.round(Math.hypot(gd.target.x - p.x, gd.target.z - p.z))} M`, 102, y, P.inkSoft, { align: 'right' }); y += 8;
       line(gd.name, P.ink);
       line(gd.run != null ? `RUN ${fmtT(gd.run)}` : gd.next, gd.run != null ? P.redDark : P.inkSoft);

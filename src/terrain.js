@@ -31,6 +31,7 @@ export const SPAWN = M.SPAWN;             // { x, z, yaw } where a fresh truck i
 export const ROADS = M.ROADS ?? [];
 export const TRAILS = M.TRAILS ?? [];
 export const TRAILHEAD = M.TRAILHEAD ?? null;
+export const COURSES = M.COURSES ?? [];   // timed side courses with sections (The Gauntlet map)
 export const TRACK = M.TRACK ?? null;     // race map: the closed-loop centreline
 export const CHECKPOINTS = M.CHECKPOINTS ?? [];
 export const PROPS = M.PROPS ?? [];       // box colliders (barriers, tyre walls)
