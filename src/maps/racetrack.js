@@ -183,7 +183,7 @@ function bake() {
         const graded = !inR(c.s, F.tarmac) && Math.abs(feature(c.s)) < 0.02 && !(c.s > F.rocks[0] - 4 && c.s < F.rocks[1] + 4);
         if (graded) {
           const ease = smooth(HW + 1, HW - 1, c.d);
-          surf += (brakeBumps(c.s) * 0.035 * Math.sin(c.s * 1.96) + 0.018 * (1 - smooth(0.02, 0.1, Math.abs(c.bank))) * Math.sin(c.s * 2.24)) * ease;
+          surf += (brakeBumps(c.s) * 0.025 * Math.sin(c.s * 1.96) + 0.018 * (1 - smooth(0.02, 0.1, Math.abs(c.bank))) * Math.sin(c.s * 2.24)) * ease;
           surf += lumps(x, z, 0.025) + potholes(x, z, 11, 0.25, 0.07, 1.2, 5) * ease;
         }
         const inRocks = c.s > F.rocks[0] && c.s < F.rocks[1];

@@ -88,21 +88,26 @@ markWorld(scene);
 // ---------------- particles (dust, mud, sand) ----------------
 const PMAX = 700;
 const pGeo = new THREE.BufferGeometry();
-const pPos = new Float32Array(PMAX * 3), pCol = new Float32Array(PMAX * 3);
+// [tyre fx] per-particle alpha (RGBA colours) and size, so mud clods can be heavier than grit
+const pPos = new Float32Array(PMAX * 3), pCol = new Float32Array(PMAX * 4), pSize = new Float32Array(PMAX).fill(1);
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
-const pMat = new THREE.PointsMaterial({ size: 0.2, vertexColors: true, transparent: true, opacity: 0.32, depthWrite: false });
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 4));
+pGeo.setAttribute('psize', new THREE.BufferAttribute(pSize, 1));
+const pMat = new THREE.PointsMaterial({ size: 0.2, vertexColors: true, transparent: true, depthWrite: false });
+pMat.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader.replace('uniform float size;', 'uniform float size;\nattribute float psize;').replace('gl_PointSize = size;', 'gl_PointSize = size * psize;');
+};
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 noOutline(points);
 scene.add(points);
-const parts = Array.from({ length: PMAX }, () => ({ life: 0, x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, r: 0, g: 0, b: 0, gy: 1.5, k: 2.5 }));
+const parts = Array.from({ length: PMAX }, () => ({ life: 0, x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, r: 0, g: 0, b: 0, gy: 1.5, k: 2.5, a: 0.32, sz: 1 }));
 let pNext = 0;
 const dustAcc = [0, 0, 0, 0], plumeAcc = [0, 0, 0, 0]; // [tyre fx] per-wheel emission accumulators
 // gy: gravity (m/s²), k: air drag (1/s): light grit floats, mud clods drop like stones
-function emit(x, y, z, vx, vy, vz, col, life, gy = 1.5, k = 2.5) {
+function emit(x, y, z, vx, vy, vz, col, life, gy = 1.5, k = 2.5, a = 0.32, sz = 1) {
   const p = parts[pNext]; pNext = (pNext + 1) % PMAX;
-  Object.assign(p, { x, y, z, vx, vy, vz, life, r: col[0], g: col[1], b: col[2], gy, k });
+  Object.assign(p, { x, y, z, vx, vy, vz, life, r: col[0], g: col[1], b: col[2], gy, k, a, sz });
 }
 // [tyre fx] dust plume: big, soft, low-opacity puffs that hang and drift behind a car at speed on
 // dry dirt, gravel and graded road. Round soft sprites, per-puff alpha (fade in, long fade out)
@@ -166,9 +171,9 @@ function updateParticles(dt) {
       if (p.life <= 0) p.y = -999;
     }
     pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
-    pCol[i * 3] = p.r; pCol[i * 3 + 1] = p.g; pCol[i * 3 + 2] = p.b;
+    pCol[i * 4] = p.r; pCol[i * 4 + 1] = p.g; pCol[i * 4 + 2] = p.b; pCol[i * 4 + 3] = p.life > 0 ? p.a : 0; pSize[i] = p.sz;
   }
-  pGeo.attributes.position.needsUpdate = true; pGeo.attributes.color.needsUpdate = true;
+  pGeo.attributes.position.needsUpdate = true; pGeo.attributes.color.needsUpdate = true; pGeo.attributes.psize.needsUpdate = true;
   // [tyre fx] dust puffs: slow down fast, rise a touch, drift downwind, spread and fade
   const drag = Math.exp(-1.8 * dt);
   for (let i = 0; i < DMAX; i++) {
@@ -848,10 +853,10 @@ function frame(now) {
           if (kind === 'mud') { // heavy, dark, short-lived: thrown back off the tread and dropping fast
             const c = base.map((x) => x * (0.5 + Math.random() * 0.12));
             const sv = 1.5 + Math.min(3, ws.slip * 0.8 + sp * 0.2) * Math.random();
-            emit(w.x + jx, gy + 0.2, w.z + jz, back.x * sv + jx * 2, 1.2 + Math.random() * 1.8, back.z * sv + jz * 2, c, 0.45 + Math.random() * 0.35, 9, 0.6);
+            emit(w.x + jx, gy + 0.2, w.z + jz, back.x * sv + jx * 2, 1.2 + Math.random() * 1.8, back.z * sv + jz * 2, c, 0.45 + Math.random() * 0.35, 9, 0.6, 0.7, 1.5 + Math.random() * 0.6);
           } else if (kind === 'water') {
             const c = [0.72, 0.84, 0.9];
-            emit(w.x + jx, gy + 0.15, w.z + jz, back.x * 1.2 + jx * 4, 1.0 + Math.random() * 1.6, back.z * 1.2 + jz * 4, c, 0.4 + Math.random() * 0.3, 8, 0.8);
+            emit(w.x + jx, gy + 0.15, w.z + jz, back.x * 1.2 + jx * 4, 1.0 + Math.random() * 1.6, back.z * 1.2 + jz * 4, c, 0.4 + Math.random() * 0.3, 8, 0.8, 0.45, 1.3);
           } else { // grit off a spinning tyre
             const c = base.map((x) => Math.min(1, x * 0.85 + 0.12 + (Math.random() - 0.5) * 0.04));
             const sv = 0.5 + Math.min(1.5, ws.slip * 0.3);
