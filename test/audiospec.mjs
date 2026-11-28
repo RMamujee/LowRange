@@ -184,6 +184,10 @@ const res = await page.evaluate(async ({ srcs, RIGS, WAV }) => {
   { const { x } = await render('new', rig0, off(3, 2, 2.0), 2.5); ground.scrub = stats(x.subarray(SR), SR); }
   { const { x } = await render('new', rig0, off(3, 2, 0.02), 2.5); ground.noScrub = stats(x.subarray(SR), SR); }
   { const { x } = await render('new', rig0, off(0, 1, 0, { winch: { running: true, load: 0.8, direction: 'in' } }), 2.5); ground.winch = stats(x.subarray(SR), SR); }
+  // on-board air (tyre pressure): compressor while inflating, vent hiss while deflating, nothing when settled
+  { const { x } = await render('new', rig0, off(0, 1, 0, { tyres: { psi: 20, target: 32, inflating: true, deflating: false } }), 2.5); ground.compressor = stats(x.subarray(SR), SR); }
+  { const { x } = await render('new', rig0, off(0, 1, 0, { tyres: { psi: 20, target: 10, inflating: false, deflating: true } }), 2.5); ground.vent = stats(x.subarray(SR), SR); }
+  { const { x } = await render('new', rig0, off(0, 1, 0, { tyres: { psi: 20, target: 20, inflating: false, deflating: false } }), 2.5); ground.airIdle = stats(x.subarray(SR), SR); }
   const quiet = await render('new', rig0, off(0, 1, 0), 1);
   const swap = await render('new', rig0, () => ({ running: true, rpm: 1200, throttle: 0.3, load: 0.3, gear: 1, range: 'high', kmh: 0, wheels: wheels(1, 0, rig0.radius) }), 2, SR,
     { at: (a, t) => { if (Math.abs(t - 0.5) < 0.02) a.start(RIGS[1].engine); if (Math.abs(t - 1.0) < 0.02) a.start(RIGS[2].engine); } });
@@ -267,6 +271,9 @@ for (const k of ['dirt', 'gravel', 'rock', 'tarmac', 'sand', 'mud', 'water']) ch
 check(G.tarmac.rms < G.gravel.rms, `tarmac hum kept below gravel crunch (${G.tarmac.rms.toFixed(3)} < ${G.gravel.rms.toFixed(3)})`);
 check(G.scrub.rms > G.noScrub.rms * 1.5 && G.scrub.centroid < 1200 && G.scrub.whine < -30, `scrub on rock: slip raises it (rms ${G.noScrub.rms.toFixed(3)} -> ${G.scrub.rms.toFixed(3)}), low-mid (centroid ${G.scrub.centroid.toFixed(0)} Hz < 1200), no squeal (narrow partial ${G.scrub.whine.toFixed(0)} dB)`);
 check(G.winch.rms > 0.01 && G.winch.centroid < 300 && G.winch.whine < -30, `winch: deep motor voice (rms ${G.winch.rms.toFixed(3)}, centroid ${G.winch.centroid.toFixed(0)} Hz < 300, narrow partial >1 kHz ${G.winch.whine.toFixed(0)} dB)`);
+check(G.compressor.rms > 0.006 && G.compressor.centroid < 300 && G.compressor.whine < -30, `compressor: low hum while inflating (rms ${G.compressor.rms.toFixed(3)}, centroid ${G.compressor.centroid.toFixed(0)} Hz < 300, narrow partial >1 kHz ${G.compressor.whine.toFixed(0)} dB)`);
+check(G.vent.rms > 0.004 && G.vent.rms < G.compressor.rms * 1.5 && G.vent.centroid < 1600 && G.vent.above6k < 0.01 && G.vent.whine < -30, `vent: soft hiss while deflating (rms ${G.vent.rms.toFixed(3)}, centroid ${G.vent.centroid.toFixed(0)} Hz < 1600, >6 kHz ${(G.vent.above6k * 100).toFixed(2)}% < 1%, narrow partial ${G.vent.whine.toFixed(0)} dB)`);
+check(G.airIdle.rms < 0.2 * Math.min(G.compressor.rms, G.vent.rms), `air quiet when the pressure is settled (rms ${G.airIdle.rms.toFixed(4)})`);
 check(res.extra.nodesAfterSwaps === res.extra.nodesQuiet, `rig swaps release the old voice: ${res.extra.nodesAfterSwaps} nodes after two swaps vs ${res.extra.nodesQuiet} (no winch built without a winch state)`);
 check(res.extra.swapPeak <= LIM.peak, `no clipping across rig swaps: peak ${res.extra.swapPeak.toFixed(2)}`);
 const nodes = res.out.find((r) => r.label === 'new').nodes;

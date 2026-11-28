@@ -18,7 +18,8 @@
 // Tyres: low, textured loops by surface (dirt / grass rumble, gravel crunch, rock crackle, tarmac
 // hum, sand hush, mud squelch, water splash), scrub grains when a tyre slips on hard ground, and a
 // scrape voice driven by the chassis' scrape work (car.crash.scrape). Winch: a low motor buzz and gear
-// growl, only built once a winch state object shows up.
+// growl, only built once a winch state object shows up. On-board air (tyre pressure): a low compressor
+// thrum while inflating and a soft vent hiss while deflating, built once a tyre state shows up.
 // Master: engine and effects buses -> high shelf (-8 dB above 4.5 kHz) -> low-pass 7 kHz ->
 // compressor -> master gain (volume, mute, pause fade). No per-sample JS runs at play time:
 // update() only moves AudioParams with smooth ramps. The context is created on the first user
@@ -214,6 +215,7 @@ export function audioStateFrom(car, kmh) {
     kmh: kmh ?? Math.abs(car.speed()) * 3.6, radius: sp.tire.radius, wheels: car.wheelState,
     scrape: car.crash ? car.crash.scrape : 0,
     winch: w ? (w.state && typeof w.state === 'object' ? w.state : w) : null,
+    tyres: car.tyre ? car.tyre.state : null, // [tyre pressure] { psi, target, inflating, deflating }
   };
 }
 
@@ -244,7 +246,7 @@ export class EngineAudio {
     this.fxBus.gain.setTargetAtTime(this.mix.effects, t, 0.05);
     this._applyMaster();
   }
-  // game mute (M key) and pause; a paused realtime context is suspended after the fade
+  // game mute (N key) and pause; a paused realtime context is suspended after the fade
   setMuted(m) {
     this.muted = !!m;
     this._applyMaster();
@@ -351,7 +353,7 @@ export class EngineAudio {
     branch(splash, [filt('lowpass', 1300, 0.6)], 'water');                 // water splash
     branch(grit, [filt('bandpass', 620, 0.9), filt('lowpass', 1400, 0.6)], 'scrub'); // tyre scrub / chirp on hard ground
     branch(crunch, [filt('bandpass', 420, 0.8)], 'scrape');                // chassis / diff on rock
-    this.winchV = null;
+    this.winchV = null; this.airV = null;
     this._applyMaster();
   }
 
@@ -467,6 +469,40 @@ export class EngineAudio {
 
     // ---------- winch ----------
     this._winch(s.winch, t);
+    // ---------- on-board air: compressor and vent ----------
+    this._air(s.tyres, t);
+  }
+
+  // Tyre pressure (car.tyre.state): a small 12 V compressor while inflating (a low piston thrum: a
+  // 38 Hz band-limited sawtooth and its sub through a 220 Hz low-pass, plus brown-noise rattle at
+  // 150 Hz) and a soft vent hiss while deflating (white noise, broad band-pass round 900 Hz, low-passed
+  // at 2.4 kHz; no narrow tone). Built the first time a tyre state shows up; quiet otherwise.
+  _air(a, t) {
+    if (!a && !this.airV) return;
+    const ctx = this.ctx;
+    if (!this.airV) {
+      const n = (x) => this._n(x);
+      const motor = n(ctx.createOscillator()); motor.type = 'sawtooth'; motor.frequency.value = 38;
+      const sub = n(ctx.createOscillator()); sub.type = 'sine'; sub.frequency.value = 19;
+      const lp = n(ctx.createBiquadFilter()); lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 0.5;
+      const rattle = n(ctx.createBufferSource()); rattle.buffer = this.tex.brown; rattle.loop = true; rattle.playbackRate.value = 1.3;
+      const rbp = n(ctx.createBiquadFilter()); rbp.type = 'bandpass'; rbp.frequency.value = 150; rbp.Q.value = 0.7;
+      const comp = n(ctx.createGain()); comp.gain.value = 0;
+      const hiss = n(ctx.createBufferSource()); hiss.buffer = this.tex.white; hiss.loop = true;
+      const hbp = n(ctx.createBiquadFilter()); hbp.type = 'bandpass'; hbp.frequency.value = 900; hbp.Q.value = 0.45;
+      const hlp = n(ctx.createBiquadFilter()); hlp.type = 'lowpass'; hlp.frequency.value = 2400; hlp.Q.value = 0.6;
+      const vent = n(ctx.createGain()); vent.gain.value = 0;
+      motor.connect(lp); sub.connect(lp); lp.connect(comp); rattle.connect(rbp); rbp.connect(comp); comp.connect(this.fxBus);
+      hiss.connect(hbp); hbp.connect(hlp); hlp.connect(vent); vent.connect(this.fxBus);
+      motor.start(); sub.start(); rattle.start(); hiss.start(0, this.realtime ? Math.random() * 2 : 0);
+      this.airV = { comp, vent, motor, sub };
+    }
+    const V = this.airV, up = a && a.inflating ? 1 : 0, down = a && a.deflating ? 1 : 0;
+    // the compressor labours a little as the pressure rises (slower, deeper)
+    const f = 40 - 6 * clamp(((a && a.psi) || 0) / 36);
+    V.motor.frequency.setTargetAtTime(f, t, 0.3); V.sub.frequency.setTargetAtTime(f / 2, t, 0.3);
+    V.comp.gain.setTargetAtTime(0.05 * up, t, up ? 0.12 : 0.2);
+    V.vent.gain.setTargetAtTime(0.03 * down, t, down ? 0.06 : 0.15);
   }
 
   _winch(w, t) {
@@ -545,6 +581,6 @@ export class EngineAudio {
     for (const x of this.nodes) { try { x.disconnect(); } catch { /* gone */ } }
     this.nodes.clear();
     if (this.realtime) this.ctx.close().catch(() => {});
-    this.ctx = null; this.voice = null; this.winchV = null;
+    this.ctx = null; this.voice = null; this.winchV = null; this.airV = null;
   }
 }
