@@ -200,6 +200,36 @@ plane so the static hold works in mud) have not been seen in the game. A human s
 - [ ] Spawn list (J): every place and trail end lands somewhere sensible.
 - [ ] Sand tyre marks: visible enough, not distracting; fade time.
 
+## HUD and map legibility (latest)
+
+The user found the HUD and map text stylish but hard to read. Measured before the change (1366x768 and 1024x600 at 100%, where the HUD and the big map both run at scale 2): every small word was the 3x5 caps face, 5 game px tall, so 10 device px with 3 px wide letters (B/8, S/5, M/N/W, E/F barely differ); the minimap hint, the big map's "ENTER / CLICK TO CONFIRM" and similar used `paperEdge` on parchment (2.35:1), secondary text `inkSoft` (3.96:1), HOT `amberDark` (2.58:1), red warnings on parchment 3.41:1, ink on the wooden keys 3.37:1; the player arrow was amber on ochre (lost on the desert and the trailhead lots); trail difficulty was hue only along the lines (symbols only at trail ends); on the Gauntlet overview 27 spawn signposts, 12 stage gates and the course gates sat on top of each other and the labels; the desert's zoom read "1X" at 1/2 (the label table assumed four zoom steps); the terrain was the bright gameplay material grid (orange / grey / lime shards) under everything.
+
+What changed (`src/hud/px.js`, `src/hud/hud.js`, `src/hud/instruments.js`, `src/hud/mapview.js`, `src/hud/layout.js`):
+- **Type scale, three sizes.** Display: the bitmap face (`ui/pixelfont.js`) at 2x, or 1x with a painted outline (titles, big messages, PAUSED). Body: the same face at 1x, mixed case, 7 px caps, 5 px x-height, 10 px line pitch (`LINE`), for every word on the HUD and the maps (lamps, keys, the chassis and engine boards, the minimap plaque, map labels, sidebar, spawn list, prompt, legend, controls board). Numerals: the 3x5 face only for digits and one or two letter marks (dial numbers, gear slots, 2H/4H/4L, F/R, T/B/C, gate and flag numbers) plus the stamped marks RPM, KM/H and PARK. Helpers: `text`, `fitText`, `nice` (title case for names stored in caps) in `px.js`.
+- **Contrast.** New text colours in `P`: `text` 11.6:1, `text2` 7.6:1 (5.7:1 on the shaded parchment), `textWarn` 6.5:1, `textGood` 5.5:1, `textHot` 6.0:1, all on parchment. Wooden keys now `btn` (ink 5.7:1), unlit lamp labels `m5` on `m1` (5.6:1), the red warning lamp is `redDark` with cream (7.5:1). `inkSoft` and `paperEdge` stay for lines and rims only.
+- **Boards** grew to fit the body face: engine 136x46 (was 128x40), chassis 216x62 (200x60), minimap 120x166 (108x146: 112 px map square, four plaque lines). Cluster unchanged (lamps 12 px tall). The big map is 446x241 (`BIGMAP` / `BIGMAP_SIZE` in `layout.js`, shared with `mapview.js`): 290x200 viewport, 140 px sidebar, a legend strip; it still opens at scale 4 at 1080p and 2 at 1366x768 and 1024x600.
+- **Map.** The base is the ground the world shows (`visualSurface` from `gfx/terrain_look.js`) in each map's own `MAT_INFO` colours, desaturated a little and pulled 18% towards parchment, three tone hill shading, contours every 5 m (10 m zoomed out). Trails: ink rim, cream band, at least 2 px of difficulty colour, and the difficulty symbol (circle / square / diamond / two diamonds) repeated every 70 px along every trail and course (60 px on the minimap). Labels are parchment plates with an ink rim, placed by priority (running trail first, trail names always, trailhead and course names from zoom 1) at the first free spot of ten around the anchor, clear of the player, waypoints, gates, trail ends, spawn markers, the scale bar and the hovered spawn's tag. Gates: the next one always, others where they don't overlap a gate already placed. Spawn points are small wooden pegs when zoomed out (same click target), signposts from zoom 1. The player is a red arrow with an ink outline and a cream halo on the big map and the minimap. Zoom label computed from the zoom (1/4x, 1/2x, 1x...). Legend under the map: difficulty names from `DIFF`, road, gate, you, waypoint, spawn (or checkpoint / start on the race track). When the waypoint rows do not fit under the list (the Gauntlet with two or three set), the sidebar folds them into one row with CLEAR ALL. A trail whose middle is off the view is labelled at its visible point nearest the middle. Roads in the legend: Road, or Paved and Track where a map has asphalt (the island). Spawn list rows keep the map's spelling of names (`nameCase`), tags in sentence case ("Far end"), four rows per wheel notch.
+- **Minimap plaque:** line 1 what the arrow points at (trail name, waypoint, stage), line 2 why / how far, line 3 the clock, line 4 a key hint.
+- `test/mapshots.mjs` (new): HUD, minimap, cluster, chassis, big map at every zoom, spawn list and prompt per map, window size and display scaling. `test/hudlayout.mjs` reads the board and big map sizes from `layout.js` now; a 373x240 window now also holds a toast back behind a big message (allowed below 400 x 240).
+
+Rules now in force:
+- No word drawn in the 3x5 face except the three stamped instrument marks RPM, KM/H (inside the dials) and PARK (under the lever); body text is 7 game px caps, so at least 14 device px at HUD scale 2 (every window from about 800 x 500 up) and 28 px on the 1080p big map.
+- Whole-number scaling only for the HUD and the big map at every window size the matrix covers (`fitScale` goes fractional only below scale 1, i.e. windows under about 475 x 270 device px).
+- Body text at least 4.5:1 against its own plate, large or outlined text at least 3:1; text on the map always sits on a plate, never on terrain.
+- Difficulty never by hue alone: shape symbols along every line, in the sidebar, the spawn list and the legend.
+
+Before / after previews: `docs/previews/legibility_before_*.png` and `legibility_after_*.png` (same views).
+
+### Needs playtesting (HUD and map legibility)
+
+- [ ] Read the minimap plaque and lamps at a glance while driving at 1920x1080, 1366x768 and a small window, at 100% and 150% display scaling; nothing should need a squint.
+- [ ] Big map on every map at every zoom: labels never cover the player, a gate or each other; the legend matches what is drawn; the desert and the island zoom out to 1/4x and say so.
+- [ ] The Gauntlet overview: gates readable, spawn pegs small and under the gates, the next gate always shown; with two or three waypoints set, CLEAR ALL still clickable on its folded row.
+- [ ] Spawn list (J) and its prompt: names in title case, keyboard selection scrolls, the hovered signpost's name tag stays clear of the trailhead label.
+- [ ] The red player arrow on every ground (grass, ochre dirt, desert sand, slickrock, the dry lake, water, roads): always findable.
+- [ ] Clicking RECOVER / CAM / MAP / HELP, the lamps and the H-shifter after the board size changes; the engine board's compact lamp labels when oil, coolant and drive all warn at once.
+- [ ] A rig with rear steer (none today) would add an "R-steer" lamp; check the lamp strip still fits beside the buttons if one is added.
+
 ## Known gaps
 
 - Mud limits: the mud's support on a tyre is always vertical and the berms only raise the surface, so ruts don't steer a truck or hold it in its track (no sideways rut guidance), and a tyre climbing out of a rut gets no extra resistance. The rut lattice is 0.2 m. Mud packs on the tread only as a look (no grip loss from clogged tread). The belly reads `spec.chassis.floor` (chassis-local floor-pan height) when a spec has one, else the frame box's bottom.
@@ -220,6 +250,7 @@ node test/view.mjs && node test/garage.mjs && node test/brake.mjs && node test/c
 node test/mud.mjs                               # deformable mud: sinkage, ruts, digging, crossing Bog Run, parked in the bog
 node test/hudlayout.mjs                         # HUD layout maths: no board off-screen / overlapping at any window size, common sizes unchanged
 CHROME=<chromium.exe> PORT=5199 node test/hudfit.mjs [shotdir]   # same in the browser: 3 maps x size matrix x 100/125/150% scaling (slow)
+CHROME=<chromium.exe> PORT=5199 node test/mapshots.mjs <outdir> [maps] [WxH@dpr,...]   # HUD + minimap + big map at every zoom + spawn list, for legibility checks
 node test/waypoints.mjs && node test/camclear.mjs     # stored waypoints on every map; camera vs. trees / signs / ground
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor

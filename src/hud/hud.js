@@ -8,8 +8,8 @@
 import './hud.css';
 import * as THREE from 'three';
 import { TRAILS, CHECKPOINTS, SIZE, heightAt, pathPoint } from '../terrain.js';
-import { P, mk, rect, px, board, paper, inset, tiny, tinyMeasure, sign, drawText, measure, wrap, clamp, fmtT, fmtLap, spriteFrom, rotSprite, shape } from './px.js';
-import { Dial, Shifter, TransferLever, ParkLever, drawLockers, drawPedals, drawLamp, drawIncl } from './instruments.js';
+import { P, mk, rect, px, board, paper, inset, tiny, sign, drawText, measure, text, fitText, nice, LINE, clamp, fmtT, fmtLap, spriteFrom, rotSprite, shape } from './px.js';
+import { Dial, Shifter, TransferLever, ParkLever, drawLockers, drawPedals, drawLamp, lampWidth, LAMP_H, drawIncl } from './instruments.js';
 import { MapBases, BigMap, Waypoints, drawMinimap } from './mapview.js';
 import { Beacons } from './waypoint_pillars.js';
 import { TEMP, engineStatus, engineLamps, EngineWarnings } from './engine_state.js';
@@ -134,18 +134,19 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     park.draw(g, 229, 6, { park: S.parkBrake, held: input.handbrake });
     cluster.hits.push({ x: 229, y: 6, w: park.W, h: park.H, act: 'park' });
     drawPedals(g, 261, 6, { t: input.throttle, b: input.brake, c: 1 - d.engagement });
-    // lamp strip + buttons
+    // lamp strip + buttons (body text, mixed case)
+    const LY = 62;
     let x = 5;
-    const lamp = (label, state, act) => { const w = drawLamp(g, x, 63, label, state); cluster.hits.push({ x, y: 63, w, h: 10, act }); x += w + 2; };
+    const lamp = (label, state, act) => { const w = drawLamp(g, x, LY, label, state); cluster.hits.push({ x, y: LY, w, h: LAMP_H, act }); x += w + 2; };
     lamp('4WD', d.fourWD ? 'on' : null, '4wd');
-    lamp('AIRED', car.airedDown ? 'on' : null, 'tyres');
-    if (spec.rearSteer) lamp('R-STEER', car.rearSteerOn ? 'on' : null, 'rsteer');
-    lamp(d.autoClutch ? 'AUTO-CL' : 'MANUAL', d.autoClutch ? 'good' : null, 'autoclutch');
+    lamp('Aired', car.airedDown ? 'on' : null, 'tyres');
+    if (spec.rearSteer) lamp('R-steer', car.rearSteerOn ? 'on' : null, 'rsteer');
+    lamp(d.autoClutch ? 'Auto-cl' : 'Manual', d.autoClutch ? 'good' : null, 'autoclutch');
     const stalled = !d.running;
-    lamp(d.dead ? 'DEAD' : stalled ? 'STALL I' : 'ENGINE', stalled ? (Math.floor(clock * 3) % 2 ? 'warn' : 'on') : null, 'ignition');
-    const btns = [['RECOVER', 'recover'], ['CAM', 'camera'], ['MAP', 'map'], ['HELP', 'help']];
-    let bx = cluster.w - 5 - btns.reduce((a, [l]) => a + tinyMeasure(l) + 9, -2);
-    for (const [l, act] of btns) { const w = drawLamp(g, bx, 63, l, (act === 'map' && mapOpen) || (act === 'help' && helpOpen) ? 'on' : null, 'button'); cluster.hits.push({ x: bx, y: 63, w, h: 10, act }); bx += w + 2; }
+    lamp(d.dead ? 'Dead' : stalled ? 'Stall I' : 'Engine', stalled ? (Math.floor(clock * 3) % 2 ? 'warn' : 'on') : null, 'ignition');
+    const btns = [['Recover', 'recover'], ['Cam', 'camera'], ['Map', 'map'], ['Help', 'help']];
+    let bx = Math.max(x + 3, cluster.w - 5 - btns.reduce((a, [l]) => a + lampWidth(l) + 2, -2));
+    for (const [l, act] of btns) { const w = drawLamp(g, bx, LY, l, (act === 'map' && mapOpen) || (act === 'help' && helpOpen) ? 'on' : null, 'button'); cluster.hits.push({ x: bx, y: LY, w, h: LAMP_H, act }); bx += w + 2; }
   }
 
   // ------------------------------------------------------------ chassis board
@@ -155,23 +156,24 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     const att = car.attitude(), pd = att.pitch * 57.3, rd = att.roll * 57.3;
     drawIncl(g, 5, 4, pd, 'pitch', 38, clock);
     drawIncl(g, 52, 4, rd, 'roll', 30, clock);
-    const pl = `PITCH ${Math.abs(pd).toFixed(0)}°${pd > 0.5 ? ' UP' : pd < -0.5 ? ' DN' : ''}`, rl = `ROLL ${Math.abs(rd).toFixed(0)}°${rd > 0.5 ? ' R' : rd < -0.5 ? ' L' : ''}`;
-    tiny(g, pl, 27, 50, Math.abs(pd) > 38 ? P.redHi : P.paint, { align: 'center', shadow: P.ol });
-    tiny(g, rl, 74, 50, Math.abs(rd) > 30 ? P.redHi : P.paint, { align: 'center', shadow: P.ol });
+    // painted lettering under each dial (body text, outlined so it reads on the planks): "Pitch 12°↑", "Roll 4°→"
+    const pl = `Pitch ${Math.abs(pd).toFixed(0)}°${pd > 0.5 ? '↑' : pd < -0.5 ? '↓' : ''}`, rl = `Roll ${Math.abs(rd).toFixed(0)}°${rd > 0.5 ? '→' : rd < -0.5 ? '←' : ''}`;
+    text(g, pl, 27, 50, Math.abs(pd) > 38 ? P.redHi : P.paint, { align: 'center', outline: P.ol });
+    text(g, rl, 74, 50, Math.abs(rd) > 30 ? P.redHi : P.paint, { align: 'center', outline: P.ol });
     // wheels card
-    const X = 99, Y = 5, W = 96, H = 50, cx = X + 48;
+    const X = 99, Y = 5, W = chassis.w - X - 5, H = 52, cx = X + Math.floor(W / 2);
     paper(g, X, Y, W, H, 5);
     const d = car.dt, axY = [Y + 10, Y + 30];
     rect(g, cx, axY[0], 1, axY[1] - axY[0], P.inkSoft);
     for (const [i, ay] of axY.entries()) {
-      rect(g, X + 41, ay, 15, 1, P.inkSoft);
+      rect(g, cx - 7, ay, 15, 1, P.inkSoft);
       const locked = i === 0 ? d.lockF : d.lockR, driven = i === 1 || d.fourWD;
       rect(g, cx - 2, ay - 2, 5, 5, P.ink); rect(g, cx - 1, ay - 1, 3, 3, locked ? P.red : driven ? P.paperShade : P.paper);
     }
     const comp = car.compression(), s = spec.susp, names = car.wheelState.map((ws) => ws);
     for (let i = 0; i < 4; i++) {
       const left = i % 2 === 0, front = i < 2, ws = names[i];
-      const tx = left ? X + 35 : X + 55, ty = front ? Y + 4 : Y + 24;
+      const tx = left ? cx - 13 : cx + 7, ty = front ? Y + 4 : Y + 24;
       const broken = car.broken[i], flat = car.health.tire[i] < 0.35, suspHurt = car.health.susp[i] < 0.75;
       const rim = broken ? P.red : !ws.grounded ? P.paperEdge : ws.slip > 0.7 ? P.amber : P.green;
       if (!broken) {
@@ -183,24 +185,26 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
         for (let k = 0; k < 7; k++) { px(g, tx + k, ty + 3 + k, P.red); px(g, tx + 6 - k, ty + 3 + k, P.red); }
       }
       // suspension travel: marker in a slot, centre line at static
-      const bx = left ? X + 30 : X + 65;
+      const bx = left ? cx - 18 : cx + 17;
       inset(g, bx, ty, 3, 13, P.paperShade);
       const c = clamp(comp[i], -s.droop - 0.15, s.bump + 0.15), f = clamp(0.5 - c / (s.bump + s.droop + 0.3), 0, 1);
       rect(g, bx, ty + 6, 3, 1, P.paperEdge);
       rect(g, bx - 1, ty + 1 + Math.round(f * 10), 5, 2, ws.grounded ? P.ink : P.inkSoft);
-      // surface + status labels on the outside
+      // surface + status labels on the outside (body text), the surface's swatch under it;
+      // a hurt corner's label alternates with "Susp" (its tyre frame is red too)
       const MAT_NAME = S.matInfo[ws.mat];
-      const lab = broken ? 'GONE' : flat ? 'FLAT' : ws.grounded ? MAT_NAME.name.toUpperCase() : 'AIR';
-      const col = broken || flat ? P.red : ws.grounded ? P.ink : P.inkSoft;
+      const susp = suspHurt && !broken && Math.floor(clock * 1.5) % 2 === 0;
+      const lab = broken ? 'Gone' : flat ? 'Flat' : susp ? 'Susp' : ws.grounded ? MAT_NAME.name : 'Air';
+      const col = broken || flat || susp ? P.textWarn : ws.grounded ? P.text : P.text2;
       const sw = MAT_NAME.color.map((v) => Math.round(v * 255)), swc = `rgb(${sw.join(',')})`;
-      if (left) { tiny(g, lab, X + 27, ty + 2, col, { align: 'right' }); if (ws.grounded && !broken) { rect(g, X + 23, ty + 8, 5, 4, P.ink); rect(g, X + 24, ty + 9, 3, 2, swc); } }
-      else { tiny(g, lab, X + 70, ty + 2, col); if (ws.grounded && !broken) { rect(g, X + 70, ty + 8, 5, 4, P.ink); rect(g, X + 71, ty + 9, 3, 2, swc); } }
-      if (suspHurt && !broken) tiny(g, 'SUSP', left ? X + 21 : X + 76, ty + 8, P.red, { align: left ? 'right' : 'left' });
+      const lx = left ? cx - 22 : cx + 23;
+      text(g, lab, lx, ty, col, { align: left ? 'right' : 'left' });
+      if (ws.grounded && !broken) { const sx = left ? lx - 6 : lx; rect(g, sx, ty + 10, 6, 4, P.ink); rect(g, sx + 1, ty + 11, 4, 2, swc); }
     }
     // damage
-    const H2 = car.health, pct = (v) => Math.round(v * 100), dc = (v) => (v > 0.75 ? P.greenDark : v > 0.35 ? P.amberDark : P.red);
-    tiny(g, d.dead ? 'ENG DEAD' : `ENG ${pct(H2.engine)}%`, X + 5, Y + 42, d.dead ? P.red : dc(H2.engine));
-    tiny(g, `BODY ${pct(H2.body)}%`, X + W - 5, Y + 42, dc(H2.body), { align: 'right' });
+    const H2 = car.health, pct = (v) => Math.round(v * 100), dc = (v) => (v > 0.75 ? P.textGood : v > 0.35 ? P.textHot : P.textWarn);
+    text(g, d.dead ? 'Eng dead' : `Eng ${pct(H2.engine)}%`, X + 5, Y + 41, d.dead ? P.textWarn : dc(H2.engine));
+    text(g, `Body ${pct(H2.body)}%`, X + W - 5, Y + 41, dc(H2.body), { align: 'right' });
   }
 
   // ------------------------------------------------------------ engine board
@@ -208,13 +212,13 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   // power loss, and oil / coolant / drive lamps. Quiet when healthy (needle on the cold stop, lamps
   // dark); a warning blinks for a moment when it first comes on or gets worse. Redrawn only when
   // what it shows changes.
-  const SEIZE_TEXT = { oil: 'NO OIL', heat: 'OVERHEATED', damage: 'WRECKED' };
-  const ZONE = { normal: ['NORMAL', P.inkSoft], hot: ['HOT', P.amberDark], overheat: ['OVERHEATING', P.red] };
+  const SEIZE_TEXT = { oil: 'No oil', heat: 'Overheated', damage: 'Wrecked' };
+  const ZONE = { normal: ['Normal', P.text2], hot: ['Hot', P.textHot], overheat: ['Overheating', P.textWarn] };
   const BAND_COOK = [P.red, P.red, P.redDark], BAND_HOT = [P.amber, P.amber, P.amberDark], BAND_OK = [P.paperShade, P.paperShade, P.paperShade];
   const TEMP_TICKS = [0, 0.25, 0.5, TEMP.hot, TEMP.cook, TEMP.max], LAMP_KEYS = ['oil', 'coolant', 'drive'];
   let engineSig = '';
   function drawEngine(S) {
-    const { car } = S, g = engine.g, W = engine.w, xs = 28, xe = W - 9, span = xe - xs;
+    const { car } = S, g = engine.g, W = engine.w, xs = 34, xe = W - 9, span = xe - xs;
     const st = engineStatus(car.crash.mech, car.dt), w = warnings.update(st, clock, car.crash.mech), L = engineLamps(st);
     const nx = xs + Math.round(st.tempFrac * span), pw = Math.round(st.power * 100);
     const sig = st.seized ? `S${w.cause}${w.lit.seized}` : `${st.zone}${nx}${w.lit.temp}${st.lowPower && w.lit.power ? pw : ''}`;
@@ -222,13 +226,13 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     if (sig + lamps === engineSig) return;
     engineSig = sig + lamps;
     board(g, 0, 0, W, engine.h, { seed: 14 });
-    paper(g, 4, 4, W - 8, 19, 15);
+    paper(g, 4, 4, W - 8, 25, 15);
     if (st.seized) {
-      if (w.lit.seized) drawText(g, 'ENGINE SEIZED', Math.round((W - measure('ENGINE SEIZED')) / 2), 5, P.red);
-      tiny(g, SEIZE_TEXT[w.cause] || SEIZE_TEXT.damage, 8, 16, P.redDark);
-      tiny(g, 'BACKSPACE: REPAIR', W - 9, 16, P.inkSoft, { align: 'right' });
+      if (w.lit.seized) text(g, 'ENGINE SEIZED', W / 2, 6, P.textWarn, { align: 'center' });
+      text(g, SEIZE_TEXT[w.cause] || SEIZE_TEXT.damage, 8, 17, P.textWarn);
+      text(g, 'Bksp: repair', W - 9, 17, P.text2, { align: 'right' });
     } else {
-      tiny(g, 'TEMP', 8, 7, P.inkSoft);
+      text(g, 'Temp', 8, 6, P.text2);
       for (let x = xs; x <= xe; x++) {
         const v = ((x - xs) / span) * TEMP.max;
         const band = v > TEMP.cook ? BAND_COOK : v > TEMP.hot ? BAND_HOT : BAND_OK;
@@ -241,11 +245,15 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
       }
       rect(g, nx + 1, 7, 1, 6, P.ol); rect(g, nx, 6, 1, 7, P.red); px(g, nx, 6, P.redHi);
       const [zw, zc] = ZONE[st.zone];
-      if (w.lit.temp) tiny(g, zw, 8, 16, zc);
-      if (st.lowPower && w.lit.power) tiny(g, `POWER ${pw}%`, W - 9, 16, st.power < 0.5 ? P.red : P.amberDark, { align: 'right' });
+      if (w.lit.temp) text(g, zw, 8, 17, zc);
+      if (st.lowPower && w.lit.power) text(g, `Power ${pw}%`, W - 9, 17, st.power < 0.5 ? P.textWarn : P.textHot, { align: 'right' });
     }
+    // lamp labels in sentence case ('NO DRIVE F' -> 'No drive F'); if all three are long at once, the
+    // compact forms ('Oil', 'Drive F') keep them on the board (the lamp colour still says how bad)
+    const lab = (k, compact) => { let s = L[k].label; if (compact) s = s.replace(/ \d+%$/, '').replace(/^NO DRIVE/, 'DRIVE'); return s.charAt(0) + s.slice(1).toLowerCase().replace(/ ([fr])$/, (m, c) => ' ' + c.toUpperCase()); };
+    const compact = LAMP_KEYS.reduce((a, k) => a + lampWidth(lab(k, false)) + 2, 3) > W - 4;
     let x = 5;
-    for (const k of LAMP_KEYS) x += drawLamp(g, x, 26, L[k].label, w.lit[k] ? L[k].state : null) + 2;
+    for (const k of LAMP_KEYS) x += drawLamp(g, x, 31, lab(k, compact), w.lit[k] ? L[k].state : null) + 2;
   }
 
   // ------------------------------------------------------------ guidance
@@ -253,65 +261,70 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   let lastWpCheck = 0;
   function guidance(S, p) {
     const wp = waypoints.active;
-    if (wp) return { target: wp, label: `WAYPOINT 1${waypoints.list.length > 1 ? ` OF ${waypoints.list.length}` : ''}`, wp: true };
-    if (isRace) { const r = S.race; if (!r) return null; const c = CHECKPOINTS[r.next]; return { target: c, label: r.next ? `CHECKPOINT ${r.next}/${CHECKPOINTS.length - 1}` : 'START / FINISH' }; }
+    if (wp) return { target: wp, label: `Waypoint 1${waypoints.list.length > 1 ? ` of ${waypoints.list.length}` : ''}`, sub: '', wp: true };
+    if (isRace) { const r = S.race; if (!r) return null; const c = CHECKPOINTS[r.next]; return { target: c, label: r.next ? `Checkpoint ${r.next}/${CHECKPOINTS.length - 1}` : 'Start / finish' }; }
     const G = S.game;
     if (G.guide) return G.guide; // [crawl] The Gauntlet: next stage gate, with progress
-    if (G.active) { const t = TRAILS[G.active.trail]; return { target: trailEnds[G.active.trail][1 - G.active.from], label: 'FINISH ' + t.name.toUpperCase() }; }
+    if (G.active) { const t = TRAILS[G.active.trail]; return { target: trailEnds[G.active.trail][1 - G.active.from], label: nice(t.name), sub: 'Finish' }; }
     let best = null, bd = Infinity;
-    TRAILS.forEach((t, i) => { if (G.trails[i].done) return; trailEnds[i].forEach((e) => { const dd = Math.hypot(e.x - p.x, e.z - p.z); if (dd < bd) { bd = dd; best = { target: e, label: t.name.toUpperCase() }; } }); });
+    TRAILS.forEach((t, i) => { if (G.trails[i].done) return; trailEnds[i].forEach((e) => { const dd = Math.hypot(e.x - p.x, e.z - p.z); if (dd < bd) { bd = dd; best = { target: e, label: nice(t.name), sub: 'Trail' }; } }); });
     return best;
   }
+  // 'GATE 3' -> 'Gate 3', 'COURSE DONE' -> 'Course done' (strings the Gauntlet hands over in caps)
+  const sentence = (s) => (s == null ? '' : /[a-z]/.test(s) ? String(s) : String(s).charAt(0) + String(s).slice(1).toLowerCase());
 
-  function fit(text, maxW) { if (tinyMeasure(text) <= maxW) return text; let t = text; while (t.length > 2 && tinyMeasure(t + '.') > maxW) t = t.slice(0, -1); return t + '.'; }
-
+  // The minimap board: the map square (MINI_S game px) and the parchment plaque under it, four body
+  // lines at LINE pitch: what the arrow points at, how far, the clock, and a key hint.
+  const MINI_S = BOARDS.mini[0] - 8, PLAQUE_Y = MINI_S + 7;
   function drawMini(S) {
     const { car } = S, g = mini.g, p = car.chassis.translation(), { heading } = car.attitude();
-    mini.hits = [{ x: 0, y: 0, w: 108, h: 106, act: 'map' }];
+    mini.hits = [{ x: 0, y: 0, w: mini.w, h: MINI_S + 6, act: 'map' }];
     board(g, 0, 0, mini.w, mini.h, { seed: 8, nails: false });
-    inset(g, 3, 3, 102, 102, P.m1);
-    drawMinimap(g, 4, 4, 100, { bases, p, heading, waypoints: waypoints.list, raceCp: isRace && S.race && S.race.racing ? CHECKPOINTS[S.race.next] : S.game.guide?.target ?? null, t: clock }); // [crawl] ring the next gate
+    inset(g, 3, 3, MINI_S + 2, MINI_S + 2, P.m1);
+    drawMinimap(g, 4, 4, MINI_S, { bases, p, heading, waypoints: waypoints.list, raceCp: isRace && S.race && S.race.racing ? CHECKPOINTS[S.race.next] : S.game.guide?.target ?? null, t: clock }); // [crawl] ring the next gate
     // compass N
-    rect(g, 6, 6, 7, 9, P.ol); rect(g, 7, 7, 5, 7, P.paper); tiny(g, 'N', 10, 8, P.redDark, { align: 'center' });
+    rect(g, 6, 6, 9, 11, P.ol); rect(g, 7, 7, 7, 9, P.paper); text(g, 'N', 11, 8, P.textWarn, { align: 'center' });
     // plaque
-    paper(g, 4, 107, 100, 36, 11);
+    const PW = mini.w - 8, PH = mini.h - PLAQUE_Y - 3;
+    paper(g, 4, PLAQUE_Y, PW, PH, 11);
     const gd = guidance(S, p);
     camera.getWorldDirection(camDir);
-    const tx = 4 + 11, ty = 107 + 11;
+    const tx = 4 + 11, ty = PLAQUE_Y + 11;
     rect(g, tx - 8, ty - 8, 17, 17, P.paperShade);
     if (gd) {
       const ang = Math.atan2(gd.target.x - p.x, -(gd.target.z - p.z)) - Math.atan2(camDir.x, -camDir.z);
       rotSprite(g, ARROW, tx, ty, ang); guideAng = Math.atan2(Math.sin(ang), Math.cos(ang));
     }
-    const x0 = 25, mw = 104 - x0 - 2;
-    let y = 110;
-    const line = (txt, col) => { tiny(g, fit(txt, mw), x0, y, col); y += 8; };
+    const x0 = 28, xr = 4 + PW - 4, mw = xr - x0;
+    let y = PLAQUE_Y + 3;
+    const line = (txt, col) => { text(g, fitText(txt, mw), x0, y, col); y += LINE; };
+    const row = (a, b, ca = P.text2, cb = P.text) => { const bw = text(g, b, xr, y, cb, { align: 'right' }); text(g, fitText(a, mw - bw - 4), x0, y, ca); y += LINE; };
+    const dist = gd ? `${Math.round(Math.hypot(gd.target.x - p.x, gd.target.z - p.z))} m` : '';
+    const hint = (s) => text(g, s, x0, PLAQUE_Y + 3 + 3 * LINE, P.text2);
     if (isRace && S.race) {
       const r = S.race;
-      const dist = gd ? Math.hypot(gd.target.x - p.x, gd.target.z - p.z) : 0;
-      if (r.wrong) line('WRONG WAY!', Math.floor(clock * 4) % 2 ? P.red : P.redDark);
-      else line(gd ? `${gd.wp ? 'WP' : r.next ? 'CP ' + r.next + '/' + (CHECKPOINTS.length - 1) : 'FINISH'} ${Math.round(dist)} M` : '', P.ink);
-      const row = (a, b, col = P.ink) => { tiny(g, a, x0, y, P.inkSoft); tiny(g, b, 102, y, col, { align: 'right' }); y += 8; };
-      row(r.lap ? `LAP ${r.lap}` : r.holding ? 'WAIT' : 'GO TO LINE', r.started ? fmtLap(r.lapTime) : '-:--.-', P.ink);
-      row('LAST', fmtLap(r.last));
-      row('BEST', fmtLap(r.best), r.best != null ? P.redDark : P.inkSoft);
+      if (r.wrong) line('Wrong way!', Math.floor(clock * 4) % 2 ? P.textWarn : P.text);
+      else if (gd) row(gd.wp ? 'Waypoint' : r.next ? `CP ${r.next}/${CHECKPOINTS.length - 1}` : 'Finish', dist, P.text, P.text2);
+      else y += LINE;
+      row(r.lap ? `Lap ${r.lap}` : r.holding ? 'Wait' : 'Go to line', r.started ? fmtLap(r.lapTime) : '-:--.-');
+      row('Last', fmtLap(r.last));
+      row('Best', fmtLap(r.best), P.text2, r.best != null ? P.textWarn : P.text2);
     } else if (gd && gd.of) {
-      // [crawl] stage progress: STAGE 7/12 + distance to the next gate, stage name, run clock
-      const unit = gd.unit || 'STAGE'; // side courses: SECTION n/N
-      tiny(g, gd.stage ? `${unit} ${gd.stage}/${gd.of}` : `${gd.of} ${unit}S`, x0, y, P.redDark);
-      tiny(g, `${Math.round(Math.hypot(gd.target.x - p.x, gd.target.z - p.z))} M`, 102, y, P.inkSoft, { align: 'right' }); y += 8;
-      line(gd.name, P.ink);
-      line(gd.run != null ? `RUN ${fmtT(gd.run)}` : gd.next, gd.run != null ? P.redDark : P.inkSoft);
-      tiny(g, 'M MAP  Y RETRY', x0, 135, P.paperEdge);
+      // [crawl] stage progress: Stage 7/12 + distance to the next gate, stage name, run clock
+      const unit = sentence(gd.unit || 'STAGE'); // side courses: Section n/N
+      row(gd.stage ? `${unit} ${gd.stage}/${gd.of}` : `${gd.of} ${unit.toLowerCase()}s`, dist, P.textWarn, P.text2);
+      line(nice(gd.name || ''), P.text);
+      line(gd.run != null ? `Run ${fmtT(gd.run)}` : sentence(gd.next), gd.run != null ? P.textWarn : P.text2);
+      hint('M map   Y retry');
     } else {
       if (gd) {
-        line(gd.label, gd.wp ? P.redDark : P.ink);
-        line(`${Math.round(Math.hypot(gd.target.x - p.x, gd.target.z - p.z))} M`, P.inkSoft);
-      } else { line('EVERY TRAIL DONE!', P.greenDark); y += 8; }
+        line(gd.label, gd.wp ? P.textWarn : P.text);
+        row(gd.sub || '', dist);
+      } else { line('Every trail done!', P.textGood); y += LINE; }
       const G = S.game;
-      if (G.active) line(`RUN ${fmtT(G.active.t)}`, P.redDark);
-      else line(`${fmtT(G.time)}  ${(G.dist / 1000).toFixed(2)} KM`, P.inkSoft);
-      tiny(g, 'M MAP  H HELP', x0, 135, P.paperEdge);
+      if (G.active) line(`Run ${fmtT(G.active.t)}`, P.textWarn);
+      else row(fmtT(G.time), `${(G.dist / 1000).toFixed(2)} km`, P.text2, P.text2);
+      hint('M map   H help');
     }
     // waypoint arrival
     if (waypoints.active && clock - lastWpCheck > 0.2) {
@@ -331,6 +344,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   function renderToast() {
     const fit = fitToast(L, toastMsg.replace(/[·•—–]/g, '-').replace(/✓/g, ''), bigT > 0 && bigBox ? [bigBox] : []);
     toastWait = !fit.ok; toastMoved = fit.moved;
+    toastC.cv.style.transition = toastWait ? 'none' : ''; // held back behind a big message: gone at once, no fade over it
     toastC.cv.classList.toggle('show', toastT > 0 && !toastWait);
     const { lines, w, h } = fit;
     sizeCanvas(toastC, w, h, scale);
@@ -366,23 +380,24 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   // ------------------------------------------------------------ help (controls board)
   function renderHelp() {
     const rows = controls();
-    const keyW = Math.max(...rows.map(([k]) => tinyMeasure(k.toUpperCase()))) + 8;
+    // keycaps: body caps on a light wooden key (ink 7.9:1); descriptions: body text on parchment
+    const keyW = Math.max(...rows.map(([k]) => measure(k.toUpperCase()))) + 8;
     const descW = Math.max(...rows.map(([, v]) => measure(v)));
-    const per = Math.ceil(rows.length / 2), colW = keyW + 6 + descW;
-    const W = colW * 2 + 30, H = per * 12 + 40;
+    const per = Math.ceil(rows.length / 2), colW = keyW + 6 + descW, RP = 14;
+    const W = colW * 2 + 30, H = per * RP + 40;
     const dpr = devicePixelRatio || 1;
     sizeCanvas(helpC, W, H, fitScale(innerWidth, innerHeight, dpr, W, H));
     const g = helpC.g;
     board(g, 0, 0, W, H, { seed: 21 });
     sign(g, 'CONTROLS', 10, 6);
-    tiny(g, 'H OR ESC TO CLOSE', W - 10, 9, P.paint, { align: 'right', shadow: P.ol });
+    text(g, 'H or Esc to close', W - 10, 6, P.paint, { align: 'right', outline: P.ol });
     paper(g, 6, 18, W - 12, H - 24, 22);
     rows.forEach(([k, v], i) => {
-      const col = i < per ? 0 : 1, r = i % per, x = 12 + col * (colW + 8), y = 23 + r * 12;
-      const kw = tinyMeasure(k.toUpperCase()) + 7;
-      rect(g, x, y, kw, 10, P.ol); rect(g, x + 1, y + 1, kw - 2, 8, P.w4); rect(g, x + 1, y + 1, kw - 2, 1, P.w5); rect(g, x + 1, y + 8, kw - 2, 1, P.w2);
-      tiny(g, k.toUpperCase(), x + 4, y + 3, P.ink);
-      drawText(g, v, x + keyW + 6, y + 1, P.ink);
+      const col = i < per ? 0 : 1, r = i % per, x = 12 + col * (colW + 8), y = 23 + r * RP;
+      const kw = measure(k.toUpperCase()) + 7;
+      rect(g, x, y, kw, 12, P.ol); rect(g, x + 1, y + 1, kw - 2, 10, P.w5); rect(g, x + 1, y + 1, kw - 2, 1, P.cream); rect(g, x + 1, y + 10, kw - 2, 1, P.w4);
+      text(g, k.toUpperCase(), x + 4, y + 2, P.ol);
+      drawText(g, v, x + keyW + 6, y + 2, P.ink);
     });
   }
 
@@ -405,7 +420,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     sizeCanvas(t, w, 9 * 2 + 14, sc);
     t.g.clearRect(0, 0, t.w, t.h);
     sign(t.g, 'PAUSED', 4, 2, P.paint, P.ol, 2);
-    tiny(t.g, 'ESC RESUMES', 4, 26, P.paint, { shadow: P.ol });
+    text(t.g, 'Esc resumes', 4, 22, P.paint, { outline: P.ol });
     plankButton(pauseBtns[0], 'RESUME', true, sc);
     plankButton(pauseBtns[1], isRace ? 'BACK TO THE GRID (REPAIR)' : 'RESTART AT TRAILHEAD (REPAIR)', false, sc);
   }
@@ -519,7 +534,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   mapC.cv.addEventListener('wheel', (e) => {
     e.stopPropagation(); e.preventDefault();
     const [x, y] = local(mapC, e);
-    if (big.list && x >= big.mx + big.VW + 4) { big.scrollBy(e.deltaY > 0 ? 18 : -18); return; } // [spawns] scroll the list
+    if (big.list && x >= big.mx + big.VW + 4) { big.scrollBy((e.deltaY > 0 ? 4 : -4) * big.list.rowH); return; } // [spawns] scroll the list, four rows a notch
     big.zoomAt(big.inView(x, y) ? x : big.mx + big.VW / 2, big.inView(x, y) ? y : big.my + big.VH / 2, e.deltaY < 0 ? 1 : -1);
   }, { passive: false });
   mapWrap.addEventListener('pointerdown', (e) => { if (e.target === mapWrap) setMapOpen(false); });

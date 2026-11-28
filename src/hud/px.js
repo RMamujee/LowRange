@@ -16,7 +16,41 @@ export const P = {
   green: '#5fae36', greenHi: '#8fd14a', greenDark: '#2a6628', greenDeep: '#1f3d1c',
   blue: '#4f7fe8', blueHi: '#9cc0ff', blueDark: '#2140a0',
   warnFace: '#f2b09a',
+  // text on parchment (#f4e5b9), WCAG contrast in brackets; inkSoft / paperEdge stay for lines and rims only
+  text: '#3a2414',      // body ink (11.6:1)
+  text2: '#5e3f24',     // secondary text, hints, units (7.6:1; 5.7:1 on paperShade)
+  textWarn: '#8e2e22',  // warnings, the live run, the selection (6.5:1)
+  textGood: '#2a6628',  // done / completed (5.5:1)
+  textHot: '#7a4a10',   // caution, e.g. HOT (6.0:1)
+  btn: '#cf9757', btnHi: '#e6b77a', btnLo: '#8a5a30', // wooden key face: ink on it 5.7:1
 };
+
+// Type scale (game pixels; every board is blown up by a whole number, never resampled):
+//   display  the bitmap face (ui/pixelfont.js) at 2x or more, or 1x with a painted outline: titles, big messages
+//   body     the bitmap face at 1x, mixed case, 7 px caps / 5 px x-height, 10 px line pitch: every word on the HUD and maps
+//   numerals the 3x5 face (tinyfont.js), digits and one- or two-letter marks only: dial numbers, gear slots, gate numbers
+//            (plus the stamped instrument marks RPM, KM/H and PARK, where body text has no room)
+// Minimum body size on screen: 7 game px x HUD scale (>= 2 at any window over about 800 x 500) = 14 device px.
+export const LINE = 10;
+
+// Body text with alignment; returns the width drawn.
+export function text(g, s, x, y, col, { align = 'left', shadow = null, outline = null } = {}) {
+  s = String(s);
+  const w = measure(s), x0 = align === 'center' ? x - Math.floor(w / 2) : align === 'right' ? x - w : x;
+  drawText(g, s, Math.round(x0), Math.round(y), col, { shadow, outline });
+  return w;
+}
+// Shorten a string with a trailing '.' until it fits maxW (body face).
+export function fitText(s, maxW) {
+  s = String(s);
+  if (measure(s) <= maxW) return s;
+  while (s.length > 2 && measure(s.trimEnd() + '.') > maxW) s = s.slice(0, -1);
+  return s.trimEnd() + '.';
+}
+// Greedy word wrap for the body face (same as pixelfont's wrap, re-exported for the HUD).
+export const wrapText = (s, maxW) => wrap(String(s), maxW);
+// Title case for names stored in caps elsewhere ('BOG RUN' -> 'Bog Run'); leaves mixed-case input alone.
+export const nice = (s) => (/[a-z]/.test(s) ? String(s) : String(s).toLowerCase().replace(/(^|[\s/(&])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Ii|Iii|Iv)\b/g, (m) => m.toUpperCase()));
 
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];

@@ -1,7 +1,7 @@
 // The cluster's pixel instruments: analog dials, the H-pattern stick shifter, the transfer-case lever,
 // locker rocker switches, the parking-brake lever, pedal bars and the lamp/button strip.
 // Each draws itself into a low-res 2D context at (x, y); stateful ones animate between updates.
-import { P, mk, rect, px, plate, inset, shape, ball, line, tiny, tinyMeasure, clamp, spriteFrom, rotSprite } from './px.js';
+import { P, mk, rect, px, plate, inset, shape, ball, line, tiny, text, measure, clamp, spriteFrom, rotSprite } from './px.js';
 
 const WOOD_KNOB = [P.w5, P.w4, P.w3, P.w1];
 const WOOD_KNOB_LIFT = [P.cream, P.w5, P.w4, P.w2];
@@ -50,8 +50,8 @@ export class Dial {
       if (label.length > 2 && v + major > max + 1e-6 && title) continue; // the last wide numeral would sit on the title
       tiny(g, label, Math.round(c - 0.5 + Math.cos(a) * rn) + 1, Math.round(c - 0.5 + Math.sin(a) * rn) - 2, red != null && v >= red ? P.redDark : P.ink, { align: 'center' });
     }
-    if (title) tiny(g, title, Math.round(c), Math.round(c) + 4, P.inkSoft, { align: 'center' });
-    if (sub) tiny(g, sub, Math.round(c) + 15, Math.round(c) + 18, P.inkSoft, { align: 'left' });
+    if (title) tiny(g, title, Math.round(c), Math.round(c) + 4, P.text2, { align: 'center' });
+    if (sub) tiny(g, sub, Math.round(c) + 15, Math.round(c) + 18, P.text2, { align: 'left' });
     this.face = f.cv;
   }
 
@@ -187,7 +187,7 @@ export class TransferLever {
 export function drawLockers(g, x, y, { front, rear, hasF, hasR }) {
   const W = 24, H = 52;
   plate(g, x, y, W, H, { screws: false });
-  tiny(g, 'LOCK', x + W / 2, y + 3, P.m6, { align: 'center', shadow: P.ol });
+  text(g, 'Lock', x + W / 2 + 1, y + 2, P.m6, { align: 'center', shadow: P.ol });
   const rocker = (ry, on, has, label) => {
     const rx = x + 5;
     rect(g, rx, ry, 14, 19, P.ol); rect(g, rx + 1, ry + 1, 12, 17, P.m0);
@@ -243,7 +243,7 @@ export class ParkLever {
       return v < -0.4 ? P.m6 : v < 0.6 ? P.m5 : P.m4;
     });
     ball(g, pxv, pyv, 2.6, HUB);
-    tiny(g, 'PARK', x + this.W / 2 + 1, y + 47 - 1, park ? P.redHi : P.m6, { align: 'center', shadow: P.ol });
+    tiny(g, 'PARK', x + this.W / 2 + 1, y + 47 - 1, park ? P.redHi : P.m6, { align: 'center', shadow: P.ol }); // a stamped mark under the lever (no room for body text above the plate's rim)
   }
 }
 
@@ -264,19 +264,23 @@ export function drawPedals(g, x, y, { t, b, c }) {
 
 // ------------------------------------------------------------------ lamps + buttons
 // kind: 'lamp' (inset, lights up) or 'button' (raised wooden key). state: null | 'on' | 'good' | 'warn'
+// Labels are body text (7 px caps); the key / lamp is LAMP_H tall. Contrast: ink on the wooden key 5.7:1,
+// on amber 9.4:1, on green 9.1:1; cream on the red warning lamp 7.5:1; an unlit lamp's label (m5 on m1) 5.6:1.
+export const LAMP_H = 12;
+export const lampWidth = (label) => measure(label) + 7;
 export function drawLamp(g, x, y, label, state, kind = 'lamp') {
-  const w = tinyMeasure(label) + 7, h = 10;
+  const w = lampWidth(label), h = LAMP_H;
   if (kind === 'button') {
     rect(g, x, y, w, h, P.ol);
-    rect(g, x + 1, y + 1, w - 2, h - 2, state ? P.amber : P.w3);
-    rect(g, x + 1, y + 1, w - 2, 1, state ? P.amberHi : P.w5); rect(g, x + 1, y + h - 2, w - 2, 1, state ? P.amberDark : P.w1);
-    tiny(g, label, x + 4, y + 3, P.ink);
+    rect(g, x + 1, y + 1, w - 2, h - 2, state ? P.amber : P.btn);
+    rect(g, x + 1, y + 1, w - 2, 1, state ? P.amberHi : P.btnHi); rect(g, x + 1, y + h - 2, w - 2, 1, state ? P.amberDark : P.btnLo);
+    text(g, label, x + 4, y + 2, P.ol);
     return w;
   }
-  const fill = state === 'on' ? P.amber : state === 'good' ? P.greenHi : state === 'warn' ? P.red : P.m1;
+  const fill = state === 'on' ? P.amber : state === 'good' ? P.greenHi : state === 'warn' ? P.redDark : P.m1;
   inset(g, x, y, w, h, fill);
-  if (state) rect(g, x + 1, y + 1, w - 2, 1, state === 'warn' ? P.redHi : state === 'good' ? '#c4ec8a' : P.amberHi);
-  tiny(g, label, x + 4, y + 3, state === 'warn' ? P.cream : state ? P.ol : P.m4);
+  if (state) rect(g, x + 1, y + 1, w - 2, 1, state === 'warn' ? P.red : state === 'good' ? '#c4ec8a' : P.amberHi);
+  text(g, label, x + 4, y + 2, state === 'warn' ? P.cream : state ? P.ol : P.m5);
   return w;
 }
 
