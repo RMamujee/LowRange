@@ -15,6 +15,7 @@ Everything is on `main`; there are no unpushed branches or local-only source fil
 6. If the game loads headless but fails in your own browser, suspect an ad blocker matching a file name (see `test/blocklist_names.mjs`).
 
 Open items to start from: the "Needs playtesting" checklists below (start with the clutch's stall assist); hill starts at light throttle in the Pickup and the Sedan roll back (pre-existing, see *Auto-clutch stall assist*); the Pickup stuck in Boulder Alley at 51/180 m on the trail autopilot (pre-existing at c18ccfa). The Boulder Alley spawn failure is fixed (twisted footing: spawn points now also reject over 0.08 m of cross-axle twist; `node test/spawns.mjs` passes on all five maps). Bug-fix pass of 2026-11-27: `docs/reviews/BUGS.md` 14-17 fixed; found but not fixed there: stale delayed Gauntlet toasts, and `node test/props.mjs` part (d) failing (a truck parked with one tyre on a loose stone creeps 8-38 mm; static-hold code, already failing on c18ccfa).
+Open items to start from: the "Needs playtesting" checklists below; the Pickup's square-ledge climb (0.30 m down to 0.25 m, cause untraced); the ride rework's playtest list (*Ride and damping* below). `node test/spawns.mjs` passes on every map again since the ride rework (the Cruiser at the Boulder Alley start used to miss by 1 mm).
 
 ## What's in `main` now
 
@@ -63,6 +64,78 @@ node tools/export/export_world.mjs <map>           # park | race | crawl | jungl
 - Run Blender for these scripts only as a separate background process with `--factory-startup` (without
   it the user's add-ons, the MCP add-on included, load into that process). Never drive the open GUI
   session from a build script.
+## Ride and damping (latest: "too bouncy, model real interactions")
+
+The suspension force model now lives in `src/ride.js` (pure maths, no Rapier) and is applied by `rideStep()` in `src/vehicle.js` (marked `[ride]`) to the suspension joint motors every step: target, stiffness and damping, linearised about each joint's position and speed, so Rapier still integrates it implicitly (stable at any rate). `node test/ride.mjs` measures and checks it (about 6 min; `RIDE_BASE=<dir with an older src/>` prints before / after side by side; `RIDE_CASES=whoops,...` picks driving cases).
+
+**What caused the bounce (measured at the old stock settings):**
+- Linear, symmetric dampers at zeta 0.30-0.36 in both directions. Released from a 30-40 mm push the body overshot 30-37% and swung 3 half-cycles before it was within 5 mm (0.8 s on the Cruiser). Real dampers have 1.5-3x the bump damping in rebound.
+- Hard, elastic travel limits. Landings hit Rapier's joint limit at 1-1.5 m/s; the limit pushes the joint back out of its overlap and hands energy back. Drops gained energy: Cruiser +5.4% of the drop energy at 0.5 m and +8.1% at 1 m, Pickup +2.8% / +4.8%, Sedan +2.2% / +2.9%. After a bottom-out the body rebounded 38-50% (0.3-0.5 m drops) and 63-75% (1 m) of the compression.
+- No bump stop and no droop strap: the only end stops were the hard limits above.
+- Restitution: tyres and body boxes had 0 but the Average rule, so on the 0.2 props (bridges, rails, huts) they bounced at 0.1. Rocks and ground were already 0.
+- Rigid tyres: Rapier's tyre collider has no vertical compliance, so there is no wheel-hop mode; a tyre hitting a sharp edge at speed gets its velocity changed in one step. This is still so (see Known limits).
+- Not causes: no explicit spring force anywhere (the anti-roll bar impulse is small and stable), solver iterations / substeps (8 at 200 Hz), tyre landings on rock (hop under 4 mm, which is the engine pushing a tyre that sank in a few mm back out).
+
+**Reference values used:** ride frequency 1.2-1.6 Hz for trucks (rear a little above front), 1.6-2.2 Hz for the rally car; damping ratio about 0.25-0.35 bump and 0.4-0.6 rebound (trucks), a little higher for the rally car; settled within 1-1.5 cycles, overshoot under 25-30%; tyre vertical rate 200-300 N/mm at road pressure; near-zero restitution; progressive, lossy bump stops and a soft droop limit.
+
+**The new model (spec data per rig in `src/specs.js`, shared constants in `RIDE` at the top of `src/ride.js`):**
+- `susp.freq` / `freqR`: ride frequency front / rear (tyres included). Cruiser 1.35 / 1.45 Hz, Pickup 1.40 / 1.50, Rally Sedan 1.65 / 1.75 (was 1.40, 1.45 and 1.70 on both axles).
+- `susp.zeta` / `zetaR`: low-speed bump / rebound damping ratio. Trucks 0.34 / 0.55, Sedan 0.40 / 0.65 (was 0.30, 0.32, 0.36 both ways).
+- Two-slope dampers: firm up to a 0.25 m/s shaft-speed knee, then half the slope (bump and rebound); bump and rebound blend over the first 0.02 m/s so a joint at rest doesn't flip its damping every step (flipping it made the Sedan's wheels kick at rest).
+- `tire.rate`: vertical rate of one tyre (N/m): Cruiser 280, Pickup 270, Sedan 220 N/mm. The tyre is in series with the spring: the ride rate is the spec frequency, the spring alone is stiffer (`kS`), and the bump stop's rate can't exceed the tyres'. This is the value the tyre pressure work should scale (lower rate: softer ride, a little more sag).
+- Bump stop over the last 40% of bump travel: rising rate (to 8x the ride rate, in series with the tyres), unloading gives back half its force (hysteresis), hydraulic damping while compressing, and position-sensitive rebound damping while leaving it. In the last 15 mm before the hard limit a very stiff, heavily damped "crushed stop" brings the axle to the limit slowly, so the limit no longer pushes back.
+- Droop strap over the last 30 mm of droop (rising rate plus rebound damping): no hard top-out.
+- Solid-axle roll: each side's damper works at its own shaft speed; roll damping = both dampers x `rollDamp` (1.1, was 1.4 on the symmetric damper). `susp.springSpacingR` lets the rear springs sit further in (Cruiser 1.10 m, Pickup 1.11 m against 1.15 m in front) so the stiffer rear doesn't cost articulation.
+- Every vehicle collider has restitution 0 with the Min rule, so nothing it touches can make it bounce.
+- Garage: Springs scales both `freq` and `freqR`, Damping scales both `zeta` and `zetaR` (same multipliers as before, so saved setups mean what they said).
+
+**Before / after (stock, from `RIDE_BASE=... node test/ride.mjs`; release = push for 2 s, let go; OS = first overshoot / release; settle = until within 5 mm):**
+
+| | Cruiser before | Cruiser after | Pickup before | Pickup after | Sedan before | Sedan after |
+|---|---|---|---|---|---|---|
+| Ride freq F / R measured (Hz) | 1.41 / 1.42 | 1.39 / 1.47 | 1.56 / 1.56 | 1.49 / 1.60 | 1.84 / 1.84 | 1.75 / 1.90 |
+| Damping bump / rebound measured | 0.30 / 0.30 | 0.38-0.41 / 0.55-0.60 | 0.34 / 0.35 | 0.34-0.37 / 0.56-0.59 | 0.38 / 0.38 | 0.41-0.43 / 0.66-0.70 |
+| Heave OS (down / up release) | 0.37 / 0.37 | 0.11 / 0.28 | 0.34 / 0.35 | 0.12 / 0.32 | 0.30 / 0.29 | 0.06 / 0.25 |
+| Heave second overshoot | 0.14 | 0.01-0.02 | 0.12 | 0.04 | 0.09 | 0.01-0.02 |
+| Heave settle (s, half-cycles) | 0.80 (3) | 0.25-0.55 (1-2) | 0.51 (2) | 0.23-0.53 (1-2) | 0.41 (2) | 0.20-0.40 (1-2) |
+| Pitch OS / settle | 0.37 / 0.48 s | 0.15 / 0.21 s | 0.30 / 0.36 s | 0.17 / 0.17 s | 0.25 / 0.12 s | 0.10 / 0.13 s |
+| Roll OS / settle | 0.25 / 0.63 s | 0.20 / 0.64 s | 0.28 / 0.33 s | 0.19 / 0.32 s | 0.14 / 0.10 s | 0.04 / 0.10 s |
+| Drop 0.3 m: rebound / settle | 0.38 / 1.21 s | 0.13 / 0.64 s | 0.35 / 1.09 s | 0.15 / 0.61 s | 0.30 / 0.75 s | 0.09 / 0.52 s |
+| Drop 0.5 m: rebound / energy gained | 0.47 / 5.4% | 0.15 / 0.3% | 0.43 / 2.8% | 0.15 / 0.4% | 0.34 / 2.2% | 0.09 / 0.1% |
+| Drop 1 m: rebound / energy gained | 0.75 / 8.1% | 0.23 / 1.4% | 0.63 / 4.8% | 0.20 / 0.9% | 0.45 / 2.9% | 0.09 / 0.0% |
+| Articulation: FL block lift before a wheel unloads (m) | 0.836 | 0.860 | 0.720 | 0.732 | 0.284 | 0.280 |
+| Ledge drop 0.5 m at 20 km/h: heave settle | 0.99 s (4) | 0.69 s (3) | 0.98 s (4) | 0.70 s (3) | 0.59 s (3) | 0.39 s (2) |
+| Boulder creep: pitch after (half-cycles / s) | 5 / 1.38 | 3 / 0.89 | 3 / 2.27 | 4 / 2.77 | 1 / 0.39 | 1 / 0.39 |
+| Hard stop from 60 km/h: pitch after | 4 / 1.57 s | 2 / 0.79 s | 3 / 0.94 s | 2 / 0.61 s | 2 / 0.46 s | 1 / 0.22 s |
+| Lane change 60 km/h: max roll / roll after | 13.4 deg / 5 hc | 15.6 deg / 3 hc | 3.7 / 2 hc | 4.0 / 1 hc | 1.9 / 1 hc | 1.7 / 0 hc |
+| 0.15 m bump at 60 km/h | heave 5 hc | 4 hc | 4 hc | 4 hc | rolled over | lands, 3 hc |
+| Whoops 50 km/h: time not on 4 wheels (of 2.5 s) | 1.41 s | 1.72 s | 1.31 s | 1.76 s | 1.72 s | 2.23 s |
+
+(The release tests stand the truck on frictionless pads, like a ride rig, so the tyre grip solve and the static hold stay out of the measurement.)
+
+**Other numbers, base (c18ccfa) then after, same machine:**
+- Race (`node test/race.mjs`): 1:29.3 / 1:29.7 / 1:25.4 then 1:29.5 / 1:30.1 / 1:25.5 (Cruiser / Pickup / Sedan), no flips; max airtime 0.69 / 0.63 / 0.82 s then 0.71 / 0.59 / 0.76 s.
+- Trails 400 s (`node test/trails.mjs lc70,taco,wrx 400`): Cruiser 4/5 both times (before: stuck in Widowmaker at 97 m; after: Widowmaker done 243 s, stuck in Boulder Alley at 62 m on a step, all four wheels spinning at 30 degrees nose-up), Pickup 4/5 both times (before: stuck in Boulder Alley at 51 m; after: Boulder Alley done 275 s, stuck in Widowmaker at 98 m), Sedan 2/5 both times (Pinyon 73 then 84 s, Bog Run 73 then 74 s). Which black / double-black trail each truck fails swapped: the autopilot on those steps is sensitive to small changes; drive them by hand.
+- `node test/ledgeclimb.mjs` (no assert; limits get re-measured after the merges): Cruiser square crawl / run-up 0.45 / 0.65 then 0.45 / 0.60 m, chamfered 0.70 / 0.75 both; Pickup square 0.25 / 0.35 both, chamfered 0.60 / 0.65 then 0.60 / 0.60; Sedan square 0.25 / 0.25 then 0.20 / 0.25, chamfered 0.30 / 0.35 both.
+- `node test/spawns.mjs`: before, the Cruiser at the Boulder Alley start failed (0.016 m); after, every map passes.
+- `node test/tipangle.mjs`: unchanged within a degree.
+
+**Known limits / side findings:**
+- Tyres are still rigid colliders: no wheel-hop resonance (a real tyre would give 7-10 Hz, `test/ride.mjs` prints what it would be). Sharp edges at speed kick the wheel in one step; this is why the 0.15 m bump at 60 km/h still throws the trucks 0.15-0.25 m up (the Sedan used to roll over on it; now it lands). A tyre with compliance needs a hub body between knuckle and wheel: a structural change left for later.
+- Whoops: the firmer dampers and the bump stops make the trucks and especially the Sedan skip more over 0.12 m whoops at 50 km/h (more time off at least one wheel; pitch swings on the Sedan up to 0.1 m at the axle). Race lap times barely move (below), but feel-check the race track's braking bumps and the desert whoops.
+- The Cruiser's peak roll in a hard 0.6 g lane change is 2 degrees more (digressive dampers give less roll damping at high roll speed) though it settles in fewer swings. `rollDamp` above about 1.15 changed how the Cruiser hits the tree in `test/crash.mjs` (the door no longer caved in), so it stays at 1.1.
+- Test harness: an 800 m single cuboid as the ground (most `test/*.mjs` use one) loses tyre contacts on the Rally Sedan's small tyres now and then (about 12% of steps at rest; the wheel sinks 20-30 mm and slams back, and its wheels then spin up to 50-150 rad/s at standstill). A flat heightfield, like the maps use, has none. `test/ride.mjs` uses a heightfield; other tests' Sedan numbers on a big cuboid carry that noise.
+- The static hold squeezes left against right on the independent-front rigs at rest (Sedan up to the full mu x N each way, Pickup about 30%); harmless on the maps so far (it only acts below 4 cm/s), untouched.
+
+### Needs playtesting (ride)
+- [ ] Landings, each rig: drive off a 0.3 m ledge at crawl and a 0.5 m drop at 15-20 km/h; one firm compression and one small rebound, no second bounce, no "kick" off the bump stops.
+- [ ] Bottoming: a big jump (race track, desert crests): a heavy, dead landing, the truck must not spring back up.
+- [ ] Whoops and braking bumps (race track straights, Basin Loop): still controllable, not pogoing; the Rally Sedan is the one to watch.
+- [ ] Hard braking from 60 km/h: one dive and settle, no rocking after the stop.
+- [ ] Quick lane changes at road speed in the Cruiser and the Pickup: roll and settle, no wallow.
+- [ ] Crawling flex: Cruiser and Pickup over cross-axle humps (Gauntlet stage 2, Boulder Alley): axles must still twist freely; the body must not keep nodding after a boulder.
+- [ ] Garage: soft / firm damping and soft / stiff springs feel different and sensible around the new stock.
+- [ ] Parked and spawned trucks sit still (no jitter).
 
 ## Next: Blender pipeline (start here)
 
@@ -463,6 +536,7 @@ CHROME=<chromium.exe> PORT=5199 node test/mapshots.mjs <outdir> [maps] [WxH@dpr,
 node test/waypoints.mjs && node test/camclear.mjs     # stored waypoints on every map; camera vs. trees / signs / ground
 node test/trails.mjs lc70,taco,wrx 400         # trail autopilot (slow); 4th arg filters green|blue|black|dblack
 node test/trailaudit.mjs                        # rock / ledge heights in each trail corridor
+node test/ride.mjs                              # ride: frequencies, damping, overshoot, drops, tyre hop, flex, driving cases (~6 min)
 node test/ledgeclimb.mjs                        # tallest single ledge per rig, square/chamfered, crawl/run-up (LEDGE_ASSERT=1 checks)
 node test/race.mjs                              # race autopilot
 node test/crawlcheck.mjs && node test/crawlcourse.mjs   # The Gauntlet: numbers + run logic (and the side courses' run logic)
