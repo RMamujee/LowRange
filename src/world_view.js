@@ -205,7 +205,8 @@ export function buildMarkers(scene) {
     // where a crux's lines split: a pair of posts either side of each line's way in, topped with the
     // trail's colour for the easy (rated) line, black for the hard one, red for the extreme one
     const lanePosts = { easy: [], hard: [], extreme: [] };
-    for (const c of t.cruxes || []) for (const ln of c.lanes) {
+    // (maps built with src/maps/widecrawl.js have no laneLat: their own view modules place their line posts)
+    for (const c of (t.laneLat ? t.cruxes || [] : [])) for (const ln of c.lanes) {
       const s = c.s0 - 1, p = pathPoint(t, s), L = t.laneLat(c, ln.name, c.s0);
       for (const d of [-1.7, 1.7]) { const x = p.x - p.tz * (L + d), z = p.z + p.tx * (L + d); lanePosts[ln.name].push([x, heightAt(x, z), z]); }
     }
@@ -223,8 +224,11 @@ export function buildMarkers(scene) {
     // and a signpost at each crux's way in naming it and its lines, left to right
     for (const c of t.cruxes || []) {
       const p = pathPoint(t, Math.max(1, c.s0 - 4)), label = { easy: 'EASY', hard: 'HARD', extreme: 'EXTREME' };
-      const face = fitFace({ title: c.name, sub: c.lanes.map((ln) => label[ln.name]).join(' · '), diff: t.diff, maxTitleW: 60 }, { m: SIGN_M });
-      const side = -(widthAt(t, c.s0 - 4) / 2 + 1.0 + face.w / 2), sx = p.x - p.tz * side, sz = p.z + p.tx * side;
+      // a lane names its line as `name` (trail park, Gauntlet) or `line` (widecrawl.js maps)
+      const names = [...new Set(c.lanes.map((ln) => label[ln.name ?? ln.line]).filter(Boolean))];
+      const face = fitFace({ title: c.name, sub: names.join(' · '), diff: t.diff, maxTitleW: 60 }, { m: SIGN_M });
+      const hw = t.halfWidthAt ? t.halfWidthAt(Math.max(1, c.s0 - 4)).right : widthAt(t, c.s0 - 4) / 2;
+      const side = -(hw + 1.0 + face.w / 2), sx = p.x - p.tz * side, sz = p.z + p.tx * side;
       scene.add(signpost(sx, sz, faceYaw([-p.tx, -p.tz], sx, sz, p.x, p.z, 0.2), face));
     }
   }
