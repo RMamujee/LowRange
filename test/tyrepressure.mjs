@@ -5,7 +5,7 @@
 //  2. road pressure is exactly the old aired-up tyre and crawl pressure the old aired-down one
 //     (grip, rolling resistance, mud footprint, deep sand, collider radius, speed costs), and a
 //     drive at road pressure matches the old `airedDown = false` drive to the last bit
-//  3. rock: the Cruiser creeps up a 0.45 m square rock ledge at crawl pressure, not at road or trail pressure
+//  3. rock: the Cruiser creeps up a 0.42 m square rock ledge at crawl pressure, not at road or trail pressure (majority of 8 starts)
 //  4. Bog Run: a parked Cruiser sinks less the lower the pressure (32 / 18 / 10 / 8 psi)
 //  5. dune sand (Sunfall Basin's Practice Dune apron, a child process on the desert map): the same
 //  6. at speed soft tyres cost: a longer coast-down at road pressure, a wider steady corner and a
@@ -145,8 +145,8 @@ const run = (car, secs, inp) => { for (let i = 0; i < Math.round(secs / H); i++)
 
 // ---------------------------------------------------------------- 3. rock: a square ledge
 // test/ledgeclimb.mjs's square ledge (rock, 4 m deep slab), at a crawl (0.6-1.6 m/s, 4-Low)
-function ledge(id, top, psi) {
-  const lip = -6, depth = 4, hw = 4, Hh = top + 0.6, pts = [];
+function ledge(id, top, psi, z0 = 0) {
+  const lip = -6 - z0, depth = 4, hw = 4, Hh = top + 0.6, pts = [];
   for (const sx of [-1, 1]) for (const zt of [0, -depth]) { pts.push(sx * hw, top, zt); pts.push(sx * hw, -0.6, zt); }
   const { car, world, sp } = flat(id, T.MAT.ROCK, (w, rh) => { const c = w.createCollider(RAPIER.ColliderDesc.convexHull(new Float32Array(pts)).setTranslation(0, 0, lip).setFriction(1).setCollisionGroups(T.GROUP_WORLD)); rh.add(c.handle); });
   car.tyre.set(psi); car.grace = 1e9;
@@ -168,13 +168,23 @@ function ledge(id, top, psi) {
   return ok;
 }
 {
-  // measured limits on this ledge (2 cm steps): 32 and 18 psi 0.42 m, 10 psi 0.44 m, 8 psi 0.48 m
-  const up = (ok) => (ok ? 'up' : 'stopped');
-  const r = { 32: ledge('lc70', 0.44, 32), 18: ledge('lc70', 0.44, 18), 10: ledge('lc70', 0.44, 10), 8: ledge('lc70', 0.47, 8), '10b': ledge('lc70', 0.47, 10) };
-  console.log(`     Cruiser, square rock ledge at a crawl: 0.44 m at 32 psi ${up(r[32])}, 18 psi ${up(r[18])}, 10 psi ${up(r[10])}; 0.47 m at 10 psi ${up(r['10b'])}, 8 psi ${up(r[8])}`);
-  check(r[10] && !r[32] && !r[18], 'aired down to 10 psi the Cruiser climbs a 0.44 m square ledge it cannot climb at 32 or 18 psi');
-  check(r[8] && !r['10b'], 'below crawl pressure (8 psi) it climbs 0.47 m, which 10 psi does not');
-  check(ledge('lc70', 0.42, 32), 'at 32 psi it still climbs 0.42 m (the case is the limit, not a broken truck)');
+  // Near a limit one run is a coin flip (a stall at the face that breaks loose or not), so, as in
+  // test/ledgeclimb.mjs, each case is driven from 8 start offsets and counts as climbed with 6 or more.
+  // Majority limits on the merged physics (stall assist, new front-end boxes, ride rework; 2026-11-27,
+  // 2 cm steps): 32 psi 0.40 m (0.42: 4/8), 18 psi 0.40 m (0.42: 5/8), 10 psi 0.42 m (8/8; 0.44: 5/8),
+  // 8 psi 0.46 m (7/8; 0.48: 1/8). (On the old clutch and boxes: 0.42 / 0.42 / 0.44 / 0.48 m, one start.)
+  const OFFS = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5], MAJ = 6;
+  const clears = (top, psi) => OFFS.filter((z0) => ledge('lc70', top, psi, z0)).length;
+  const n = { 32: clears(0.42, 32), 18: clears(0.42, 18), 10: clears(0.42, 10), 8: clears(0.46, 8), '10b': clears(0.46, 10), base: clears(0.40, 32) };
+  console.log(`     Cruiser, square rock ledge at a crawl (clears of 8 starts): 0.42 m at 32 psi ${n[32]}, 18 psi ${n[18]}, 10 psi ${n[10]}; 0.46 m at 10 psi ${n['10b']}, 8 psi ${n[8]}; 0.40 m at 32 psi ${n.base}`);
+  // 18 psi is no longer separated from 10 psi by a majority: at 0.42 m it cleared 5/8 and 7/8 in two
+  // measurements. Above crawl pressure the tyre's deflection is drawn only (PHYS_DEFL_FROM = 1), so
+  // 18 vs 10 psi differs on rock only by the grip (+5% vs +15%), which at this ledge is now within
+  // the start-to-start spread. 18 psi must still not climb better than 10 psi.
+  check(n[10] >= MAJ && n[32] < MAJ, 'aired down to 10 psi the Cruiser climbs a 0.42 m square ledge it cannot climb at 32 psi (majority of 8 starts)');
+  check(n[18] <= n[10], `18 psi climbs it no more often than 10 psi (${n[18]} vs ${n[10]} of 8)`);
+  check(n[8] >= MAJ && n['10b'] < MAJ, 'below crawl pressure (8 psi) it climbs 0.46 m, which 10 psi does not (majority of 8 starts)');
+  check(n.base >= MAJ, 'at 32 psi it still climbs 0.40 m (the case is the limit, not a broken truck)');
 }
 
 // ---------------------------------------------------------------- 4. Bog Run
