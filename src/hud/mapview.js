@@ -51,12 +51,14 @@ function bakeBase(ppm, trees) {
     px(g, cx + r, cz + r + 1, LEAF[3]);
   }
   // paths as stamped squares: dark rim, then fill
+  // (w: pixels, or a function of the path point for a crawl corridor whose width varies)
   const stamp = (path, w, col) => {
-    const pts = path.pts, half = w / 2;
+    const pts = path.pts;
     g.fillStyle = col;
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i], L = Math.hypot(b.x - a.x, b.z - a.z) * ppm, k = Math.max(1, Math.ceil(L * 2));
-      for (let s = 0; s <= k; s++) { const t = s / k, X = P2(a.x + (b.x - a.x) * t), Z = P2(a.z + (b.z - a.z) * t); g.fillRect(Math.round(X - half), Math.round(Z - half), Math.max(1, Math.round(w)), Math.max(1, Math.round(w))); }
+      const wa = typeof w === 'function' ? w(a) : w, wb = typeof w === 'function' ? w(b) : w;
+      for (let s = 0; s <= k; s++) { const t = s / k, X = P2(a.x + (b.x - a.x) * t), Z = P2(a.z + (b.z - a.z) * t), ww = wa + (wb - wa) * t, half = ww / 2; g.fillRect(Math.round(X - half), Math.round(Z - half), Math.max(1, Math.round(ww)), Math.max(1, Math.round(ww))); }
     }
   };
   if (TRACK) {
@@ -69,11 +71,18 @@ function bakeBase(ppm, trees) {
   for (const r of ROADS) { const w = Math.max(2, (r.width || 8) * ppm * 0.7); stamp(r, w + 2, P.w2); stamp(r, w, r.surface === 'paved' ? '#5a554e' : '#f4dfa8'); if (r.surface === 'paved' && w >= 4) stamp(r, 1, '#e0b84a'); }
   const coreOf = (diff) => (diff === 'green' ? P.green : diff === 'blue' ? P.blue : P.m1);
   for (const t of TRAILS) {
-    const w = Math.max(1, (t.width || 5) * ppm * 0.55);
-    stamp(t, w + 2, P.cream);
+    // a crawl corridor (t.corridor) is stamped as wide as it really is where it opens up (capped)
+    const w = t.corridor ? (p) => Math.max(1, Math.min(p.w ?? t.width, 20) * ppm * 0.55) : Math.max(1, (t.width || 5) * ppm * 0.55);
+    stamp(t, typeof w === 'function' ? (p) => w(p) + 2 : w + 2, P.cream);
     // [crawl] a staged trail is stamped stage by stage in each stage's colour
     if (t.stages) for (const st of t.stages) stamp({ pts: t.pts.filter((p) => p.s >= st.s0 - 0.5 && p.s <= st.s1 + 0.5) }, w, coreOf(st.diff));
     else stamp(t, w, coreOf(t.diff));
+    // and its easy line, a pale thread through the wide parts
+    if (t.corridor && t.lineAt && ppm >= 1) {
+      const pts = [];
+      for (let s = 0; s <= t.length; s += 1) { const p = pathPoint(t, s), L = t.lineAt('easy', s); pts.push({ x: p.x - p.tz * L, z: p.z + p.tx * L }); }
+      stamp({ pts }, 1, P.cream);
+    }
   }
   // [crawl] the Gauntlet's side courses, section by section, as wide as they really are (the slab face)
   for (const C of COURSES) {

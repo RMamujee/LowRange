@@ -179,7 +179,9 @@ export function rockKit(R, heightAt) {
     return m;
   };
   // flat-topped ledge slab across the trail, top at `top` above the local ground
-  const ledge = (x, z, rotY, width, depth, top) => {
+  // side: optional cross slope (rise per m to the slab's +x side) to follow instead of measuring the
+  // ground at its ends (a slab that reaches past a corridor's edge would tilt to the bank there)
+  const ledge = (x, z, rotY, width, depth, top, side = null) => {
     const pts = [];
     const hw = width / 2, hd = depth / 2, H = top + 0.6;
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -190,7 +192,7 @@ export function rockKit(R, heightAt) {
     // follow the ground's grade and camber, so the step is the same height from either side
     const fx = Math.sin(rotY), fz = Math.cos(rotY), lx = Math.cos(rotY), lz = -Math.sin(rotY);
     const gAlong = (heightAt(x + fx * hd, z + fz * hd) - heightAt(x - fx * hd, z - fz * hd)) / (2 * hd);
-    const gSide = (heightAt(x + lx * hw, z + lz * hw) - heightAt(x - lx * hw, z - lz * hw)) / (2 * hw);
+    const gSide = side ?? (heightAt(x + lx * hw, z + lz * hw) - heightAt(x - lx * hw, z - lz * hw)) / (2 * hw);
     for (let i = 0; i < pts.length; i += 3) pts[i + 1] += gSide * pts[i] + gAlong * pts[i + 2];
     rocks.push({ x, y: heightAt(x, z) + H / 2 - 0.6, z, rotY, pts, ledge: true });
   };
