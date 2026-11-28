@@ -402,9 +402,9 @@ export const TRAILS = [
     cross: { k: 1, up: 0.22, down: 0.12, from: 2.4 },
     crawl: { base: [5, 5], cruxes: [
       { name: 'Boulder Run', s: 36, len: 16, lanes: [
-        { line: 'easy', lat: 0, w: 6, f: 'boulders', size: [0.7, 1.0], gap: 2.4, top: 0.5, keep: 1.75, crawl: { top: 0.24, every: 2.8 } },
-        { line: 'hard', lat: 5.6, w: 3.6, f: 'boulders', size: [0.6, 0.9], gap: 2.4, top: 0.4 },
-        { line: 'extreme', lat: -5.6, w: 3.6, f: 'boulders', size: [0.8, 1.1], gap: 2.1, top: 0.48 }] },
+        { line: 'easy', lat: 0, w: 5.6, f: 'boulders', size: [0.6, 0.9], gap: 2.4, top: 0.5, keep: 1.75, crawl: { top: 0.24, every: 2.8 } },
+        { line: 'hard', lat: 5.0, w: 3.6, f: 'boulders', size: [0.6, 0.9], gap: 2.6, top: 0.4 },
+        { line: 'extreme', lat: -5.0, w: 3.6, f: 'boulders', size: [0.8, 1.1], gap: 2.2, top: 0.48 }] },
       { name: 'Creek Steps', s: 66, len: 15, lanes: [
         { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.26, 0.3], skew: 0.3, alt: true },
         { line: 'hard', lat: -4.8, w: 3.8, f: 'ledge', n: 2, top: [0.36, 0.4], skew: -0.3, alt: true },
