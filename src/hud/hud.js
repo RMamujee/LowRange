@@ -635,6 +635,6 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     get mapOpen() { return mapOpen; },
     waypoints,
     // for tests: stick position vs. the slot it should travel to, overlays, last toast, guidance angle
-    debug: () => ({ layout: { scale, chassis: L.chassis, engine: L.engine, mini: L.mini, tyre: !!L.tyre, mapScale }, knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
+    debug: () => ({ layout: { scale, chassis: L.chassis, engine: L.engine, mini: L.mini, tyre: !!L.tyre, winch: !!L.winch, mapScale }, knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
   };
 }

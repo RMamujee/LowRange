@@ -6,15 +6,18 @@
 //   cluster  bottom-left            engine  on the cluster's left end, 3 HUD px above it
 //   chassis  bottom-right ('side'), or beside the engine board above the cluster ('stacked'), or hidden
 //   mini     top-right (minimap + guidance plaque)
+//   tyre     beside the engine board, on the cluster (optional)
+//   winch    above the chassis board, or bottom-right when the chassis board is hidden (optional)
 // The scale starts from the height rule the HUD always used (at least 2, one step per 400 device px of
-// height), then drops while the boards don't fit, down to 1. If even scale 1 doesn't fit, boards are
-// hidden, least important first: chassis, then minimap (the M key and MAP button still open the map),
-// then the engine board. Toasts and the big centre messages are placed by fitToast() / fitBig().
+// height), then drops while the boards don't fit, down to 1. At each scale the optional boards are tried
+// first (winch + tyre, then tyre only, then neither), so they never cost the others their scale or
+// spot. If even scale 1 doesn't fit, boards are hidden, least important first: chassis, then minimap
+// (the M key and MAP button still open the map), then the engine board. Toasts and the big centre messages are placed by fitToast() / fitBig().
 
 import { measure, wrap } from '../ui/pixelfont.js';
 
 export const MARGIN = 10, GAP = 4;
-export const BOARDS = { cluster: [283, 77], engine: [136, 46], chassis: [216, 62], mini: [120, 166], tyre: [112, 40] };
+export const BOARDS = { cluster: [283, 77], engine: [136, 46], chassis: [216, 62], mini: [120, 166], tyre: [120, 46], winch: [112, 46] };
 const ENGINE_LIFT = 3;
 // The big map board (mapview.js BigMap): title row, viewport VW x VH beside the SB-wide sidebar, legend strip LEG tall.
 export const BIGMAP = { mx: 6, my: 21, VW: 290, VH: 200, SB: 140, LEG: 13 };
@@ -22,7 +25,10 @@ export const BIGMAP_SIZE = [BIGMAP.mx + BIGMAP.VW + 4 + BIGMAP.SB + 6, BIGMAP.my
 // [tyre pressure] the tyre board sits beside the engine board, on the cluster (3 HUD px from each). Every
 // mode below is tried with it first and then without it, so where it doesn't fit the other boards get
 // exactly the scale and spots they had before it existed (the cluster's psi lamp still shows the pressure).
-const withTyre = (set) => set.flatMap((m) => (m.engine ? [{ ...m, tyre: true }, m] : [m]));
+// [winch] The winch board sits above the chassis board on the right (3 HUD px above it), or in the
+// bottom-right corner when the chassis board is hidden. It is tried first with the tyre board and
+// dropped before it, so it never costs any other board its scale or spot either.
+const withTyre = (set) => set.flatMap((m) => (m.engine ? [{ ...m, tyre: true, winch: true }, { ...m, tyre: true }, m] : [m]));
 // the widest / tallest big message (main.js: race lap time at letter scale 5, WRONG WAY at 3)
 export const BIG_MAX = [Math.max(measure('WRONG WAY') * 3, measure('10:23.4') * 5) + 8, 9 * 5 + 8];
 
@@ -44,6 +50,7 @@ function build(W, H, dpr, scale, mode, B) {
   if (mode.tyre) { const [tw, th] = B.tyre; rects.tyre = r(MARGIN + (ew + ENGINE_LIFT) * u, H - MARGIN - lift - th * u, tw, th); } // [tyre pressure]
   if (mode.chassis === 'side') rects.chassis = r(W - MARGIN - sw * u, H - MARGIN - sh * u, sw, sh);
   else if (mode.chassis === 'stacked') rects.chassis = r(W - MARGIN - sw * u, H - MARGIN - lift - sh * u, sw, sh);
+  if (mode.winch) { const [ww, wh] = B.winch, ch = rects.chassis; rects.winch = r(W - MARGIN - ww * u, ch ? ch.y - (ENGINE_LIFT + wh) * u : H - MARGIN - wh * u, ww, wh); } // [winch]
   if (mode.mini) rects.mini = r(W - MARGIN - mw * u, MARGIN, mw, mh);
   return { W, H, dpr, scale, u, ...mode, chassisBottom: mode.chassis === 'stacked' ? MARGIN + lift : MARGIN, rects };
 }
@@ -54,7 +61,8 @@ function boardsFit(L) {
   for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
     const pair = [names[i], names[j]];
     const onCluster = (pair.includes('cluster') && (pair.includes('engine') || pair.includes('tyre') || (pair.includes('chassis') && L.chassis === 'stacked'))) // sits 3 HUD px above it by design
-      || (pair.includes('engine') && pair.includes('tyre')); // [tyre pressure] 3 HUD px beside the engine board
+      || (pair.includes('engine') && pair.includes('tyre')) // [tyre pressure] 3 HUD px beside the engine board
+      || (pair.includes('winch') && pair.includes('chassis')); // [winch] 3 HUD px above the chassis board
     if (overlaps(L.rects[names[i]], L.rects[names[j]], onCluster ? 0 : GAP)) return false;
   }
   return true;

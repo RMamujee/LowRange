@@ -1,17 +1,20 @@
-// The winch board on the HUD: a small wooden board like the engine and chassis boards, with the state
-// (STOWED / AIMING / HOOKED / PULLING / PAYING OUT / STALLED), the line out in metres, the load as a bar
-// with a red zone, the anchor on offer while aiming, ASSISTED (as its title) during a run the line has helped, and
-// clickable buttons (NEXT, HOOK, IN, OUT, OFF) like the cluster's RECOVER / CAM / MAP.
-// It uses the HUD's own board / parchment / lamp helpers and tiny font (src/hud/px.js,
-// src/hud/instruments.js), so it follows any restyle of those. It sits above the chassis board on the
-// right, or wherever src/hud/layout.js placeBox finds room clear of the other boards; hidden if none.
-import { P, rect, px, board, paper, inset, tiny } from '../hud/px.js';
-import { drawLamp } from '../hud/instruments.js';
-import { BIG_MAX, MARGIN, GAP, hudLayout, placeBox } from '../hud/layout.js';
+// The winch board on the HUD: a small wooden board like the engine and tyre boards, with the state
+// (Stowed / Aiming / Hooked / Pulling / Paying out / Stalled), the line out in metres, the load as a bar
+// with a red zone, the anchor on offer while aiming, Assisted (as its title) during a run the line has
+// helped, and clickable keys (Next, Hook, In, Out, Off) like the cluster's Recover / Cam / Map.
+// It follows the HUD legibility rules: the HUD's own board / parchment / lamp helpers, body text
+// (7 px caps, mixed case) in the text colours (src/hud/px.js, src/hud/instruments.js). Its size
+// (BOARDS.winch) and its spot (above the chassis board on the right) come from the pure layout in
+// src/hud/layout.js, like every other board, so toasts and big messages keep clear of it and
+// test/hudlayout.mjs / test/hudfit.mjs cover it; where the layout has no room for it, it is hidden.
+import { P, rect, px, board, paper, inset, text } from '../hud/px.js';
+import { drawLamp, LAMP_H } from '../hud/instruments.js';
+import { BIG_MAX, BOARDS, hudLayout } from '../hud/layout.js';
 
-export const WBOARD = [112, 40];
-const STATE_COL = { STOWED: P.inkSoft, AIMING: P.amberDark, HOOKED: P.ink, PULLING: P.greenDark, 'PAYING OUT': P.blueDark, STALLED: P.red };
+export const WBOARD = BOARDS.winch;
+const STATE = { STOWED: ['Stowed', P.text2], AIMING: ['Aiming', P.textHot], HOOKED: ['Hooked', P.text], PULLING: ['Pulling', P.textGood], 'PAYING OUT': ['Paying out', P.text], STALLED: ['Stalled', P.textWarn] };
 const RED_ZONE = 0.85;
+const LY = 31; // key row, as on the engine and tyre boards
 
 export class WinchBoard {
   // root: the #hud element; action(name): main.js action()
@@ -33,18 +36,16 @@ export class WinchBoard {
     addEventListener('resize', () => this.layout());
   }
 
-  // same scale and boards as the HUD (layout.js is pure, so this matches hud.js exactly)
+  // the same pure layout as hud.js (same inputs, so the same answer): its rect, or hidden
   layout() {
     const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight;
-    const L = hudLayout({ W, H, dpr, centre: BIG_MAX }), u = L.u, w = WBOARD[0] * u, h = WBOARD[1] * u;
-    const ch = L.rects.chassis;
-    const home = ch ? [W - MARGIN - w, ch.y - GAP - h] : [W - MARGIN - w, H - MARGIN - h];
-    const spot = placeBox(L, w, h, home[0], home[1]);
-    this.spot = spot;
-    if (spot) {
-      this.cv.style.left = `${spot.x}px`; this.cv.style.top = `${spot.y}px`;
-      this.cv.style.width = `${w}px`; this.cv.style.height = `${h}px`;
+    const L = hudLayout({ W, H, dpr, centre: BIG_MAX }), q = L.rects.winch;
+    this.spot = q ? { x: q.x, y: q.y } : null;
+    if (q) {
+      this.cv.style.left = `${q.x}px`; this.cv.style.top = `${q.y}px`;
+      this.cv.style.width = `${q.w}px`; this.cv.style.height = `${q.h}px`;
     }
+    this.shown = null; // re-apply display on the next update
     this.sig = '';
   }
 
@@ -64,20 +65,21 @@ export class WinchBoard {
     const g = this.g, [W, H] = WBOARD;
     g.clearRect(0, 0, W, H);
     board(g, 0, 0, W, H, { seed: 17 });
-    paper(g, 4, 4, W - 8, 19, 18);
-    // the title, or ASSISTED while the current run has had help from the line
-    if (info.assisted) tiny(g, 'ASSISTED', 8, 7, P.amberDark);
-    else tiny(g, info.kind === 'compact' ? 'COMPACT' : 'WINCH', 8, 7, P.inkSoft);
-    const st = info.state, col = STATE_COL[st] ?? P.ink;
-    if (!(st === 'STALLED' && blink)) tiny(g, st, W - 9, 7, col, { align: 'right' });
+    paper(g, 4, 4, W - 8, 25, 18);
+    // the title, or Assisted while the current run has had help from the line
+    if (info.assisted) text(g, 'Assisted', 8, 6, P.textHot);
+    else text(g, info.kind === 'compact' ? 'Compact' : 'Winch', 8, 6, P.text2);
+    const st = info.state, [word, col] = STATE[st] ?? [st, P.text];
+    if (!(st === 'STALLED' && blink)) text(g, word, W - 9, 6, col, { align: 'right' });
     // second line: line out + load bar, or the anchor on offer while aiming
     if (st === 'AIMING' && info.cand) {
-      const c = info.cand, name = c.kind === 'post' ? 'POST' : c.kind === 'tree' ? 'TREE' : 'ROCK';
-      tiny(g, `${name} ${c.d.toFixed(0)} M`, 8, 15, P.ink);
-      tiny(g, `${c.i + 1}/${c.n}  HOLD K`, W - 9, 15, P.inkSoft, { align: 'right' });
+      const c = info.cand, name = c.kind === 'post' ? 'Post' : c.kind === 'tree' ? 'Tree' : 'Rock';
+      text(g, `${name} ${c.d.toFixed(0)} m`, 8, 17, P.text);
+      text(g, `${c.i + 1}/${c.n}`, W - 9, 17, P.text2, { align: 'right' });
     } else {
-      tiny(g, info.out > 0 ? `${info.out.toFixed(1)} M` : `${Math.round(info.line)} M`, 8, 15, info.out > 0 ? P.ink : P.inkSoft);
-      const bx = 38, bw = W - 9 - bx, by = 15, fill = Math.round(Math.min(1, info.load) * (bw - 2)), red = Math.round(RED_ZONE * (bw - 2));
+      const out = info.out > 0;
+      const bx = 8 + text(g, out ? `${info.out.toFixed(1)} m` : `${Math.round(info.line)} m`, 8, 17, out ? P.text : P.text2) + 5;
+      const bw = W - 9 - bx, by = 18, fill = Math.round(Math.min(1, info.load) * (bw - 2)), red = Math.round(RED_ZONE * (bw - 2));
       inset(g, bx, by, bw, 6, P.paperShade);
       rect(g, bx + 1 + red, by + 1, bw - 2 - red, 4, P.warnFace);
       if (fill > 0) {
@@ -87,14 +89,14 @@ export class WinchBoard {
       }
       px(g, bx + 1 + red, by, P.redDark); px(g, bx + 1 + red, by + 5, P.redDark);
     }
-    // buttons
+    // keys, and their keyboard keys painted on the wood (outlined body text, like the chassis board)
     this.hits = [];
-    const btns = st === 'STOWED' || st === 'AIMING'
-      ? [['NEXT', 'winchNext', st === 'AIMING'], ['HOOK', 'winchHook', false]]
-      : [['IN', 'winchIn', info.latch === 1], ['OUT', 'winchOut', info.latch === -1], ['OFF', 'winchOff', false]];
-    const keys = st === 'STOWED' || st === 'AIMING' ? 'K' : 'U  O  L';
+    const aim = st === 'STOWED' || st === 'AIMING';
+    const btns = aim
+      ? [['Next', 'winchNext', st === 'AIMING'], ['Hook', 'winchHook', false]]
+      : [['In', 'winchIn', info.latch === 1], ['Out', 'winchOut', info.latch === -1], ['Off', 'winchOff', false]];
     let x = 5;
-    for (const [label, act, on] of btns) { const w = drawLamp(g, x, 26, label, on ? 'on' : null, 'button'); this.hits.push({ x, y: 26, w, h: 10, act }); x += w + 2; }
-    tiny(g, keys, W - 6, 29, P.paint, { align: 'right', shadow: P.ol });
+    for (const [label, act, on] of btns) { const w = drawLamp(g, x, LY, label, on ? 'on' : null, 'button'); this.hits.push({ x, y: LY, w, h: LAMP_H, act }); x += w + 2; }
+    text(g, aim ? 'K' : 'U O L', W - 7, LY + 2, P.paint, { align: 'right', outline: P.ol });
   }
 }

@@ -53,6 +53,9 @@ for (const [dpr, sizes] of Object.entries(DPR_SIZES)) {
           const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
           check(!(ox > E && oy > E), `${tag}: ${a.n} overlaps ${b.n} by ${ox.toFixed(1)}x${oy.toFixed(1)} px`);
         }
+        // the optional boards are really measured where layout.js has room for them (every rig has a winch)
+        for (const n of ['tyre', 'winch']) if (res.scale[n]) check(res.rects.some((r) => r.n === `hud-${n}`), `${tag}: the ${n} board is laid out but not shown`);
+        if (w >= 1024 && h >= 600) check(res.scale.tyre && res.scale.winch, `${tag}: tyre and winch boards shown at a common size`);
         if (big[1] === 'best') {
           console.log(`${tag}: ${JSON.stringify(res.scale)} ${res.rects.map((r) => r.n.replace('hud-', '') + ' ' + [r.x, r.y, r.w, r.h].map((v) => Math.round(v)).join(',')).join(' | ')}`);
           if (out) await page.screenshot({ path: `${out}/${mapName}_${w}x${h}_dpr${dpr}.png` });
