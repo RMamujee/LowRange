@@ -16,7 +16,7 @@
 const LEDGE = process.argv[2] === '--ledge';
 process.env.MAP = LEDGE ? 'crawl' : 'park';
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
-const { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, ROADS, pathPoint } = await import('../src/terrain.js');
+const { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, ROADS, pathPoint, materialAt, MAT } = await import('../src/terrain.js');
 const { ALL_VEHICLES } = await import('../src/specs.js');
 const { Vehicle } = await import('../src/vehicle.js');
 const { Winch, WINCH_AUDIO, surfaceProbe } = await import('../src/winch/winch.js');
@@ -116,7 +116,10 @@ if (LEDGE) {
 // ---- B. bogged in Bog Run, winched out to the far bank
 {
   const T = TRAILS.find((t) => t.name === 'Bog Run');
-  const cx = RPS.cruxes.find((c) => c.pathName === T.name && c.kind === 'bog' && c.sig > 0 && c.far);
+  // the truck is placed on the centreline: on a wide bog that is the deep middle line ('hard'),
+  // so its far-bank crux is the one for that line (a narrow bog has one crux, line null)
+  const onCentre = (c) => !c.line || Math.abs(c.lat ?? 0) < 0.5;
+  const cx = RPS.cruxes.find((c) => c.pathName === T.name && c.kind === 'bog' && c.sig > 0 && c.far && onCentre(c));
   check(!!cx && !!cx.post, `Bog Run has a far-bank recovery post (${cx?.post} for the bank at s=${cx?.sTop.toFixed(1)})`);
   if (cx) {
     const W = newWorld(), s0 = cx.sTop - 12, car = placeOn(W, 'lc70', T, s0);
@@ -141,11 +144,15 @@ if (LEDGE) {
       for (let i = 0; i < 90 / H; i++) {
         car.step({ throttle: 0, brake: 0, steer: steerOn(car, T, s), handbrake: false }, H);
         maxLoad = Math.max(maxLoad, car.winch.load);
-        if (i % 20 === 0) { s = noseS(car, T, s); const p = car.chassis.translation(); if (along(T, p.x, p.z, s - 2) > cx.sTop + 0.5) { out = true; t = (i + 1) * H; break; } }
-        if (car.winch.L <= 1.3) { t = (i + 1) * H; break; }
+        // out: the body past the bank, or (a wide bog's post stands off to the side of the bank) all
+        // four tyres on firm ground out of the mud
+        const firm = () => car.wheels.every((w) => { const q = w.translation(); return materialAt(q.x, q.z) !== MAT.MUD; });
+        if (i % 20 === 0) { s = noseS(car, T, s); const p = car.chassis.translation(); if (along(T, p.x, p.z, s - 2) > cx.sTop + 0.5 || firm()) { out = true; t = (i + 1) * H; break; } }
+        if (car.winch.L <= 1.3) { t = (i + 1) * H; out = firm(); break; }
       }
       const p = car.chassis.translation();
-      console.log(`     winching in neutral: body at s=${along(T, p.x, p.z, s - 2).toFixed(1)} after ${t.toFixed(1)} s (bank at ${cx.sTop.toFixed(1)}), peak load ${(maxLoad * 100).toFixed(0)}%`);
+      const onMud = car.wheels.filter((w) => { const q = w.translation(); return materialAt(q.x, q.z) === MAT.MUD; }).length;
+      console.log(`     winching in neutral: body at s=${along(T, p.x, p.z, s - 2).toFixed(1)} after ${t.toFixed(1)} s (bank at ${cx.sTop.toFixed(1)}, post ${cx.post}), ${onMud} tyre(s) still on mud, peak load ${(maxLoad * 100).toFixed(0)}%`);
       check(out, 'the Cruiser is winched out of the bog onto the far bank');
       check(maxLoad <= 1.0005, `line load never over the rated pull (peak ${(maxLoad * 100).toFixed(1)}%)`);
     }

@@ -148,9 +148,13 @@ if (process.env.LEDGE_ASSERT) {
   // where the old number was luck: Cruiser square crawl 0.45 m cleared 3/8 starts before the
   // stall assist (1/8 after; it hangs up with all four tyres spinning, a grip limit), Sedan
   // square crawl 0.25 m 3/8 (5/8 after).
+  // Raised on the integrated code (stall assist + new front-end boxes + ride rework, measured
+  // 2026-11-27, 8/8 starts each): Cruiser square run-up 0.60 -> 0.65 m (0.70 m clears 4/8) and
+  // chamfered crawl 0.70 -> 0.75 m (8/8 at 0.75 m, the top of the sweep). Every other limit measured
+  // exactly at its old minimum.
   const expect = {
     'wrx/square/crawl': [0.2, 0.35], 'wrx/chamfer/crawl': [0.3, 0.35], 'wrx/square/speed': [0.25, 0.35], 'wrx/chamfer/speed': [0.35, 0.35],
-    'lc70/square/crawl': [0.4, 9], 'lc70/chamfer/crawl': [0.7, 9], 'lc70/square/speed': [0.6, 9], 'lc70/chamfer/speed': [0.75, 9],
+    'lc70/square/crawl': [0.4, 9], 'lc70/chamfer/crawl': [0.75, 9], 'lc70/square/speed': [0.65, 9], 'lc70/chamfer/speed': [0.75, 9],
     'taco/square/crawl': [0.35, 9], 'taco/chamfer/crawl': [0.65, 9], 'taco/square/speed': [0.35, 9], 'taco/chamfer/speed': [0.65, 9],
   };
   let fail = 0;

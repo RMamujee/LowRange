@@ -33,6 +33,7 @@ export const RP = {
   BANK_SLOPE: 1.4,      // ...or, where nothing flatter is in reach (a trail on an embankment), driven into the bank
   EDGE: 0.45,           // last resort (a trail on a causeway): a post this far outside the tread edge
   BELOW: 2.5,
+  BANK_PAST: 5,         // m past a bog's / ford's far bank a post is tried first (a truck length: winched up to it, the rear is out too)
   AHEAD: 5,             // m a post must be ahead of the stuck nose (along the trail), and PAST_TOP m past
   PAST_TOP: 3,          // the crux's top (counting at most TOP_CAP m to the top): a post beside the obstacle pulls sideways, one past its top
                         // pulls the truck up and over it
@@ -96,6 +97,32 @@ export function rockRecords(rocks) {
   return out;
 }
 
+// Half width of a path's tread at arc length s: wide crawl corridors carry a width per point
+// (pts[i].w, with pts[i].s); every other path has one width.
+function halfWidthAt(p, s) {
+  const P = p.pts;
+  if (!P?.length || P[0].w == null || P[0].s == null) return p.width / 2;
+  let lo = 0, hi = P.length - 1;
+  if (s <= P[0].s) return P[0].w / 2;
+  if (s >= P[hi].s) return P[hi].w / 2;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P[m].s <= s) lo = m; else hi = m; }
+  const f = (s - P[lo].s) / Math.max(1e-6, P[hi].s - P[lo].s);
+  return (P[lo].w + (P[hi].w - P[lo].w) * f) / 2;
+}
+// The lines a truck may be on along a path: a wide corridor's marked lines (easy / hard / extreme:
+// p.lineAt(name, s), lateral offset from the centreline), each line that strays more than half a
+// metre from the others; else just the centreline.
+function pathLines(p) {
+  if (!p.lines || typeof p.lineAt !== 'function') return [{ name: '', lat: () => 0 }];
+  const out = [];
+  for (const name of ['easy', 'hard', 'extreme']) {
+    const L = p.lines[name]; if (!L) continue;
+    if (out.some((o) => L.every(([, lat], i) => Math.abs(lat - o.arr[i][1]) < 0.5))) continue;
+    out.push({ name, arr: L, lat: (s) => p.lineAt(name, s) });
+  }
+  return out.length ? out : [{ name: '', lat: () => 0 }];
+}
+
 // ---------------------------------------------------------------- the build
 // opts: { rocks, trees, extra (loose / dressing props with pos + halfLen or x, z, r), warn }
 export function buildRecoveryPoints(opts = {}) {
@@ -122,7 +149,8 @@ export function buildRecoveryPoints(opts = {}) {
   const segGrid = hashGrid(16);
   for (const p of all) for (let i = 1; i < p.pts.length; i++) {
     const a = p.pts[i - 1], b = p.pts[i];
-    segGrid.add((a.x + b.x) / 2, (a.z + b.z) / 2, Math.hypot(b.x - a.x, b.z - a.z) / 2 + p.width / 2 + 2, { a, b, hw: p.width / 2 });
+    const hw = Math.max(a.w ?? p.width, b.w ?? p.width, p.width) / 2; // a wide crawl corridor is tread across its width
+    segGrid.add((a.x + b.x) / 2, (a.z + b.z) / 2, Math.hypot(b.x - a.x, b.z - a.z) / 2 + hw + 2, { a, b, hw });
   }
   const tmp = [];
   const onTread = (x, z, margin = RP.TREAD_MARGIN) => {
@@ -215,19 +243,31 @@ export function buildRecoveryPoints(opts = {}) {
   function cover(cx) {
     const found = posts.find((P) => covers(P, cx));
     if (found) { cx.post = found.id; found.cruxes.push(cx.id); return true; }
-    const p = cx.path, hw = p.width / 2;
+    const p = cx.path;
+    // offsets out from the tread edge where the post is tried (its half width is taken at the try's own
+    // s, so a wide corridor's posts go beyond its edge, not into it); a = metres past the crux's top
     const tries = [];
-    for (const a of [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]) for (const lat of [hw + 1.0, hw + 1.8, hw + 2.8, hw + 4, hw + 5.5, hw + 7.5, hw + 10]) for (const side of [1, -1]) tries.push([a, lat * side]);
-    // nearest straight ahead first: the pull angle off the trail matters more than the distance
-    const aTop = Math.abs(cx.sTop - cx.s), cost = ([a, lat]) => Math.abs(lat) / (aTop + a) * 12 + a * 0.3 + Math.abs(lat) * 0.3;
-    tries.sort((u, w) => cost(u) - cost(w));
+    for (const a of [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]) for (const off of [1.0, 1.8, 2.8, 4, 5.5, 7.5, 10]) for (const side of [1, -1]) tries.push([a, off, side]);
+    // nearest straight ahead of the stuck nose first: the pull angle matters more than the distance
+    const aTop = Math.abs(cx.sTop - cx.s), latOf = (a, off, side) => side * (halfWidthAt(p, cx.sTop + cx.sig * a) + off);
+    const cost = ([a, off, side]) => { const d = Math.abs(latOf(a, off, side) - (cx.lat ?? 0)); return d / (aTop + a) * 12 + a * 0.3 + d * 0.3; };
+    // a bog's or ford's post stands at least BANK_PAST m past the far bank where it can, so a truck
+    // winched right up to it has its rear tyres out of the mud too
+    const wet = cx.kind === 'bog' || cx.kind === 'ford', near = ([a]) => (wet && a < RP.BANK_PAST ? 1 : 0);
+    tries.sort((u, w) => near(u) - near(w) || cost(u) - cost(w));
     const why = cx.why = {};
     const no = (w) => { why[w] = (why[w] || 0) + 1; };
     const edge = [];
-    for (const a of [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]) for (const side of [1, -1]) edge.push([a, (hw + RP.EDGE + 0.05) * side]);
-    for (const [slope, margin, list] of [[RP.POST_SLOPE, RP.TREAD_MARGIN, tries], [RP.BANK_SLOPE, RP.TREAD_MARGIN, tries], [RP.BANK_SLOPE, RP.EDGE, edge]]) for (const [a, lat] of list) {
+    for (const a of [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]) for (const side of [1, -1]) edge.push([a, RP.EDGE + 0.05, side]);
+    // last of all, short of the crux's top (still AHEAD / PAST_TOP ahead of the nose): a long, wide bog's
+    // first stretch, where the bank past the top is out of reach from a line far out to one side
+    const short = [];
+    for (const a of [0, -2, -4, -6]) for (const off of [1.0, 1.8, 2.8, 4, 5.5, 7.5]) for (const side of [1, -1]) short.push([a, off, side]);
+    short.sort((u, w) => cost(u) - cost(w));
+    for (const [slope, margin, list] of [[RP.POST_SLOPE, RP.TREAD_MARGIN, tries], [RP.BANK_SLOPE, RP.TREAD_MARGIN, tries], [RP.BANK_SLOPE, RP.EDGE, edge], [RP.POST_SLOPE, RP.TREAD_MARGIN, short], [RP.BANK_SLOPE, RP.TREAD_MARGIN, short]]) for (const [a, off, side] of list) {
       const s = cx.sTop + cx.sig * a;
       if (!p.closed && (s < 0 || s > p.length)) { no('path end'); continue; }
+      const lat = latOf(a, off, side);
       const q = pathPoint(p, p.closed ? ((s % p.length) + p.length) % p.length : s);
       const x = +(q.x - q.tz * lat).toFixed(2), z = +(q.z + q.tx * lat).toFixed(2); // (checked where it is stored)
       const f = footprint(x, z, slope, margin);
@@ -254,10 +294,15 @@ export function buildRecoveryPoints(opts = {}) {
 
   for (const { p, dirs, obstacles, sections } of scanPaths) {
     const L = p.length, ds = RP.STEP_DS, n = Math.floor(L / ds);
-    const S = [], H = [], M = [];
+    // a wide crawl corridor is scanned along each of its marked lines (a truck stuck on the deep line
+    // of a bog, or in a pit off it, needs a post it can reach from there); other paths along the centreline
+    const lines = pathLines(p);
+    for (const line of lines) {
+    const S = [], H = [], M = [], LAT = [];
     for (let i = 0; i <= n; i++) {
-      const s = i * ds, q = pathPoint(p, s), lx = -q.tz, lz = q.tx;
-      S.push(q);
+      const s = i * ds, c = pathPoint(p, s), lx = -c.tz, lz = c.tx, lat = line.lat(s);
+      const q = { ...c, x: c.x + lx * lat, z: c.z + lz * lat };
+      S.push(q); LAT.push(lat);
       let h = -Infinity;
       for (const o of [0, -0.8, 0.8]) h = Math.max(h, tread(q.x + lx * o, q.z + lz * o));
       H.push(h);
@@ -266,7 +311,7 @@ export function buildRecoveryPoints(opts = {}) {
     const mk = (kind, sig, iBot, iTop, extra = {}) => {
       const qb = S[iBot], dir = { x: qb.tx * sig, z: qb.tz * sig };
       const B = { x: qb.x, z: qb.z, y: H[iBot] + RP.NOSE };
-      const cx = { id: `${MAP_ID}:${p.name}:${kind}:${sig > 0 ? 'up' : 'down'}:${(iBot * ds).toFixed(1)}`, kind, path: p, pathName: p.name, sig, s: +(iBot * ds).toFixed(1), sTop: iTop * ds, B, dir, ...extra };
+      const cx = { id: `${MAP_ID}:${p.name}${line.name ? '/' + line.name : ''}:${kind}:${sig > 0 ? 'up' : 'down'}:${(iBot * ds).toFixed(1)}`, kind, path: p, pathName: p.name, line: line.name || null, lat: LAT[iBot], sig, s: +(iBot * ds).toFixed(1), sTop: iTop * ds, B, dir, ...extra };
       cruxes.push(cx);
       if (!cover(cx)) uncovered.push(cx);
     };
@@ -317,12 +362,13 @@ export function buildRecoveryPoints(opts = {}) {
         }
       }
     }
-    if (sections) {
+    if (sections && line === lines[0]) {
       for (const st of p.stages) {
         if (st.n === 1) continue;
         const iTop = Math.min(n, Math.round(st.gateS / ds)), iBot = Math.max(0, Math.round((st.gateS - 6) / ds));
         mk('section', 1, iBot, iTop, { section: st.n, name: st.name });
       }
+    }
     }
   }
   for (const cx of uncovered) warn(`[winch] ${MAP_ID}: no recovery point for the ${cx.kind} at ${cx.pathName} s=${cx.s} (tries failed on: ${Object.entries(cx.why || {}).map(([k, v]) => `${k} x${v}`).join(', ')})`);

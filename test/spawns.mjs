@@ -66,9 +66,22 @@ for (const sp of list) {
   const tw = Math.abs((wh(1, 1) - wh(1, -1)) - (wh(-1, 1) - wh(-1, -1)));
   check(tw <= S.LIMITS.twist, `${sp.name}: ground twist ${tw.toFixed(3)} m within ${S.LIMITS.twist} m`);
 }
-if (T.MAP_ID === 'park') {
-  const r = S.checkSpot(96.59, -85.74, 0.2758, []);
-  check(!r.ok && /^twist/.test(r.why), `old Boulder Alley start rejected for its twist (${r.why ?? 'accepted'})`);
+// The twist rule itself: the bug-fix pass found it on the Trail Park's old Boulder Alley start (grade
+// 0.119, rough 0.075, twist 0.10 m), ground the wide-crawl work has since re-laid. So search this map
+// for poses that pass the grade and roughness limits but twist the axles more than the limit: each must
+// be rejected for its twist, and accepted with the twist limit lifted (twist is the only reason).
+{
+  const free = { ...S.LIMITS, twist: Infinity }, step = Math.max(2, T.SIZE / 200), found = [];
+  for (let x = -T.SIZE / 2 + 15; x < T.SIZE / 2 - 15 && found.length < 5; x += step) for (let z = -T.SIZE / 2 + 15; z < T.SIZE / 2 - 15 && found.length < 5; z += step) {
+    const yaw = ((x * 7 + z * 13) % 6.283 + 6.283) % 6.283;
+    if (!S.checkSpot(x, z, yaw, [], undefined, free).ok) continue;
+    const r = S.checkSpot(x, z, yaw, []);
+    if (!r.ok) found.push({ x, z, yaw, r });
+  }
+  if (found.length) console.log(`  twist rule: ${found.length} pose(s) within grade and roughness but twisted, e.g. (${found[0].x.toFixed(0)}, ${found[0].z.toFixed(0)}): ${found[0].r.why}`);
+  if (found.length) check(found.every((f) => /^twist/.test(f.r.why)), `poses within grade and roughness but twisted are rejected for their twist: ${found.map((f) => `(${f.x.toFixed(0)}, ${f.z.toFixed(0)}) ${f.r.why}`).join(', ')}`);
+  else console.log('  (no pose on this map passes grade and roughness but fails the twist limit)');
+  if (T.MAP_ID === 'park' || T.MAP_ID === 'crawl') check(found.length > 0, `the twist rule is exercised on this map (${found.length} twisted pose(s) found)`);
 }
 // saved ids: unknown / corrupt fall back to the default
 S.saveLastSpawn({ id: 'no-such-spawn' });
