@@ -82,9 +82,9 @@ export class CrawlCourse {
     const tx = q1.x - q0.x, tz = q1.z - q0.z, L = Math.hypot(tx, tz) || 1;
     const lat = ((p.x - a.x) * -tz + (p.z - a.z) * tx) / L, along = ((p.x - a.x) * tx + (p.z - a.z) * tz) / L;
     const st = this.stageOf(a.s);
-    // on the course: inside the corridor and at its height (the switchback legs are far apart), and
-    // not out past either end of it
-    this.on = Math.abs(lat) < st.width / 2 + 3.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3.5 && !(i === 0 && along < -1) && !(last && along > 1);
+    // on the course: inside the corridor (as wide as it is here: stages and sections open up between
+    // their gates) and at its height (the switchback legs are far apart), and not out past either end
+    this.on = Math.abs(lat) < (a.w ?? st.width) / 2 + 3.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3.5 && !(i === 0 && along < -1) && !(last && along > 1);
     this.s = a.s; this.lat = lat;
     return { s: a.s, lat, on: this.on };
   }

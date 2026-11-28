@@ -49,7 +49,7 @@ export const COURSE_DEFS = [
   {
     id: 'slab', name: 'Broken Slab', diff: 'blue', unit: 'Section',
     blurb: 'A wide, broken slab face. Pick your line: low ledges on the left, tall ones and boulders on the right.',
-    start: { x: -16, z: -152, deg: 180 }, h0: 41,
+    start: { x: -16, z: -158, deg: 180 }, h0: 41,
     sections: [
       { name: 'The Toe', diff: 'blue', blurb: 'Swing round onto the foot of the face.',
         path: [['s', 9], ['a', 90, 9], ['s', 8]], width: 8, grades: [[0, 0], [9, -0.1], [19, 0]], rough: 0.03, mat: 'rock',
@@ -78,67 +78,79 @@ export const COURSE_DEFS = [
     ],
     // access: summit pad -> the course start; exit: the finish -> the summit pad
     roads: [
-      { name: 'Slab Track', from: { pad: 'summit', x: 2, z: -50 }, ctrl: [[6, -66], [10, -92], [8, -118], [2, -140], [-6, -152]], to: 'start', width: 5 },
+      { name: 'Slab Track', from: { pad: 'summit', x: 2, z: -50 }, ctrl: [[6, -66], [10, -92], [8, -118], [2, -142], [-6, -158]], to: 'start', width: 5 },
       // (both leave the summit by the Slab Track: the pad's edge is too steep to the east and north for its own mouth)
-      { name: 'Slab Exit', from: 'finish', lead: false, ctrl: [[-29, -59.5], [-16, -61]], to: { road: 'Slab Track', near: [6, -61] }, width: 5 },
+      { name: 'Slab Exit', from: 'finish', lead: false, ctrl: [[-29, -65.5], [-16, -67]], to: { road: 'Slab Track', near: [6, -67] }, width: 5 },
     ],
   },
   {
     id: 'camber', name: 'Camber Ridge', diff: 'black', unit: 'Section',
-    blurb: 'An off-camber traverse that leans further and further. Slow, and keep the low side low.',
-    start: { x: -108, z: 150, deg: 0 }, h0: 5,
+    blurb: 'An off-camber traverse that leans further and further. Three lines: the low one leans least. Slow, and keep the low side low.',
+    start: { x: -108, z: 155, deg: 0 }, h0: 5,
+    blend: 6, // (a shorter blend into the hillside than the others: the bypass runs 25 m north)
+    // lanes: easy on the low (left) side, where the hill leans least, extreme high on the right with
+    // the most lean and the kickers; per lane camber { deg: { lane: [from, to] } }
     sections: [
-      { name: 'Lean-in', diff: 'blue', blurb: 'The hill starts to lean: 6 degrees, then 18.',
-        path: [['s', 44]], width: 6, grades: [[0, 0], [8, 0.03], [36, 0.0]], rough: 0.03, mat: 'rock',
-        camber: { deg: [6, 18], in: 3, full: 34, out: BENCH_OUT }, lumps: 0.05,
-        kickers: { from: 13, to: 34, every: 6.5, top: [0.16, 0.22], lat: [0.85] }, embed: { every: 2.4, size: [0.35, 0.8], proud: [0.06, 0.12] } },
-      { name: 'Rib Walk', diff: 'black', blurb: 'Straddle the rib on a 20 degree lean; holes drop one wheel at a time.',
-        path: [['s', 16], ['a', -10, 70], ['s', 18]], width: 6, grades: [[0, 0.02], [36, 0.0]], rough: 0.03, mat: 'rock',
-        camber: { deg: [19, 21], in: 3, full: 12, out: BENCH_OUT }, lumps: 0.06,
-        ribs: { from: 10, to: 39, len: 2.9, gap: 0.9, top: 0.15, w: 0.6 },
-        axleHoles: { from: 11, to: 38, every: 4.6, depth: 0.3, r: 1.05, lat: 0.85 } },
-      { name: 'Knife Edge', diff: 'black', blurb: 'The lean peaks near 30 degrees with rocks under the high side. Creep.',
-        path: [['s', 14], ['a', 18, 60], ['s', 18]], width: 6.4, grades: [[0, 0.0], [20, 0.03], [44, 0.0]], rough: 0.03, mat: 'rock',
-        camber: { deg: [23, 29], in: 3, full: 30, out: BENCH_OUT }, lumps: 0.05,
-        kickers: { from: 11, to: 44, every: 5.5, top: [0.22, 0.3], lat: [0.85, -0.85] } },
+      { name: 'Lean-in', diff: 'blue', blurb: 'The hill starts to lean: 4 degrees on the low line, 22 up on the high one.',
+        path: [['s', 56]], widths: [[0, 7], [6, 7], [11, 13], [47, 13], [52, 7]], grades: [[0, 0], [8, 0.03], [48, 0.0]], rough: 0.03, mat: 'rock',
+        lanes: [['easy', -4.2], ['hard', 0], ['extreme', 4.2]],
+        camber: { deg: { easy: [4, 10], hard: [6, 18], extreme: [10, 22] }, in: 3, full: 44, out: BENCH_OUT }, lumps: 0.05,
+        kickers: { from: 13, to: 46, every: 6.5, top: [0.16, 0.22], lanes: ['hard', 'extreme'] }, embed: { every: 2.4, size: [0.35, 0.8], proud: [0.06, 0.12] } },
+      { name: 'Rib Walk', diff: 'black', blurb: 'Straddle the rib on a 20 degree lean, or take the low bench at 12; holes drop one wheel at a time.',
+        path: [['s', 20], ['a', -10, 80], ['s', 26]], widths: [[0, 7], [6, 7], [11, 13], [51, 13], [56, 7]], grades: [[0, 0.02], [52, 0.0]], rough: 0.03, mat: 'rock',
+        lanes: [['easy', -4.2], ['hard', 0], ['extreme', 4.2]],
+        camber: { deg: { easy: [11, 13], hard: [19, 21], extreme: [23, 25] }, in: 3, full: 14, out: BENCH_OUT }, lumps: 0.06,
+        ribs: { from: 10, to: 50, len: 2.9, gap: 0.9, top: 0.14, w: 0.6, lane: 'hard' },
+        axleHoles: { from: 11, to: 49, every: 4.6, depth: 0.3, r: 1.05, lat: 0.85, lanes: ['hard', 'extreme'] } },
+      { name: 'Knife Edge', diff: 'black', blurb: 'The lean peaks near 30 degrees up high with rocks under the high side; the low line holds at 20. Creep.',
+        path: [['s', 18], ['a', 18, 70], ['s', 26]], widths: [[0, 7], [6, 7], [11, 13], [57, 13], [62, 7]], grades: [[0, 0.0], [24, 0.03], [56, 0.0]], rough: 0.03, mat: 'rock',
+        lanes: [['easy', -4.2], ['hard', 0], ['extreme', 4.2]],
+        camber: { deg: { easy: [16, 20], hard: [23, 28], extreme: [26, 30] }, in: 3, full: 38, out: BENCH_OUT }, lumps: 0.05,
+        kickers: { from: 11, to: 56, every: 5.5, top: [0.22, 0.3], lat: [0.85, -0.85], lanes: ['hard', 'extreme'] } },
       { name: 'Finish', diff: 'green', blurb: 'Level ground again.', finish: true,
         path: [['s', 16]], width: 7, grades: [[0, 0]], rough: 0.02, mat: 'gravel', lumps: 0.03 },
     ],
     roads: [
-      { name: 'Camber Track', from: { pad: 'trailhead', x: -134, z: 122 }, ctrl: [[-130, 133], [-123, 143], [-116, 149.4]], to: 'start', width: 5 },
-      { name: 'Camber Exit', from: 'finish', ctrl: [[64, 149]], to: { road: 0, near: [70, 125], out: 15 }, width: 5 }, // ends short of the bypass's blend: The Gauntlet's cells stay as baked
+      { name: 'Camber Track', from: { pad: 'trailhead', x: -134, z: 122 }, ctrl: [[-130, 135], [-124, 147], [-116, 154.4]], to: 'start', width: 5 },
+      { name: 'Camber Exit', from: 'finish', ctrl: [[104, 152]], to: { road: 0, near: [118, 124], out: 21 }, width: 5 }, // ends short of the bypass's blend: The Gauntlet's cells stay as baked
     ],
   },
   {
     id: 'gully', name: 'Cobble Gully', diff: 'dblack', unit: 'Section',
-    blurb: 'Down a gully full of boulders on engine braking, across a creek bed of cobbles, and out again.',
-    start: { x: 28, z: -54, deg: -8 }, h0: 54,
+    blurb: 'Down a gully full of boulders on engine braking, across a creek bed of cobbles, and out again. Smaller cobbles on the left, the biggest on the right.',
+    start: { x: 28, z: -54, deg: -22 }, h0: 54,
+    // lanes: per lane cobble size and how tightly they pack (cobbles { lanes: { lane: { top, size, fill } } })
     sections: [
       { name: 'Drop-in', diff: 'black', blurb: 'Over the lip and down a 35% boulder slope. First gear low range, off the brakes.',
-        path: [['s', 34]], width: 6, grades: [[0, 0], [8, -0.35], [23, -0.04], [25, 0]], rough: 0.04, mat: 'rock',
-        gully: { wall: 1.0 }, lumps: 0.06,
-        cobbles: { from: 9, to: 23, dx: 1.25, dz: 1.5, size: [0.65, 1.05], top: [0.24, 0.4], fill: 0.62 }, walls: { every: 3.2, size: [1.2, 2.0] } },
+        path: [['s', 40]], widths: [[0, 7], [6, 7], [11, 12], [31, 12], [35, 7]], grades: [[0, 0], [8, -0.35], [27, -0.04], [29, 0]], rough: 0.04, mat: 'rock',
+        gully: { wall: 1.0 }, lumps: 0.06, lanes: [['easy', -3.8], ['hard', 0], ['extreme', 3.8]],
+        cobbles: { from: 9, to: 27, dx: 1.25, dz: 1.5, size: [0.65, 1.05], top: [0.24, 0.4], fill: 0.62,
+          lanes: { easy: { top: [0.18, 0.28], size: [0.55, 0.85], fill: 0.45 }, extreme: { top: [0.38, 0.52], size: [0.8, 1.2], fill: 0.78 } } }, walls: { every: 3.2, size: [1.2, 2.0] } },
       { name: 'Cobble Run', diff: 'black', blurb: 'A long run of rounded boulders. Put the tyres on top of them.',
-        path: [['s', 8], ['a', 50, 34]], width: 6.4, grades: [[0, 0], [7, -0.2], [29, -0.03], [31, 0]], rough: 0.04, mat: 'rock',
-        gully: { wall: 1.4 }, lumps: 0.06,
-        cobbles: { from: 7, to: 29, dx: 1.2, dz: 1.35, size: [0.7, 1.15], top: [0.3, 0.48], fill: 0.75 }, walls: { every: 3, size: [1.3, 2.2] } },
+        path: [['s', 12], ['a', 60, 32]], widths: [[0, 7], [6, 7], [11, 12.5], [37, 12.5], [41, 7]], grades: [[0, 0], [7, -0.2], [35, -0.03], [37, 0]], rough: 0.04, mat: 'rock',
+        gully: { wall: 1.4 }, lumps: 0.06, lanes: [['easy', -4], ['hard', 0], ['extreme', 4]],
+        cobbles: { from: 7, to: 35, dx: 1.2, dz: 1.35, size: [0.7, 1.15], top: [0.3, 0.48], fill: 0.75,
+          lanes: { easy: { top: [0.2, 0.32], size: [0.6, 0.9], fill: 0.5 }, extreme: { top: [0.42, 0.56], size: [0.85, 1.25], fill: 0.85 } } }, walls: { every: 3, size: [1.3, 2.2] } },
       { name: 'The Chute', diff: 'dblack', blurb: 'Steep and narrow, big boulders all the way down. Creep it.',
-        path: [['s', 32]], width: 5.6, grades: [[0, 0], [8, -0.42], [21, -0.04], [23, 0]], rough: 0.04, mat: 'rock',
-        gully: { wall: 2.2 }, lumps: 0.05,
-        cobbles: { from: 8, to: 22, dx: 1.35, dz: 1.55, size: [0.9, 1.4], top: [0.38, 0.58], fill: 0.72 }, walls: { every: 2.6, size: [1.5, 2.4] } },
+        path: [['s', 38]], widths: [[0, 7], [6, 7], [11, 11.5], [29, 11.5], [33, 7]], grades: [[0, 0], [8, -0.42], [27, -0.04], [29, 0]], rough: 0.04, mat: 'rock',
+        gully: { wall: 2.2 }, lumps: 0.05, lanes: [['easy', -3.7], ['hard', 0], ['extreme', 3.7]],
+        cobbles: { from: 8, to: 28, dx: 1.35, dz: 1.55, size: [0.9, 1.4], top: [0.38, 0.58], fill: 0.72,
+          lanes: { easy: { top: [0.3, 0.42], size: [0.75, 1.1], fill: 0.6 }, extreme: { top: [0.5, 0.62], size: [1.0, 1.45], fill: 0.82 } } }, walls: { every: 2.6, size: [1.5, 2.4] } },
       { name: 'Creek Bed', diff: 'black', blurb: 'A dry creek bed packed with boulders. No dirt to drive on.',
-        path: [['s', 5], ['a', 80, 24], ['s', 8]], width: 7, grades: [[0, 0], [7, -0.12], [35, -0.03], [37, 0]], rough: 0.04, mat: 'gravel',
-        gully: { wall: 1.6 }, lumps: 0.1, holes: [3, 0.45, 0.22, 0.9],
-        cobbles: { from: 7, to: 37, dx: 1.15, dz: 1.3, size: [0.65, 1.15], top: [0.32, 0.52], fill: 0.8 }, walls: { every: 3, size: [1.2, 2.2] } },
-      { name: 'Climb-out', diff: 'black', blurb: 'Back up over boulder steps at 26%.',
-        path: [['s', 8], ['a', 20, 30], ['s', 9]], width: 6, grades: [[0, 0], [7, 0.3], [24, 0.03], [27, 0]], rough: 0.04, mat: 'rock',
-        gully: { wall: 1.0 }, lumps: 0.05,
-        cobbles: { from: 8, to: 24, dx: 1.3, dz: 1.5, size: [0.9, 1.4], top: [0.44, 0.62], fill: 0.7 }, walls: { every: 3.4, size: [1.1, 1.8] } },
+        path: [['s', 8], ['a', 90, 26], ['s', 12]], widths: [[0, 7], [6, 7], [11, 13], [58, 13], [62, 7]], grades: [[0, 0], [7, -0.12], [56, -0.03], [58, 0]], rough: 0.04, mat: 'gravel',
+        gully: { wall: 1.6 }, lumps: 0.1, holes: [3, 0.45, 0.22, 0.9], lanes: [['easy', -4.2], ['hard', 0], ['extreme', 4.2]],
+        cobbles: { from: 7, to: 57, dx: 1.15, dz: 1.3, size: [0.65, 1.15], top: [0.32, 0.52], fill: 0.8,
+          lanes: { easy: { top: [0.22, 0.34], size: [0.55, 0.9], fill: 0.55 }, extreme: { top: [0.45, 0.6], size: [0.85, 1.25], fill: 0.88 } } }, walls: { every: 3, size: [1.2, 2.2] } },
+      { name: 'Climb-out', diff: 'black', blurb: 'Back up over boulder steps at 30%.',
+        path: [['s', 10], ['a', 20, 34], ['s', 12]], widths: [[0, 7], [6, 7], [11, 12], [30, 12], [34, 7]], grades: [[0, 0], [7, 0.3], [30, 0.03], [33, 0]], rough: 0.04, mat: 'rock',
+        gully: { wall: 1.0 }, lumps: 0.05, lanes: [['easy', -3.8], ['hard', 0], ['extreme', 3.8]],
+        cobbles: { from: 8, to: 30, dx: 1.3, dz: 1.5, size: [0.9, 1.4], top: [0.44, 0.62], fill: 0.7,
+          lanes: { easy: { top: [0.32, 0.46], size: [0.75, 1.1], fill: 0.55 }, extreme: { top: [0.52, 0.64], size: [1.0, 1.45], fill: 0.8 } } }, walls: { every: 3.4, size: [1.1, 1.8] } },
       { name: 'Finish', diff: 'green', blurb: 'Out of the gully.', finish: true,
         path: [['s', 16]], width: 7, grades: [[0, 0]], rough: 0.02, mat: 'gravel', lumps: 0.03 },
     ],
     roads: [
-      { name: 'Gully Track', from: { road: 'Slab Track', near: [7, -64] }, ctrl: [[15, -60]], to: 'start', width: 5 },
+      { name: 'Gully Track', from: { road: 'Slab Track', near: [8, -77] }, ctrl: [[19, -66]], to: 'start', width: 5 },
       { name: 'Gully Exit', from: 'finish', ctrl: [[60, -150], [36, -150]], to: { road: 'Slab Track', near: [10, -140] }, width: 5 },
     ],
   },
@@ -162,7 +174,15 @@ function buildPath(def) {
       }
     }
     const maxW = sec.widths ? Math.max(...sec.widths.map((q) => q[1])) : sec.width;
-    stages.push({ ...sec, width: maxW, n: stages.length + 1, s0, s1: s, len: s - s0, gateS: s0 + 3 });
+    const st = { ...sec, width: maxW, n: stages.length + 1, s0, s1: s, len: s - s0, gateS: s0 + 3 };
+    // lanes (as on The Gauntlet's wide stages): bands split at the midpoints between the lines, open
+    // between the benches, closed back to the centre line at the gates
+    const L = [...(sec.lanes || [])].sort((a, b) => a[1] - b[1]);
+    st.bands = L.map(([name, lat], k) => ({ name, lat, lo: k ? (L[k - 1][1] + lat) / 2 : -Infinity, hi: k < L.length - 1 ? (L[k + 1][1] + lat) / 2 : Infinity }));
+    st.lane = (nm) => st.bands.find((b) => b.name === nm) || null;
+    st.open = (u) => (st.bands.length ? smooth(BENCH_IN + 1, BENCH_IN + 6, u) * smooth(st.len - BENCH_OUT - 1, st.len - BENCH_OUT - 5, u) : 0);
+    st.lineLat = (nm, u) => { const b = st.lane(nm) || (nm === 'extreme' && st.lane('hard')) || st.lane('easy'); return b ? b.lat * st.open(u) : 0; };
+    stages.push(st);
   }
   const len = s;
   const stageIdx = (q) => { let i = 0; while (i < stages.length - 1 && q >= stages[i + 1].s0) i++; return i; };
@@ -185,7 +205,13 @@ function buildPath(def) {
     if (i) h += pts[i].g * DS;
     pts[i].h = h; pts[i].w = wa / wn;
   }
-  const C = { id: def.id, name: def.name, diff: def.diff, blurb: def.blurb, unit: def.unit, kind: 'course', pts, length: len, width: Math.max(...stages.map((q) => q.width)), shoulder: SKIRT, stages, stageAt, oneWay: true };
+  const C = { id: def.id, name: def.name, diff: def.diff, blurb: def.blurb, unit: def.unit, kind: 'course', pts, length: len, width: Math.max(...stages.map((q) => q.width)), shoulder: SKIRT, stages, stageAt, oneWay: true, blend: def.blend };
+  // marked lines where sections have lanes ([[s, lat], ...] every metre; easy = the rated route)
+  if (stages.some((q) => q.bands.length)) {
+    C.lines = {};
+    for (const nm of ['easy', 'hard', 'extreme']) { const out = []; for (let q = 0; q <= len + 1e-6; q += 1) { const st = stageAt(q); out.push([q, st.lineLat(nm, q - st.s0)]); } C.lines[nm] = out; }
+    C.lineAt = (nm, q) => { const L = C.lines[nm] || C.lines.easy, f = clamp(q, 0, L.length - 1), i = Math.min(L.length - 2, Math.floor(f)); return lerp(L[i][1], L[i + 1][1], f - i); };
+  }
   stages.forEach((st) => { const p = pathPoint(C, st.gateS); st.gate = { x: p.x, z: p.z, h: p.h, tx: p.tx, tz: p.tz }; st.course = def.id; });
   return C;
 }
@@ -208,16 +234,25 @@ function shape(st, u, lat, hw, x, z) {
   const lf = ledgeFade(st, u) * ends;
   dh += fbm(x * 0.45, z * 0.45, 2) * (st.rough || 0) * lf;
   if (st.camber) {
-    const c = st.camber, f = smooth(c.in, c.in + 6, u) * smooth(st.len - c.out, st.len - c.out - 6, u);
-    const deg = lerp(c.deg[0], c.deg[1], smooth(c.in, c.full, u));
-    dh += clamp(lat, -(hw + 7), hw + 7) * tanD(deg) * f; // the hill plane carries on past the tread
+    const c = st.camber, f = smooth(c.in, c.in + 6, u) * smooth(st.len - c.out, st.len - c.out - 6, u), full = smooth(c.in, c.full, u);
+    const L = clamp(lat, -(hw + 7), hw + 7); // the hill plane carries on past the tread
+    if (Array.isArray(c.deg)) dh += L * tanD(lerp(c.deg[0], c.deg[1], full)) * f;
+    else {
+      // each lane leans its own amount (right side up), the heights joined across the lanes; past the
+      // outer lanes the hill carries on at their lean
+      const k = st.open(u), B = st.bands, tanAt = (l) => { let v = tanD(lerp(c.deg[B[0].name][0], c.deg[B[0].name][1], full)); for (let i = 1; i < B.length; i++) { const e = B[i].lo * k; v = lerp(v, tanD(lerp(c.deg[B[i].name][0], c.deg[B[i].name][1], full)), smooth(e - 1.5, e + 1.5, l)); } return v; };
+      const n = Math.max(1, Math.ceil(Math.abs(L) / 0.25)), step = L / n;
+      let acc = 0; for (let i = 0; i < n; i++) acc += tanAt((i + 0.5) * step) * step;
+      dh += acc * f;
+    }
   }
   if (st.gully) dh += st.gully.wall * smooth(hw - 0.2, hw + 3.5, Math.abs(lat)) * (0.35 + 0.65 * ends);
   if (st.lumps) dh += lumps(x, z, st.lumps) * lf;
   if (st.holes) dh += potholes(x, z, st.holes[0], st.holes[1], st.holes[2], st.holes[3], 77) * lf;
   if (st.axleHoles && Math.abs(lat) < hw) {
     const a = st.axleHoles;
-    for (let k = 0, c = a.from; c <= a.to; k++, c += a.every) dh -= a.depth * bump(Math.hypot(u - c, lat - (k % 2 ? 1 : -1) * a.lat), a.r);
+    for (const o of a.lanes ? a.lanes.map((nm) => st.lineLat(nm, u)) : [0])
+      for (let k = 0, c = a.from; c <= a.to; k++, c += a.every) dh -= a.depth * bump(Math.hypot(u - c, lat - o - (k % 2 ? 1 : -1) * a.lat), a.r);
   }
   if (st.cracks && Math.abs(lat) < hw + 1) {
     const k = st.cracks, an = (k.angle * Math.PI) / 180;
@@ -375,7 +410,7 @@ export function sculptCourses(courses, roads, g, G0, guarded, accessId0, trailId
     }
   });
   courses.forEach((C, ci) => {
-    const P = C.pts, reach = C.width / 2 + SKIRT + BLEND + 2;
+    const P = C.pts, blend = C.blend ?? BLEND, reach = C.width / 2 + SKIRT + blend + 2;
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const p of P) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     const ia = clamp(Math.floor((x0 - reach + SIZE / 2) / CELL), 1, RES - 1), ib = clamp(Math.ceil((x1 + reach + SIZE / 2) / CELL), 1, RES - 1);
@@ -404,7 +439,7 @@ export function sculptCourses(courses, roads, g, G0, guarded, accessId0, trailId
       // past either end of the course the ground is the access track's business
       if (bs <= 0.01 || bs >= C.length - 0.01) { if (bd > widthAt(C, bs) / 2 + 0.5) continue; }
       const hw = widthAt(C, bs) / 2, core = hw + SKIRT;
-      let w = 1 - smooth(core, core + BLEND, bd);
+      let w = 1 - smooth(core, core + blend, bd);
       if (w <= 0) continue;
       const S = courseGround(C, bs, blat, x, z);
       w *= smooth(GUARD[0], GUARD[1], D[idx]);                         // keep clear of The Gauntlet
@@ -565,9 +600,12 @@ export function courseRocks(courses, heightAt) {
         for (let u = Math.max(u0, c.from); u < Math.min(u1, c.to); u += c.dz) {
           const s = st.s0 + u, hw = widthAt(C, s) / 2, row = Math.round(u / c.dz);
           for (let lat = -hw + 0.5 + (row % 2) * c.dx * 0.5; lat < hw - 0.4; lat += c.dx) {
-            if (R() > c.fill) continue;
+            // (where the section has lanes: that lane's cobble size, height and packing)
+            const b = st.bands.length && st.open(u) > 0.5 ? st.bands.find((bb) => lat >= bb.lo * st.open(u) && lat < bb.hi * st.open(u)) : null;
+            const cl = { ...c, ...(b && c.lanes?.[b.name]) };
+            if (R() > cl.fill) continue;
             const q = at(s + (R() - 0.5) * c.dz * 0.4, lat + (R() - 0.5) * c.dx * 0.35);
-            const r = rshape(lerp(c.size[0], c.size[1], R()) * 0.85, 0.95, 0.55, lerp(c.top[0], c.top[1], R())); // rounder: smaller and sunk deeper
+            const r = rshape(lerp(cl.size[0], cl.size[1], R()) * 0.85, 0.95, 0.55, lerp(cl.top[0], cl.top[1], R())); // rounder: smaller and sunk deeper
             put(r, q.x, q.z, true); tag({ cobble: { course: C.id, stage: st.n } });
           }
         }
@@ -577,9 +615,12 @@ export function courseRocks(courses, heightAt) {
         const kk = st.kickers;
         let k = 0;
         for (let u = Math.max(u0, kk.from); u < Math.min(u1, kk.to); u += kk.every * (0.85 + R() * 0.3), k++) {
-          const lat = kk.lat[k % kk.lat.length] + (R() - 0.5) * 0.2, q = at(st.s0 + u, lat);
-          const r = rshape(0.75 + R() * 0.35, 0.7, 0.45, lerp(kk.top[0], kk.top[1], R()));
-          put(r, q.x, q.z, true); tag({ kicker: { course: C.id, stage: st.n } });
+          // under each listed lane's wheel track (+0.85 = its high side), or the centre line's
+          for (const o of kk.lanes ? kk.lanes.map((nm) => st.lineLat(nm, u)) : [0]) {
+            const lat = o + (kk.lat ?? [0.85])[k % (kk.lat ?? [0.85]).length] + (R() - 0.5) * 0.2, q = at(st.s0 + u, lat);
+            const r = rshape(0.75 + R() * 0.35, 0.7, 0.45, lerp(kk.top[0], kk.top[1], R()));
+            put(r, q.x, q.z, true); tag({ kicker: { course: C.id, stage: st.n } });
+          }
         }
       }
       // a rock spine along the centre, in pieces, to straddle
@@ -587,7 +628,7 @@ export function courseRocks(courses, heightAt) {
         const rb = st.ribs;
         // pieces of uneven length and crest, each a little skewed, so it reads as a broken spine
         for (let u = Math.max(u0, rb.from), L = rb.len; u + L < Math.min(u1, rb.to) + 0.5; u += L + rb.gap * (0.7 + R() * 0.6), L = rb.len * (0.7 + R() * 0.6)) {
-          const piece = ribPiece(C, st.s0 + u, L, rb.w * (0.9 + R() * 0.2), rb.top * (0.85 + R() * 0.15), R, heightAt);
+          const piece = ribPiece(C, st.s0 + u, L, rb.w * (0.9 + R() * 0.2), rb.top * (0.85 + R() * 0.15), R, heightAt, rb.lane ? st.lineLat(rb.lane, u + L / 2) : 0);
           piece.rotY += (R() - 0.5) * 0.24;
           out.push(piece);
           out.at(-1).rib = { course: C.id, stage: st.n };
@@ -639,8 +680,8 @@ function ledgePiece(C, s, la, lb, rise, R, heightAt) {
 }
 
 // a low, narrow, rounded rock spine `len` m long along the course centre
-function ribPiece(C, s, len, w, top, R, heightAt) {
-  const pm = pathPoint(C, s + len / 2), pts = [];
+function ribPiece(C, s, len, w, top, R, heightAt, lat = 0) {
+  const pc = pathPoint(C, s + len / 2), pm = { ...pc, x: pc.x - pc.tz * lat, z: pc.z + pc.tx * lat }, pts = [];
   const g = (pathPoint(C, s + len).h - pathPoint(C, s).h) / len;
   // cross-section levels: [height, half width]: a buried foot, the flanks, a rounded crest
   const levels = [[-0.3, w * 0.58], [top * 0.45, w * 0.5], [top * 0.85, w * 0.32], [top, 0.04]];
