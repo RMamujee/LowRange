@@ -158,7 +158,7 @@ const CANYON_DEFS = [
   // between braids up to 23 m wide, where rock fins split the floor into channels (widths: half-width
   // of the floor by arc length along the canyon)
   { name: 'Knucklebone Canyon', pts: [[324, 206], [334, 186], [320, 156], [342, 124], [322, 92], [345, 58], [325, 26], [334, -4]], wall: 3.2, f0: 0, f1: 0,
-    widths: [[0, 6.5], [18, 6.5], [28, 11.5], [70, 11.5], [80, 6.5], [94, 6.5], [104, 11.5], [146, 11.5], [156, 6.5], [170, 6.5], [180, 11.5], [222, 11.5], [232, 6.5]] },
+    widths: [[0, 6.5], [12, 6.5], [22, 11.5], [70, 11.5], [80, 6.5], [88, 6.5], [98, 11.5], [146, 11.5], [156, 6.5], [164, 6.5], [174, 11.5], [222, 11.5], [232, 6.5]] }, // (each braid opens about 10 m before its crux, so the slot lines can line up)
   // the Redwall ravine: a gully climbing into the mesa from the west, floor rising to the top (the staircase)
   { name: 'Redwall Ravine', pts: [[150, 429], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388]], halfW: 9.5, wall: 2.6, f0: 0.3, f1: 33.5 }, // (19 m floor: three lanes of steps)
 ];
