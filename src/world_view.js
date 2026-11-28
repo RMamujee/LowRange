@@ -190,21 +190,43 @@ export function buildMarkers(scene) {
   roadPts.forEach(([x, y, z], i) => { m.makeTranslation(x, y + 0.55, z); white.setMatrixAt(i, m); m.makeTranslation(x, y + 0.95, z); refl.setMatrixAt(i, m); });
   white.castShadow = true;
   scene.add(white, refl);
-  // trail markers: posts topped with the difficulty colour, alternating sides
+  // trail markers: posts topped with the difficulty colour, alternating sides, at the corridor's
+  // edge (a crawl corridor opens up at its cruxes: src/maps/trailpark.js)
+  const widthAt = (t, s) => { if (!t.corridor) return t.width; const P = t.pts; let i = 1; while (i < P.length - 1 && P[i].s < s) i++; return P[i].w; };
   for (const t of TRAILS) {
     const pts = [];
     let side = 1;
     for (let s = 8; s < t.length - 5; s += 11) {
       const p = pathPoint(t, s);
-      const off = (t.width / 2 + 0.9) * side; side = -side;
+      const off = (widthAt(t, s) / 2 + 0.9) * side; side = -side;
       const x = p.x - p.tz * off, z = p.z + p.tx * off;
       pts.push([x, heightAt(x, z), z]);
     }
-    const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), pts.length);
-    const topCol = t.diff === 'green' || t.diff === 'blue' ? DIFF[t.diff].hex : 0x111111;
-    const tops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.25, 0.2), new THREE.MeshStandardMaterial({ color: topCol, emissive: t.diff === 'blue' ? 0x0a2040 : t.diff === 'green' ? 0x0a300f : 0x000000 }), pts.length);
-    pts.forEach(([x, y, z], i) => { m.makeTranslation(x, y + 0.55, z); posts.setMatrixAt(i, m); m.makeTranslation(x, y + 1.2, z); tops.setMatrixAt(i, m); });
-    scene.add(posts, tops);
+    // where a crux's lines split: a pair of posts either side of each line's way in, topped with the
+    // trail's colour for the easy (rated) line, black for the hard one, red for the extreme one
+    const lanePosts = { easy: [], hard: [], extreme: [] };
+    for (const c of t.cruxes || []) for (const ln of c.lanes) {
+      const s = c.s0 - 1, p = pathPoint(t, s), L = t.laneLat(c, ln.name, c.s0);
+      for (const d of [-1.7, 1.7]) { const x = p.x - p.tz * (L + d), z = p.z + p.tx * (L + d); lanePosts[ln.name].push([x, heightAt(x, z), z]); }
+    }
+    const all = [...pts, ...lanePosts.easy, ...lanePosts.hard, ...lanePosts.extreme];
+    const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), all.length);
+    all.forEach(([x, y, z], i) => { m.makeTranslation(x, y + 0.55, z); posts.setMatrixAt(i, m); });
+    const topG = new THREE.BoxGeometry(0.2, 0.25, 0.2), topCol = t.diff === 'green' || t.diff === 'blue' ? DIFF[t.diff].hex : 0x111111;
+    for (const [list, col, em] of [[[...pts, ...lanePosts.easy], topCol, t.diff === 'blue' ? 0x0a2040 : t.diff === 'green' ? 0x0a300f : 0x000000], [lanePosts.hard, 0x111111, 0], [lanePosts.extreme, 0xc8281e, 0x400a06]]) {
+      if (!list.length) continue;
+      const tops = new THREE.InstancedMesh(topG, new THREE.MeshStandardMaterial({ color: col, emissive: em }), list.length);
+      list.forEach(([x, y, z], i) => { m.makeTranslation(x, y + 1.2, z); tops.setMatrixAt(i, m); });
+      scene.add(tops);
+    }
+    scene.add(posts);
+    // and a signpost at each crux's way in naming it and its lines, left to right
+    for (const c of t.cruxes || []) {
+      const p = pathPoint(t, Math.max(1, c.s0 - 4)), label = { easy: 'EASY', hard: 'HARD', extreme: 'EXTREME' };
+      const face = fitFace({ title: c.name, sub: c.lanes.map((ln) => label[ln.name]).join(' · '), diff: t.diff, maxTitleW: 60 }, { m: SIGN_M });
+      const side = -(widthAt(t, c.s0 - 4) / 2 + 1.0 + face.w / 2), sx = p.x - p.tz * side, sz = p.z + p.tx * side;
+      scene.add(signpost(sx, sz, faceYaw([-p.tx, -p.tz], sx, sz, p.x, p.z, 0.2), face));
+    }
   }
   // signposts + gates at both trail ends
   const gates = [];

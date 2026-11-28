@@ -1,27 +1,36 @@
-// Autopilot: follow each trail centreline in 4-Low with lockers; report progress.
+// Autopilot: follow each trail in 4-Low with lockers; report progress.
+// On a crawl corridor (trail.lines, src/maps/trailpark.js) it drives one marked line: LINE=easy
+// (default, the rated route), hard or extreme; it keeps to that line's lane and picks its way round
+// the boulders in it, driving over the crawl-over rocks (low ones, and the packed `over` boulders).
+// usage: [LINE=easy|hard|extreme] node test/trails.mjs [ids] [secs] [diff] [trail name filter]
 import RAPIER from '@dimforge/rapier3d-compat';
 import { generateRocks, generateTrees, buildTerrainPhysics, heightAt, TRAILS, pathPoint } from '../src/terrain.js';
 import { ALL_VEHICLES } from '../src/specs.js';
 import { Vehicle } from '../src/vehicle.js';
 await RAPIER.init();
 const H=1/200;
+const LINE=(process.env.LINE||'easy').toLowerCase();
 const world=new RAPIER.World({x:0,y:-9.81,z:0}); world.timestep=H; world.numSolverIterations=8;
 const rocks=generateRocks();
-for (const r of rocks){ let m=0; for(let i=0;i<r.pts.length;i+=3) m=Math.max(m,Math.hypot(r.pts[i],r.pts[i+2])); r.rad=m; let ym=-1e9; for(let i=1;i<r.pts.length;i+=3) ym=Math.max(ym,r.pts[i]); r.top=r.y+ym; }
-// (embedded rocks are low crawl-over relief: driven over, not around)
-function pickLine(t,s,spec){ // lateral offset with most clearance from boulders over the next 8 m
-  const hw=t.width/2; let bestO=0,bestC=-1e9;
-  for(let o=-hw+0.6;o<=hw-0.6;o+=0.25){ let c=1e9;
-    for(let q=s;q<s+8;q+=1){ const p=pathPoint(t,q); const x=p.x-p.tz*o, z=p.z+p.tx*o;
-      for(const r of rocks){ if(r.ledge||r.embed) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
-    c = Math.min(c, 2.5) - Math.abs(o)*0.05; if(c>bestC){bestC=c;bestO=o;} } // past 2.5 m of room, stay central
-  return bestO; }
+for (const r of rocks){ let m=0; for(let i=0;i<r.pts.length;i+=3) m=Math.max(m,Math.hypot(r.pts[i],r.pts[i+2])); r.rad=m; let ym=-1e9; for(let i=1;i<r.pts.length;i+=3) ym=Math.max(ym,r.pts[i]); r.top=r.y+ym; r.topH=r.top-heightAt(r.x,r.z); }
+// (embedded rocks are low crawl-over relief: driven over, not around; so are low rocks and the packed crawl-overs)
+const avoid=rocks.filter(r=>!r.ledge&&!r.embed&&r.crux?.kind!=='over'&&!(r.topH<0.33));
+const lineOf=(t,s)=>t.lineAt?t.lineAt(LINE,s):0;
+function pickLine(t,s,spec){ // lateral offset with most clearance from boulders over the next 8 m, near the marked line
+  const L=lineOf(t,s), hw=(t.corridor?Math.min(...[0,4,8].map(q=>widthOf(t,s+q))):t.width)/2, span=t.corridor?1.6:hw;
+  let bestO=L,bestC=-1e9;
+  for(let o=Math.max(-hw+0.6,L-span);o<=Math.min(hw-0.6,L+span)+1e-6;o+=0.25){ let c=1e9;
+    for(let q=s;q<s+8;q+=1){ const p=pathPoint(t,q); const lq=lineOf(t,q)-L; const x=p.x-p.tz*(o+lq), z=p.z+p.tx*(o+lq);
+      for(const r of avoid){ if(Math.abs(r.x-x)>5||Math.abs(r.z-z)>5) continue; const d=Math.hypot(r.x-x,r.z-z)-r.rad-spec.track/2; if(d<c) c=d; } }
+    c = Math.min(c, 2.5) - Math.abs(o-L)*(t.corridor?0.15:0.05); if(c>bestC){bestC=c;bestO=o;} } // past 2.5 m of room, stay on the line
+  return bestO-L; }
+function widthOf(t,s){ const P=t.pts; if(P[0].w===undefined) return t.width; const i=Math.max(0,Math.min(P.length-1,P.findIndex(p=>p.s>=s))); return P[i<0?P.length-1:i].w; }
 const terrain=buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
 const ids=(process.argv[2]||'lc70,taco,wrx').split(',');
 const secs=+(process.argv[3]||120);
 for (const id of ids) {
   const spec=ALL_VEHICLES.find(v=>v.id===id); const res=[];
-  for (const t of TRAILS.filter(t=>(!process.argv[4]||t.diff===process.argv[4]) && t.graded!==false)) { // (the desert's dune route runs in test/desert.mjs)
+  for (const t of TRAILS.filter(t=>(!process.argv[4]||process.argv[4]==='all'||t.diff===process.argv[4]) && (!process.argv[5]||t.name.toLowerCase().includes(process.argv[5].toLowerCase())) && t.graded!==false)) { // (the desert's dune route runs in test/desert.mjs)
     const p0=pathPoint(t,4);
     const car=new Vehicle(RAPIER, world, spec, terrain, {x:p0.x,y:heightAt(p0.x,p0.z)+spec.tire.radius-spec.axleY+0.5,z:p0.z}, Math.atan2(-p0.tx,-p0.tz));
     car.airedDown=true; const d=car.dt; d.range=spec.ranges.low?'low':'high'; d.gear=1; d.lockF=spec.lockers.front; d.lockR=true;
@@ -34,7 +43,7 @@ for (const id of ids) {
         let bs=s, bd=1e9; for (let q=Math.max(0,s-10); q<Math.min(t.length,s+20); q+=0.5){ const pp=pathPoint(t,q); const dd=Math.hypot(pp.x-p.x,pp.z-p.z); if(dd<bd){bd=dd;bs=q;} }
         s=bs; best=Math.max(best,s);
         if (i%100===0) car._line=pickLine(t,s+2,spec);
-        const lk=pathPoint(t,Math.min(t.length,s+4+spec.wheelbase)); const o=car._line||0; const look={x:lk.x-lk.tz*o,z:lk.z+lk.tx*o};
+        const sl=Math.min(t.length,s+4+spec.wheelbase), lk=pathPoint(t,sl); const o=(car._line||0)+lineOf(t,sl); const look={x:lk.x-lk.tz*o,z:lk.z+lk.tx*o};
         const {heading}=car.attitude(); const want=Math.atan2(-(look.x-p.x),-(look.z-p.z));
         let err=want-heading; err=Math.atan2(Math.sin(err),Math.cos(err));
         inp.steer=Math.max(-1,Math.min(1,err*2.2));

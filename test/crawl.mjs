@@ -1,5 +1,6 @@
 // Autopilot on The Gauntlet (MAP=crawl): drive the course from the start gate (or from any
 // stage gate) and report, per rig, the furthest stage reached and the time spent in each stage.
+// Through the wide stages it keeps to one marked line: LINE=easy (default), hard or extreme.
 // Unlike test/trails.mjs it drives each rig as it comes (its own lockers, 4WD, low range if it
 // has one) and paces by stage: brisk on the bog, slow on ledges.
 // usage: node test/crawl.mjs [ids=lc70,taco,wrx] [fromStage=1] [toStage=12] [stuckSecs=45]
@@ -22,13 +23,16 @@ const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 }); world.timestep = H; wo
 const rocks = generateRocks();
 for (const r of rocks) { let m = 0, top = -1e9; for (let i = 0; i < r.pts.length; i += 3) { m = Math.max(m, Math.hypot(r.pts[i], r.pts[i + 2])); top = Math.max(top, r.pts[i + 1]); } r.rad = m; r.topH = r.y + top - heightAt(r.x, r.z); }
 // line choice keys on the rocks worth avoiding; low crawl-over rocks (under 0.33 m) are driven over
-const near = rocks.filter((r) => !r.ledge && r.topH > 0.33);
-function pickLine(s, spec) { // lateral offset with the most clearance from boulders over the next 8 m
-  const st = MAP.stageAt(s), hw = st.width / 2; let bestO = 0, bestC = -1e9;
-  for (let o = -hw + 0.6; o <= hw - 0.6; o += 0.25) {
+const near = rocks.filter((r) => !r.ledge && !r.over && r.topH > 0.33); // (the packed crawl-overs of an extreme garden line are driven over)
+// the line driven through the wide stages: LINE=easy (default, the rated route), hard or extreme
+const LINE = (process.env.LINE || 'easy').toLowerCase();
+const lineOf = (s) => t.lineAt(LINE, s);
+function pickLine(s, spec) { // lateral offset with the most clearance from boulders over the next 8 m, within 1.4 m of the line
+  const L = lineOf(s), hw = t.pts[Math.min(t.pts.length - 1, Math.round(s / 0.5))].w / 2; let bestO = L, bestC = -1e9;
+  for (let o = Math.max(-hw + 0.6, L - 1.4); o <= Math.min(hw - 0.6, L + 1.4) + 1e-6; o += 0.25) {
     let c = 1e9;
     for (let q = s; q < s + 8; q += 1) {
-      const p = pathPoint(t, q), x = p.x - p.tz * o, z = p.z + p.tx * o;
+      const p = pathPoint(t, q), oq = o + lineOf(q) - L, x = p.x - p.tz * oq, z = p.z + p.tx * oq;
       for (const r of near) {
         if (Math.abs(r.x - x) > 4 || Math.abs(r.z - z) > 4) continue;
         // tall rocks: keep the whole truck clear; knee-high ones (notch flanks, crawl-overs) the
@@ -37,9 +41,9 @@ function pickLine(s, spec) { // lateral offset with the most clearance from boul
         if (d < c) c = d;
       }
     }
-    c = Math.min(c, 2.5) - Math.abs(o) * 0.05; if (c > bestC) { bestC = c; bestO = o; }
+    c = Math.min(c, 2.5) - Math.abs(o - L) * 0.1; if (c > bestC) { bestC = c; bestO = o; }
   }
-  return bestO;
+  return bestO - L;
 }
 const terrain = buildTerrainPhysics(RAPIER, world, rocks, generateTrees());
 const fmt = (x) => (x == null ? '   -  ' : `${x.toFixed(0).padStart(4)}s `);
@@ -70,7 +74,7 @@ for (const id of ids) {
       if (best >= finishS) break;
       if (el - lastGain > stuckSecs) break;
       if (i % 100 === 0) car._line = pickLine(s + 2, spec);
-      const lk = pathPoint(t, Math.min(t.length, Math.max(s, 0) + 4 + spec.wheelbase)), o = car._line || 0;
+      const sl = Math.min(t.length, Math.max(s, 0) + 4 + spec.wheelbase), lk = pathPoint(t, sl), o = (car._line || 0) + lineOf(sl);
       const look = sStart < 0 && best < 5 && p.x < t.pts[0].x - 2 ? { x: t.pts[0].x, z: t.pts[0].z } : { x: lk.x - lk.tz * o, z: lk.z + lk.tx * o };
       const { heading } = car.attitude(), want = Math.atan2(-(look.x - p.x), -(look.z - p.z));
       let err = want - heading; err = Math.atan2(Math.sin(err), Math.cos(err));

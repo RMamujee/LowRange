@@ -4,8 +4,9 @@
 // how far it got, the worst roll it saw and any flip resets (a flipped truck is put back on its
 // wheels and counted; a run with a flip doesn't count as finished).
 // Line choice: tall boulders and the gully banks are avoided; the crawl-over rocks (cobbles,
-// kickers, the rib) are driven over or straddled, as a driver would. On the slab face the
-// autopilot takes a named line (LINE=easy|hard|extreme, default easy).
+// kickers, the rib) are driven over or straddled, as a driver would. On the slab face, and on the
+// sections with lanes (Camber Ridge, Cobble Gully), the autopilot takes a named line
+// (LINE=easy|hard|extreme, default easy).
 // usage: node test/coursedrive.mjs <course=slab|camber|gully|all> [ids=lc70,taco,wrx] [fromSection=1] [stuckSecs=45]
 process.env.MAP = 'crawl';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -33,19 +34,22 @@ function drive(C, id) {
   const near = rocks.filter((r) => !r.embed && !r.cobble && !r.kicker && !r.rib && !r.cstep && r.topH > 0.33 && C.pts.some((p, i) => i % 8 === 0 && Math.hypot(p.x - r.x, p.z - r.z) < 16));
   const lineOf = (st) => { const l = st.lines?.find((q) => q[1] === LINE); return l ? l[0] : null; };
   function pickLine(s) {
-    const st = C.stageAt(s), u = s - st.s0;
-    if (st.ribs) return 0;                                     // straddle the spine
+    const st = C.stageAt(s), u = s - st.s0, ln = LINE.toLowerCase();
+    // sections with lanes (Camber Ridge, Cobble Gully): keep to the chosen lane's line, picking a way
+    // round the boulders within 1.4 m of it
+    const lanes = C.lineAt && st.bands?.length, L = lanes ? C.lineAt(ln, s) : 0;
+    if (st.ribs && (!lanes || (st.ribs.lane ?? 'hard') === ln)) return L; // straddle the spine
     const want = lineOf(st);
     if (want !== null) return want * Math.min(1, smooth01((u - 3) / 9)) * Math.min(1, smooth01((st.len - u - 3) / 8)); // onto the line once the face widens
     const hw = C.pts[Math.min(C.pts.length - 1, Math.round(s / 0.5))].w / 2;
-    let bestO = 0, bestC = -1e9;
-    for (let o = -hw + 0.9; o <= hw - 0.9; o += 0.25) {
+    let bestO = L, bestC = -1e9;
+    for (let o = lanes ? Math.max(-hw + 0.9, L - 1.4) : -hw + 0.9; o <= (lanes ? Math.min(hw - 0.9, L + 1.4) : hw - 0.9); o += 0.25) {
       let c = 1e9;
       for (let q = s; q < s + 8; q += 1) {
         const p = pathPoint(C, q), x = p.x - p.tz * o, z = p.z + p.tx * o;
         for (const r of near) { if (Math.abs(r.x - x) > 4 || Math.abs(r.z - z) > 4) continue; const d = Math.hypot(r.x - x, r.z - z) - r.rad - spec.track / 2 - 0.15; if (d < c) c = d; }
       }
-      c = Math.min(c, 2.5) - Math.abs(o) * 0.08; if (c > bestC) { bestC = c; bestO = o; }
+      c = Math.min(c, 2.5) - Math.abs(o - L) * 0.08; if (c > bestC) { bestC = c; bestO = o; }
     }
     return bestO;
   }
@@ -111,7 +115,7 @@ function smooth01(t) { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * 
 const list = which === 'all' ? COURSES : COURSES.filter((C) => C.id === which);
 const summary = [];
 for (const C of list) {
-  console.log(`${C.name} (${C.id}, ${C.diff}, ${C.length.toFixed(0)} m)${C.stages.some((q) => q.lines) ? `, ${LINE.toLowerCase()} line` : ''}`);
+  console.log(`${C.name} (${C.id}, ${C.diff}, ${C.length.toFixed(0)} m)${C.stages.some((q) => q.lines) || C.lineAt ? `, ${LINE.toLowerCase()} line` : ''}`);
   for (const id of ids) {
     const r = drive(C, id);
     const where = r.reached ? `FINISHED in ${r.times.filter((x) => x != null).reduce((a, b) => a + b, 0).toFixed(0)} s` : `stuck in section ${r.last.n} ${r.last.name} at u=${r.u.toFixed(1)} m`;
