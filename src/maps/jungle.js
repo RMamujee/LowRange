@@ -370,7 +370,7 @@ export const TRAILS = [
   // Cliffside Ledge: the shelf under the north cliffs. The sea cliff is on the -lat side, so the
   // corridor widens inland (+lat), cut back into the cliff. Easy line (centre): 0.12-0.16 m ledges and
   // crawl rocks under 0.2 m (the Rally Sedan's floor is 0.25 m); hard 0.26-0.3 m; extreme 0.38-0.42 m.
-  buildPath({ name: 'Cliffside Ledge', kind: 'trail', diff: 'green', pts: ledgePts, width: 7, camber: 0.05, mat: 'dirt', maxGrade: 0.17,
+  buildPath({ name: 'Cliffside Ledge', kind: 'trail', diff: 'green', pts: ledgePts, width: 5.8, camber: 0.05, mat: 'dirt', maxGrade: 0.17,
     cross: { k: 1, up: 0.12, down: 0.05, from: 2.4 },
     crawl: { base: [6, 3.2], cruxes: [
       { name: 'Shelf Steps', at: 0.12, len: 16, lanes: [
@@ -398,7 +398,7 @@ export const TRAILS = [
   // Riverbed Run: the corridor takes in the creek floor between its valley walls, so the lines cross
   // the low-flow channel. Easy line ledges 0.26-0.30 m, hard 0.36-0.40, extreme 0.45-0.50; it
   // pinches back to its mouth through the Plantation ford (the road keeps its own surface).
-  buildPath({ name: 'Riverbed Run', kind: 'trail', diff: 'blue', pts: riverbedPts(), width: 7, mat: 'river', win: 2, maxGrade: 0.26,
+  buildPath({ name: 'Riverbed Run', kind: 'trail', diff: 'blue', pts: riverbedPts(), width: 5.4, mat: 'river', win: 2, maxGrade: 0.26,
     cross: { k: 1, up: 0.22, down: 0.12, from: 2.4 },
     crawl: { base: [5, 5], cruxes: [
       { name: 'Boulder Run', s: 36, len: 16, lanes: [
@@ -418,7 +418,7 @@ export const TRAILS = [
   // of Lava Point and back up its north flank to the lighthouse. The sea is on the +lat side, so the
   // corridor widens inland (-lat). Easy line (centre) ledges 0.26-0.32 m, hard 0.38-0.42, extreme
   // 0.48-0.52; ledges skewed so they can (and on the easy line should) be taken at an angle.
-  buildPath({ name: 'Basalt Garden', kind: 'trail', diff: 'black', width: 7, mat: 'basalt',
+  buildPath({ name: 'Basalt Garden', kind: 'trail', diff: 'black', width: 5.4, mat: 'basalt',
     pts: [[BG0.x, BG0.z], [332, -154], [350, -172], [364, -196], [371, -222], [367, -246], [355, -264], [336, -273], [315, -270], [300, -258], [302, -242], [318, -236], [LIGHTHOUSE.x, LIGHTHOUSE.z]], end: { pad: LIGHTHOUSE }, minH: 2.2, maxGrade: 0.27,
     cross: { k: 1, up: 0.14, down: 0.08, from: 2.4 },
     crawl: { base: [3.6, 6], open: [46, 200], cruxes: [
@@ -451,7 +451,7 @@ export const TRAILS = [
   // the rest a ramp behind), the hard lane the full rise (0.32-0.45), the extreme lane a 0.12 m lip proud of the
   // tread (0.44-0.57); the hard and extreme lanes swap sides from flight to flight. Big rocks lock
   // each band's ends.
-  buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 7, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
+  buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 5.6, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
     steps: [24, 31, 38, 52, 59, 66, 80, 86.5, 93].map((s, k) => ({ s, rise: [0.32, 0.36, 0.4, 0.4, 0.42, 0.44, 0.44, 0.45, 0.45][k], depth: 3.0 })),
     cross: { k: 0.3, up: 0.1, down: 0.1, from: 2.4 },
     crawl: { base: [4.5, 4.5], ends: 8, cruxes: [
@@ -466,10 +466,15 @@ export const TRAILS = [
 // wide crawls: corridor widths, lines, cruxes (src/maps/widecrawl.js); the shoulder is where the corridor edge fades into the ground
 const WIDE_SHOULDER = 5;
 for (const t of TRAILS) if (t.crawl) {
-  // where a crawl crosses a road between its ends (Riverbed Run through the Plantation ford) the corridor pinches to its mouth
-  const near = t.pts.filter((q) => q.s > 20 && q.s < t.length - 20 && ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 6)));
-  if (near.length) t.crawl.pinch = [[Math.min(...near.map((q) => q.s)), Math.max(...near.map((q) => q.s))]];
-  setupWide(t, t.crawl); t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; }
+  // wherever a crawl comes within reach of a road between its ends (Riverbed Run through and beside the
+  // Plantation ford) the corridor pinches to its mouth, so the road keeps its own surface
+  t.crawl.pinch = [];
+  for (const q of t.pts) {
+    if (q.s < 20 || q.s > t.length - 20 || !ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 9))) continue;
+    const last = t.crawl.pinch.at(-1);
+    if (last && q.s - last[1] < 10) last[1] = q.s; else t.crawl.pinch.push([q.s, q.s]);
+  }
+  setupWide(t, t.crawl); t.endShoulder = t.shoulder; t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; } // (endShoulder: the narrow trail's, kept at the gate mouths so the road junctions bake as before)
 const PATHS = [...ROADS, ...TRAILS];
 
 // ---------------------------------------------------------------- bridges
@@ -598,9 +603,10 @@ function bake() {
         }
       }
       for (const pi of touched) if (cD[pi] > cHw[pi] + PATHS[pi].shoulder) cD[pi] = Infinity; // (out of reach on this side)
-      let best = null;
+      let best = null, onRoadTread = false; // (onRoadTread: on a road's tread, where a wide crawl bakes and scores as the narrow trail did)
+      for (const pi of touched) if (cD[pi] !== Infinity && PATHS[pi].kind === 'road' && cD[pi] < PATHS[pi].width / 2 + 1) onRoadTread = true;
       // (a wide crawl scores by how far inside its corridor the vertex is, as a narrow one did)
-      for (const pi of touched) { if (cD[pi] === Infinity) continue; const P_ = PATHS[pi], score = cD[pi] - (P_.kind === 'road' ? 1.5 : P_.wide ? cHw[pi] - P_.width / 2 : 0); if (!best || score < best.score) best = { d: cD[pi], pi, lat: cLat[pi], s: cS[pi], ph: cH[pi], hw: cHw[pi], score }; }
+      for (const pi of touched) { if (cD[pi] === Infinity) continue; const P_ = PATHS[pi], score = cD[pi] - (P_.kind === 'road' ? 1.5 : P_.wide && !onRoadTread ? cHw[pi] - P_.width / 2 : 0); if (!best || score < best.score) best = { d: cD[pi], pi, lat: cLat[pi], s: cS[pi], ph: cH[pi], hw: cHw[pi], score }; }
       let pathId = -1, sink = 0, vRut = 0;
       const hNat = h; // the ground before any path (a wide crawl's corridor follows its cross-slope)
       if (best) {
@@ -611,7 +617,9 @@ function bake() {
           const q = PATHS[cc.pi], qhw = q.width / 2, shw = cHw[pi];
           // the creek stays under a bridge deck, and nothing under it may reach up to the planks
           if (q.bridges.length && onBridge(q, cc.s)) { if (cc.d < qhw + 0.8) under = Math.min(under, cc.ph - 0.3); continue; }
-          const w = 1 - smooth(shw, shw + q.shoulder, cc.d);
+          const sh = q.wide ? lerp(q.endShoulder, q.shoulder, q.pinAt(cc.s)) : q.shoulder;
+          // (on a road's tread a wide crawl weighs no more than the narrow trail did: the roads bake as before)
+          const w = Math.min(1 - smooth(shw, shw + sh, cc.d), q.wide && onRoadTread ? 1 - smooth(qhw, qhw + q.endShoulder, cc.d) : 1);
           if (w <= 0) continue;
           let surf = cc.ph;
           const lat = clamp(cc.lat, -qhw - 0.5, qhw + 0.5);
@@ -637,7 +645,7 @@ function bake() {
             surf += potholes(x, z, rl.holes[0], rl.holes[1], rl.holes[2], rl.holes[3], cc.pi * 17) * ends;
             if (q.camber) surf += lat * q.camber * Math.sin(cc.s * 0.05) * ends;
             if (q.diff === 'black' && !q.wide) surf += lat * 0.15 * Math.sin(cc.s * 0.045) * ends;
-            if (q.wide) {
+            if (q.wide && !onRoadTread) { // (not on a road's tread: there it bakes as the narrow trail did)
               // off the easy line the corridor follows the ground's own cross-slope, within limits,
               // then the cruxes' ground features (slabs, off-camber shelves, holes)
               const fo = q.cross, al = Math.abs(cc.lat), u = Math.max(0, al - fo.from);
@@ -650,7 +658,7 @@ function bake() {
         }
         if (den > 0) h = lerp(h, num / den, padCore ? 0 : W);
         h = Math.min(h, under);
-        const p = PATHS[best.pi], hw = best.hw;
+        const p = PATHS[best.pi], hw = onRoadTread ? p.width / 2 : best.hw;
         if (best.d < hw + 0.5 && !padCore) {
           pathId = best.pi;
           const n = fbm(x * 0.08 + 9, z * 0.08 - 4, 3), f = best.s / p.length;

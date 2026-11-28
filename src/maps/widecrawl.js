@@ -85,7 +85,7 @@ export function setupWide(t, def) {
     // stretches, e.g. where the trail crosses a road: the road keeps its own surface)
     let pin = smooth(ends, ends + 12, Math.min(s, L - s));
     for (const [a, b] of def.pinch ?? []) pin = Math.min(pin, 1 - smooth(a - 12, a, s) * smooth(b + 12, b, s));
-    wl[i] = lerp(mouth, Math.max(mouth, l), pin); wr[i] = lerp(mouth, Math.max(mouth, r), pin);
+    wl[i] = lerp(mouth, Math.max(mouth, l), pin); wr[i] = lerp(mouth, Math.max(mouth, r), pin); p.pin = pin;
     reqL[i] = lerp(mouth, Math.max(mouth, reqL[i]), pin); reqR[i] = lerp(mouth, Math.max(mouth, reqR[i]), pin);
   });
   // soften the edges along the trail (a corridor, not a staircase of widths)
@@ -104,6 +104,7 @@ export function setupWide(t, def) {
   t.cruxes = cruxes;
   t.maxHalf = Math.max(...wl, ...wr);
   t.halfWidthAt = (s) => { const i = idxAt(P, s), a = P[i], b = P[Math.min(P.length - 1, i + 1)], f = clamp((s - a.s) / Math.max(1e-6, b.s - a.s), 0, 1); return { left: lerp(a.wl, b.wl, f), right: lerp(a.wr, b.wr, f) }; };
+  t.pinAt = (s) => { const i = idxAt(P, s), a = P[i], b = P[Math.min(P.length - 1, i + 1)], f = clamp((s - a.s) / Math.max(1e-6, b.s - a.s), 0, 1); return lerp(a.pin, b.pin, f); }; // 0 at the gate mouths and pinches, 1 where the corridor is free to widen
   return t;
 }
 

@@ -293,7 +293,7 @@ const TRAIL_DEFS = [
     waypoints: [[95, -112], [148, -185], [268, -277], [399, -318], [468, -170]] },
   // Coyote Wash: meandering across the fans east of Needle Butte to the Basin Loop; the easy line (centre) for every rig: 0.12-0.16 m ledges and
   // crawl rocks under 0.2 m (the Rally Sedan's floor is 0.25 m); hard 0.26-0.3 m; extreme 0.38-0.42.
-  { name: 'Coyote Wash', diff: 'green', width: 7, maxGrade: 0.17,
+  { name: 'Coyote Wash', diff: 'green', width: 5.6, maxGrade: 0.17,
     pts: [[-140, 150], [-98, 190], [-160, 226], [-100, 262], [-96, 310], [-150, 352], [-96, 392], [-150, 430], [-118, 470]], // (east of Needle Butte, to the Basin Loop)
     cross: { k: 0.8, up: 0.1, down: 0.1, from: 2.4 },
     crawl: { base: [5.5, 5.5], cruxes: [
@@ -322,7 +322,7 @@ const TRAIL_DEFS = [
   // Whaleback Slickrock: over the dome and back, the tread following the slab (follow 0.7). Easy line
   // ledges 0.26-0.30 m and the dome's own slabs; hard 0.36-0.40 m, steeper slab faces, an off-camber
   // traverse; extreme 0.45-0.50 m ledges and the steepest faces.
-  { name: 'Whaleback Slickrock', diff: 'blue', width: 7, maxGrade: 0.42, follow: 0.7,
+  { name: 'Whaleback Slickrock', diff: 'blue', width: 6, maxGrade: 0.42, follow: 0.7,
     pts: [[-420, 300], [-380, 330], [-338, 358], [-300, 376], [-262, 362], [-250, 330], [-276, 305], [-240, 288], [-210, 300], [-185, 312], [-170, 345], [-176, 410], [-185, 478]],
     cross: { k: 1, up: 0.22, down: 0.22, from: 2.4 },
     crawl: { base: [6, 6], cruxes: [
@@ -354,7 +354,7 @@ const TRAIL_DEFS = [
   // channel (easy line, ledges 0.28-0.32 m), a slot along the far wall (hard: chockstones,
   // V-notches, 0.38-0.42 m ledges) and an open bench on the other side (extreme: 0.48-0.52 m
   // ledges, a slab, big boulders); between the braids the canyon pinches to 13 m.
-  { name: 'Knucklebone Canyon', diff: 'black', width: 7, maxGrade: 0.3, wideShoulder: 2,
+  { name: 'Knucklebone Canyon', diff: 'black', width: 5.2, maxGrade: 0.3, wideShoulder: 2,
     pts: [[318, 222], [324, 206], [334, 186], [320, 156], [342, 124], [322, 92], [345, 58], [325, 26], [334, -4], [328, -30], [316, -52]],
     cross: { k: 0.3, up: 0.1, down: 0.1, from: 2.4 },
     crawl: { base: [5, 5], cruxes: [
@@ -391,7 +391,7 @@ const TRAIL_DEFS = [
   // floor (locked at both ends by big rocks): the easy lane 0.1 m under the band's rise and never over
   // 0.38 m (the rest a ramp behind), the hard lane the full rise to 0.5 m, the extreme lane a 0.12 m
   // lip proud of the tread behind, to 0.6 m.
-  { name: 'Redwall Stairway', diff: 'dblack', width: 7, maxGrade: 0.34, steps: { seed: 77, from: 20, to: 14, every: 9.5, rise: [0.45, 0.62], depth: 3.4 },
+  { name: 'Redwall Stairway', diff: 'dblack', width: 5.4, maxGrade: 0.34, steps: { seed: 77, from: 20, to: 14, every: 9.5, rise: [0.45, 0.62], depth: 3.4 },
     pts: [[114, 428], [140, 431], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388], [292, 380]],
     cross: { k: 0.2, up: 0.08, down: 0.08, from: 2.4 },
     crawl: { base: [5, 5], ends: 10, cruxes: [
@@ -535,9 +535,13 @@ for (const d of TRAIL_DEFS) TRAILS.push(buildPath(d, 'trail', ROADS));
 const WIDE_SHOULDER = 6;
 for (const t of TRAILS) if (t.crawl) {
   // where a crawl passes close to a road between its ends the corridor pinches to its mouth (the road keeps its surface)
-  const near = t.pts.filter((q) => q.s > 20 && q.s < t.length - 20 && ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 8)));
-  if (near.length) t.crawl.pinch = [[Math.min(...near.map((q) => q.s)), Math.max(...near.map((q) => q.s))]];
-  setupWide(t, t.crawl); t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; }
+  t.crawl.pinch = [];
+  for (const q of t.pts) {
+    if (q.s < 20 || q.s > t.length - 20 || !ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 9))) continue;
+    const last = t.crawl.pinch.at(-1);
+    if (last && q.s - last[1] < 10) last[1] = q.s; else t.crawl.pinch.push([q.s, q.s]);
+  }
+  setupWide(t, t.crawl); t.endShoulder = t.shoulder; t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; } // (endShoulder: the narrow trail's, kept at the gate mouths so the road junctions bake as before)
 const PATHS = [...ROADS, ...TRAILS];
 const GRADED = PATHS.filter((p) => p.graded);
 
@@ -633,15 +637,18 @@ function bake() {
         }
       }
       for (const [k, c] of perPath) if (c.d > c.hw + PATHS[c.pi].shoulder) perPath.delete(k); // (out of reach on this side)
-      let best = null;
-      for (const c of perPath.values()) if (!best || c.score < best.score) best = c;
+      let best = null, onRoadTread = false; // (onRoadTread: on a road's tread, where a wide crawl bakes and scores as the narrow trail did)
+      for (const c of perPath.values()) if (PATHS[c.pi].kind === 'road' && c.d < PATHS[c.pi].width / 2 + 1) onRoadTread = true;
+      for (const c of perPath.values()) { const sc = PATHS[c.pi].wide && onRoadTread ? c.d : c.score; if (!best || sc < best.sc) best = { ...c, sc }; }
       let pathId = -1, wideTone = 0;
       if (best) {
         let num = 0, den = 0, W = 0;
         const hNat = h; // the landscape before any path (a wide crawl's corridor follows its cross-slope)
         for (const c of perPath.values()) {
           const q = PATHS[c.pi], qhw = c.hw;
-          const w = 1 - smooth(qhw, qhw + q.shoulder, c.d);
+          const sh = q.wide ? lerp(q.endShoulder, q.shoulder, q.pinAt(c.s)) : q.shoulder;
+          // (on a road's tread a wide crawl weighs no more than the narrow trail did: the roads bake as before)
+          const w = Math.min(1 - smooth(qhw, qhw + sh, c.d), q.wide && onRoadTread ? 1 - smooth(q.width / 2, q.width / 2 + q.endShoulder, c.d) : 1);
           if (w <= 0) continue;
           let surf = c.ph;
           if (q.kind === 'road') {
@@ -657,7 +664,7 @@ function bake() {
             // (a wide crawl: no relief for the first and last 4 m, eased in by 16 m, so the gate benches stay level)
             const ends = smooth(q.wide ? 4 : 0, q.wide ? 16 : 10, Math.min(c.s, q.length - c.s)) * (q.steps && q.steps.some((st) => c.s > st.s - 2.5 && c.s < st.s + st.depth + 1.2) ? 0 : 1), rl = RELIEF[q.diff];
             surf += lumps(x, z, rl.lumps) * ends + potholes(x, z, rl.holes[0], rl.holes[1], rl.holes[2], rl.holes[3], c.pi * 17) * ends;
-            if (q.wide) {
+            if (q.wide && !onRoadTread) { // (not on a road's tread: there it bakes as the narrow trail did)
               // off the easy line the corridor follows the landscape's own cross-slope, within limits,
               // then the cruxes' ground features (slabs, off-camber shelves, holes, gullies)
               const fo = q.cross, al = Math.abs(c.lat), u = Math.max(0, al - fo.from);
@@ -669,7 +676,7 @@ function bake() {
           num += surf * ww; den += ww; W = Math.max(W, w);
         }
         if (den > 0) h = lerp(h, num / den, W);
-        const p = PATHS[best.pi], hw = best.hw;
+        const p = PATHS[best.pi], hw = onRoadTread ? p.width / 2 : best.hw;
         if (best.d < hw + 0.5) {
           pathId = best.pi; depth = 0;
           if (p.kind === 'road') {
