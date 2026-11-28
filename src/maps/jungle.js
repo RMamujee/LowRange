@@ -4,7 +4,7 @@
 // riverbed, basalt boulder field, a rock staircase to the rim); sand beaches and a bay with a
 // dock. The sea is the map's edge: shallow surf drives, deep water recovers the truck to shore.
 import { MAT, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
-import { setupWide, shapeAt, wideRocks, wideRelief } from './widecrawl.js';
+import { setupWide, shapeAt, wideRocks, wideRelief, wideStep } from './widecrawl.js';
 
 export const ID = 'jungle';
 export const NAME = 'Coralume Island';
@@ -332,9 +332,10 @@ export const ROADS = [COAST_ROAD, MOUNTAIN, PLANTATION, LIGHT_LANE, FERN, RIDGE_
 
 // ---------------------------------------------------------------- crawls
 // Cliffside Ledge (green): a shelf cut into the north sea cliffs, below the coast road
-const ledgePts = [fromCoast(-2.34)];
-for (let th = -2.27; th <= -1.42; th += 0.07) ledgePts.push(shore(th, 11 + 3 * Math.sin(th * 9)));
-{ const q = coastAt(-1.36); ledgePts.push([q.x - q.nx * 13, q.z - q.nz * 13], [q.x, q.z]); } // (meets the road square on)
+// (from the coast road at -2.62 rad round to -1.16, short of the Fern Gully junction)
+const ledgePts = [fromCoast(-2.62)];
+for (let th = -2.55; th <= -1.25; th += 0.07) ledgePts.push(shore(th, 11 + 3 * Math.sin(th * 9)));
+{ const q = coastAt(-1.16); ledgePts.push([q.x - q.nx * 13, q.z - q.nz * 13], [q.x, q.z]); } // (meets the road square on)
 // Riverbed Run (blue): up the rocky lower creek from the coast road bridge to the Plantation ford
 function riverbedPts() {
   // from the coast road just upstream of its bridge (the deck is too low to drive under) down
@@ -366,46 +367,109 @@ const BG0 = coastAt(-0.42);
 // Ember Stairs (double black): a spiral rock staircase from the summit lot to the crater rim
 const STAIR_PTS = [[SUMMIT_LOT.x, SUMMIT_LOT.z], polar(77, 2.4), polar(72, 2.66), polar(66, 2.9), polar(59, 3.12), polar(52, -2.95), polar(45, -2.82), [RIM.x, RIM.z]];
 export const TRAILS = [
-  buildPath({ name: 'Cliffside Ledge', kind: 'trail', diff: 'green', pts: ledgePts, width: 5.8, camber: 0.05, mat: 'dirt' }),
-  buildPath({ name: 'Riverbed Run', kind: 'trail', diff: 'blue', pts: riverbedPts(), width: 5.4, mat: 'river', win: 2, maxGrade: 0.26 }),
+  // Cliffside Ledge: the shelf under the north cliffs. The sea cliff is on the -lat side, so the
+  // corridor widens inland (+lat), cut back into the cliff. Easy line (centre): 0.12-0.16 m ledges and
+  // crawl rocks under 0.2 m (the Rally Sedan's floor is 0.25 m); hard 0.26-0.3 m; extreme 0.38-0.42 m.
+  buildPath({ name: 'Cliffside Ledge', kind: 'trail', diff: 'green', pts: ledgePts, width: 7, camber: 0.05, mat: 'dirt', maxGrade: 0.17,
+    cross: { k: 1, up: 0.12, down: 0.05, from: 2.4 },
+    crawl: { base: [6, 3.2], cruxes: [
+      { name: 'Shelf Steps', at: 0.12, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.12, 0.16], skew: 0.25, alt: true },
+        { line: 'hard', lat: 4.8, f: 'ledge', n: 2, top: [0.26, 0.3], skew: -0.25, alt: true },
+        { line: 'extreme', lat: 8.8, f: 'ledge', n: 2, top: [0.38, 0.42], skew: 0.2, alt: true }] },
+      { name: 'Rubble Bench', at: 0.26, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.16, every: 3 },
+        { line: 'hard', lat: 5.2, f: 'boulders', size: [0.5, 0.8], gap: 2.8, top: 0.32 }] },
+      { name: 'The Lean', at: 0.4, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.14, every: 4 },
+        { line: 'hard', lat: 5, f: 'camber', tilt: 0.18, from: 2.6, crawl: { top: 0.22, every: 3.5 } },
+        { line: 'extreme', lat: 9.2, f: 'holes', depth: 0.3 }] },
+      { name: 'Washout', at: 0.54, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'holes', depth: 0.14, every: 4 },
+        { line: 'hard', lat: 4.8, f: 'ledge', n: 3, top: [0.26, 0.3], skew: 0.3, alt: true }] },
+      { name: 'Slab Ramp', at: 0.7, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.15, every: 3.5 },
+        { line: 'hard', lat: 5, f: 'slab', h: 0.8, up: 0.3, down: 0.35, side: 0.6 },
+        { line: 'extreme', lat: 9.4, f: 'slab', h: 1.3, up: 0.45, down: 0.5, side: 0.8 }] },
+      { name: 'Boulder Bay', at: 0.86, len: 18, lanes: [
+        { line: 'easy', lat: 0, w: 6.6, f: 'boulders', size: [0.8, 1.3], gap: 2.4, top: 0.6, keep: 1.8, crawl: { top: 0.16, every: 3.2 } },
+        { line: 'hard', lat: 6.4, f: 'boulders', size: [0.6, 0.9], gap: 2.6, top: 0.38 }] },
+    ] } }),
+  // Riverbed Run: the corridor takes in the creek floor between its valley walls, so the lines cross
+  // the low-flow channel. Easy line ledges 0.26-0.30 m, hard 0.36-0.40, extreme 0.45-0.50; it
+  // pinches back to its mouth through the Plantation ford (the road keeps its own surface).
+  buildPath({ name: 'Riverbed Run', kind: 'trail', diff: 'blue', pts: riverbedPts(), width: 7, mat: 'river', win: 2, maxGrade: 0.26,
+    cross: { k: 1, up: 0.22, down: 0.12, from: 2.4 },
+    crawl: { base: [5, 5], cruxes: [
+      { name: 'Boulder Run', s: 36, len: 16, lanes: [
+        { line: 'easy', lat: 0, w: 6, f: 'boulders', size: [0.7, 1.0], gap: 2.4, top: 0.5, keep: 1.75, crawl: { top: 0.24, every: 2.8 } },
+        { line: 'hard', lat: 5.6, w: 3.6, f: 'boulders', size: [0.6, 0.9], gap: 2.4, top: 0.4 },
+        { line: 'extreme', lat: -5.6, w: 3.6, f: 'boulders', size: [0.8, 1.1], gap: 2.1, top: 0.48 }] },
+      { name: 'Creek Steps', s: 66, len: 15, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.26, 0.3], skew: 0.3, alt: true },
+        { line: 'hard', lat: -4.8, w: 3.8, f: 'ledge', n: 2, top: [0.36, 0.4], skew: -0.3, alt: true },
+        { line: 'extreme', lat: 4.8, w: 3.8, f: 'ledge', n: 2, top: [0.45, 0.5], skew: 0.25, alt: true }] },
+      { name: 'Undercut Bank', s: 131, len: 12, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.26, every: 2.6 },
+        { line: 'hard', lat: 4.8, w: 3.8, f: 'camber', tilt: 0.22, from: 2.4, crawl: { top: 0.3, every: 3 } },
+        { line: 'extreme', lat: -4.8, w: 3.8, f: 'holes', depth: 0.42 }] },
+    ] } }),
   // Basalt Garden: down off the coast road onto the shore, north along the lava shore, round the tip
   // of Lava Point and back up its north flank to the lighthouse. The sea is on the +lat side, so the
-  // corridor widens inland (-lat). Easy line (centre) ledges 0.34-0.40 m, hard 0.50-0.55, extreme
-  // 0.60-0.66; ledges skewed so they can (and on the easy line should) be taken at an angle.
+  // corridor widens inland (-lat). Easy line (centre) ledges 0.26-0.32 m, hard 0.38-0.42, extreme
+  // 0.48-0.52; ledges skewed so they can (and on the easy line should) be taken at an angle.
   buildPath({ name: 'Basalt Garden', kind: 'trail', diff: 'black', width: 7, mat: 'basalt',
     pts: [[BG0.x, BG0.z], [332, -154], [350, -172], [364, -196], [371, -222], [367, -246], [355, -264], [336, -273], [315, -270], [300, -258], [302, -242], [318, -236], [LIGHTHOUSE.x, LIGHTHOUSE.z]], end: { pad: LIGHTHOUSE }, minH: 2.2, maxGrade: 0.27,
     cross: { k: 1, up: 0.14, down: 0.08, from: 2.4 },
     crawl: { base: [3.6, 6], open: [46, 200], cruxes: [
       { name: 'Basalt Steps', at: 0.25, len: 18, lanes: [
-        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.34, 0.4], skew: 0.32, alt: true },
-        { line: 'hard', lat: -5.4, f: 'ledge', n: 2, top: [0.5, 0.55], skew: -0.22, alt: true },
-        { line: 'extreme', lat: -10, f: 'ledge', n: 3, top: [0.6, 0.66], skew: 0.15, alt: true }] },
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.28, 0.32], skew: 0.32, alt: true },
+        { line: 'hard', lat: -5.4, f: 'ledge', n: 2, top: [0.38, 0.42], skew: -0.22, alt: true },
+        { line: 'extreme', lat: -10, f: 'ledge', n: 3, top: [0.48, 0.52], skew: 0.15, alt: true }] },
       { name: 'The Garden', at: 0.34, len: 18, lanes: [
-        { line: 'easy', lat: 0, w: 7.6, f: 'boulders', size: [0.9, 1.5], gap: 2.2, top: 0.75, keep: 1.75, crawl: { top: 0.3, every: 2.6 } },
-        { line: 'hard', lat: -6.6, f: 'boulders', size: [0.8, 1.3], gap: 2.5, top: 0.55 },
-        { line: 'extreme', lat: -11, f: 'boulders', size: [1.0, 1.5], gap: 2.2, top: 0.64 }] },
+        { line: 'easy', lat: 0, w: 7.6, f: 'boulders', size: [0.9, 1.5], gap: 2.2, top: 0.75, keep: 1.75, crawl: { top: 0.28, every: 2.6 } },
+        { line: 'hard', lat: -6.6, f: 'boulders', size: [0.8, 1.3], gap: 2.5, top: 0.42 },
+        { line: 'extreme', lat: -11, f: 'boulders', size: [1.0, 1.5], gap: 2.2, top: 0.52 }] },
       { name: 'Tide Shelf', at: 0.43, len: 16, lanes: [
-        { line: 'easy', lat: 0, f: 'crawl', top: 0.3, every: 2.4 },
-        { line: 'hard', lat: -6, f: 'camber', tilt: 0.26, from: 3, crawl: { top: 0.32, every: 3 } },
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.28, every: 2.4 },
+        { line: 'hard', lat: -6, f: 'camber', tilt: 0.26, from: 3, crawl: { top: 0.3, every: 3 } },
         { line: 'extreme', lat: -10.4, f: 'holes', depth: 0.5 }] },
       { name: 'Lava Tubes', at: 0.53, len: 16, lanes: [
-        { line: 'easy', lat: 0, f: 'notch', top: 0.4, gap: 1.2, every: 5.5 },
-        { line: 'hard', lat: -5.8, f: 'holes', depth: 0.42, crawl: { top: 0.34, every: 3.2 } },
+        { line: 'easy', lat: 0, f: 'notch', top: 0.32, gap: 1.2, every: 5.5 },
+        { line: 'hard', lat: -5.8, f: 'holes', depth: 0.42, crawl: { top: 0.32, every: 3.2 } },
         { line: 'extreme', lat: -10.2, f: 'slab', h: 1.2, up: 0.42, down: 0.5, side: 0.8 }] },
       { name: 'Point Ledges', at: 0.64, len: 14, lanes: [
-        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.35, 0.4], skew: -0.3, alt: true },
-        { line: 'hard', lat: -5.2, f: 'ledge', n: 2, top: [0.5, 0.54], skew: 0.35, alt: true }] },
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.28, 0.32], skew: -0.3, alt: true },
+        { line: 'hard', lat: -5.2, f: 'ledge', n: 2, top: [0.38, 0.42], skew: 0.35, alt: true }] },
       { name: 'Lighthouse Climb', at: 0.86, len: 15, lanes: [
-        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.3, 0.34], skew: 0.25, alt: true },
-        { line: 'hard', lat: 5.2, f: 'ledge', n: 2, top: [0.45, 0.5], skew: -0.25, alt: true },
-        { line: 'extreme', lat: 9.6, f: 'boulders', size: [0.9, 1.3], gap: 2.3, top: 0.6 }] },
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.26, 0.3], skew: 0.25, alt: true },
+        { line: 'hard', lat: 5.2, f: 'ledge', n: 2, top: [0.38, 0.42], skew: -0.25, alt: true },
+        { line: 'extreme', lat: 9.6, f: 'boulders', size: [0.9, 1.3], gap: 2.3, top: 0.5 }] },
     ] } }),
-  buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 5.6, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
-    steps: [24, 31, 38, 52, 59, 66, 80, 86.5, 93].map((s, k) => ({ s, rise: [0.32, 0.36, 0.4, 0.4, 0.42, 0.44, 0.44, 0.45, 0.45][k], depth: 3.0 })) }),
+  // Ember Stairs: three flights of step-ups, each band split into lanes side by side across the whole
+  // corridor: the easy lane 0.06 m under the band's rise and never over 0.36 m (0.26-0.36 m faces,
+  // the rest a ramp behind), the hard lane the full rise (0.32-0.45), the extreme lane a 0.12 m lip proud of the
+  // tread (0.44-0.57); the hard and extreme lanes swap sides from flight to flight. Big rocks lock
+  // each band's ends.
+  buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 7, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
+    steps: [24, 31, 38, 52, 59, 66, 80, 86.5, 93].map((s, k) => ({ s, rise: [0.32, 0.36, 0.4, 0.4, 0.42, 0.44, 0.44, 0.45, 0.45][k], depth: 3.0 })),
+    cross: { k: 0.3, up: 0.1, down: 0.1, from: 2.4 },
+    crawl: { base: [4.5, 4.5], ends: 8, cruxes: [
+      { name: 'Lower Flight', s: 31.5, len: 19, lanes: [
+        { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: 4.4, w: 4 }, { line: 'extreme', lat: -4.4, w: 4, lip: 0.12 }] },
+      { name: 'Middle Flight', s: 59.5, len: 19, lanes: [
+        { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: -4.4, w: 4 }, { line: 'extreme', lat: 4.4, w: 4, lip: 0.12 }] },
+      { name: 'Top Flight', s: 85.5, len: 21, lanes: [
+        { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: 4.4, w: 4 }, { line: 'extreme', lat: -4.4, w: 4, lip: 0.12 }] },
+    ] } }),
 ];
 // wide crawls: corridor widths, lines, cruxes (src/maps/widecrawl.js); the shoulder is where the corridor edge fades into the ground
 const WIDE_SHOULDER = 5;
-for (const t of TRAILS) if (t.crawl) { setupWide(t, t.crawl); t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; }
+for (const t of TRAILS) if (t.crawl) {
+  // where a crawl crosses a road between its ends (Riverbed Run through the Plantation ford) the corridor pinches to its mouth
+  const near = t.pts.filter((q) => q.s > 20 && q.s < t.length - 20 && ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 6)));
+  if (near.length) t.crawl.pinch = [[Math.min(...near.map((q) => q.s)), Math.max(...near.map((q) => q.s))]];
+  setupWide(t, t.crawl); t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; }
 const PATHS = [...ROADS, ...TRAILS];
 
 // ---------------------------------------------------------------- bridges
@@ -770,8 +834,10 @@ export function generateRocks() {
   const onRoadCell = (x, z) => { const ix = clamp(Math.round((x + SIZE / 2) / CELL), 0, RES), iz = clamp(Math.round((z + SIZE / 2) / CELL), 0, RES), id = GRID.path[ix * N1 + iz]; return id >= 0 && id < ROADS.length; };
   for (const t of TRAILS) {
     if (t.wide) { // (each wide crawl draws from its own stream)
-      const K = rockKit(rng(9150 + TRAILS.indexOf(t)), heightAt);
-      wideRocks(t, K, rng(9160 + TRAILS.indexOf(t)), { stepCap, grade, heightAt, skip: (x, z) => inWater(x, z) || onRoadCell(x, z), spec: WIDE[t.diff] });
+      const K = rockKit(rng(9150 + TRAILS.indexOf(t)), heightAt), Rw = rng(9160 + TRAILS.indexOf(t));
+      // step-up bands across a wide staircase (one slab per lane), the tread grade taken before each step
+      if (t.steps) for (const st of t.steps) wideStep(t, st, (pathPoint(t, st.s - 1).h - pathPoint(t, st.s - 3).h) / 2, K, Rw, rocks, heightAt);
+      wideRocks(t, K, Rw, { stepCap, grade, heightAt, skip: (x, z) => inWater(x, z) || onRoadCell(x, z), spec: WIDE[t.diff] });
       for (const r of K.rocks) rocks.push(r);
       continue;
     }

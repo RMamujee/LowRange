@@ -14,7 +14,7 @@ await RAPIER.init();
 const H = 1 / 200;
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 }); world.timestep = H; world.numSolverIterations = 8;
 const rocks = generateRocks();
-for (const r of rocks) { let m = 0; for (let i = 0; i < r.pts.length; i += 3) m = Math.max(m, Math.hypot(r.pts[i], r.pts[i + 2])); r.rad = m; }
+for (const r of rocks) { let m = 0; for (let i = 0; i < r.pts.length; i += 3) m = Math.max(m, Math.hypot(r.pts[i], r.pts[i + 2])); r.rad = r.fin ? 1.3 : m; } // (a fin is long and thin: its pieces every 4.5 m, each about 1.3 m to either side)
 const terrain = buildTerrainPhysics(RAPIER, world, rocks, generateTrees(rocks));
 const LINE = process.env.LINE || 'easy';
 const wide = TRAILS.filter((t) => t.wide && (!process.argv[4] || t.name.toLowerCase().includes(process.argv[4].toLowerCase())));
@@ -93,7 +93,8 @@ for (const id of ids) {
       }
       car.step(inp, H);
     }
-    res.push(`${t.name.split(' ')[0]}(${t.diff},${LINE}) ${best.toFixed(0)}/${t.length.toFixed(0)}m ${best >= t.length - 6 ? 'done ' + el.toFixed(0) + 's' : flips ? 'ROLLED' : 'STUCK'} roll ${(maxRoll * 57.3).toFixed(0)}deg${offT > 1 ? ` off-corridor ${offT.toFixed(0)}s` : ''}`);
+    const pe = car.chassis.translation(), pc = pathPoint(t, s), latNow = (pe.x - pc.x) * -pc.tz + (pe.z - pc.z) * pc.tx;
+    res.push(`${t.name.split(' ')[0]}(${t.diff},${LINE}) ${best.toFixed(0)}/${t.length.toFixed(0)}m ${best >= t.length - 6 ? 'done ' + el.toFixed(0) + 's' : (flips ? 'ROLLED' : 'STUCK') + ` at lat ${latNow.toFixed(1)} (line ${t.lines[LINE](s).toFixed(1)})`} roll ${(maxRoll * 57.3).toFixed(0)}deg${offT > 1 ? ` off-corridor ${offT.toFixed(0)}s` : ''}`);
     car.destroy();
   }
   console.log(id.padEnd(7), res.join(' | '));

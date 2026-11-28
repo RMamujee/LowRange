@@ -40,7 +40,7 @@ function idxAt(pts, s) {
 export function setupWide(t, def) {
   const L = t.length, ends = def.ends ?? 13;
   const cruxes = def.cruxes.map((c, i) => {
-    const sc = c.s ?? c.at * L, len = c.len ?? 14;
+    const sc = c.s ?? c.at * L, len = Math.min(c.len ?? 14, L - 2 * ends - 4); // (len longer than the trail: the whole trail between its mouths)
     const s0 = clamp(sc - len / 2, ends + 2, L - ends - 2 - len), s1 = s0 + len;
     return { n: i + 1, name: c.name, s0, s1, lanes: c.lanes.map((l) => ({ w: LANE_W, ...l })), features: [] };
   });
@@ -48,8 +48,14 @@ export function setupWide(t, def) {
   const lines = {};
   for (const name of LINE_NAMES) {
     const anchors = [{ s: 0, lat: 0 }, { s: ends + 1, lat: 0 }];
-    for (const c of cruxes) { const l = pickLane(c, name); anchors.push({ s: c.s0, lat: l.lat }, { s: c.s1, lat: l.lat }); }
+    // (each line lined up on its lane up to 5 m before the crux and 2 m after, as far as the gaps between cruxes allow)
+    cruxes.forEach((c, k) => {
+      const l = pickLane(c, name), gapB = k ? c.s0 - cruxes[k - 1].s1 : 99, gapA = k < cruxes.length - 1 ? cruxes[k + 1].s0 - c.s1 : 99;
+      anchors.push({ s: Math.max(ends + 1.5, c.s0 - Math.min(5, gapB * 0.35)), lat: l.lat }, { s: Math.min(L - ends - 1.5, c.s1 + Math.min(2, gapA * 0.15)), lat: l.lat });
+    });
     anchors.push({ s: L - ends - 1, lat: 0 }, { s: L, lat: 0 });
+    for (const [a, b] of def.pinch ?? []) anchors.push({ s: a - 4, lat: 0 }, { s: b + 4, lat: 0 }); // (every line through a pinch on the centreline)
+    anchors.sort((p, q) => p.s - q.s);
     lines[name] = (s) => {
       let k = 0; while (k < anchors.length - 2 && anchors[k + 1].s <= s) k++;
       const a = anchors[k], b = anchors[k + 1];
@@ -75,8 +81,10 @@ export function setupWide(t, def) {
     for (const name of LINE_NAMES) { const v = lines[name](s); reqL[i] = Math.max(reqL[i], v + LANE_W / 2 + 1.2); reqR[i] = Math.max(reqR[i], -v + LANE_W / 2 + 1.2); }
     l = Math.max(l, reqL[i]); r = Math.max(r, reqR[i]);
     for (const [at, wL, wR] of def.widen ?? []) { const e = bump(Math.abs(s - at * L), 26); l = Math.max(l, lerp(l, wL, e)); r = Math.max(r, lerp(r, wR, e)); }
-    // the gate mouths: pinched to the trail's own width at both ends
-    const pin = smooth(ends, ends + 12, Math.min(s, L - s));
+    // the gate mouths: pinched to the trail's own width at both ends (and over def.pinch [s0, s1]
+    // stretches, e.g. where the trail crosses a road: the road keeps its own surface)
+    let pin = smooth(ends, ends + 12, Math.min(s, L - s));
+    for (const [a, b] of def.pinch ?? []) pin = Math.min(pin, 1 - smooth(a - 12, a, s) * smooth(b + 12, b, s));
     wl[i] = lerp(mouth, Math.max(mouth, l), pin); wr[i] = lerp(mouth, Math.max(mouth, r), pin);
     reqL[i] = lerp(mouth, Math.max(mouth, reqL[i]), pin); reqR[i] = lerp(mouth, Math.max(mouth, reqR[i]), pin);
   });
@@ -191,7 +199,7 @@ export function wideRocks(t, kit, R, env) {
       } else if (f === 'crawl') addCrawl(c, ln, ln);
       else if (f === 'fin') {
         // a rock fin standing along the lane (a wall between two channels), in pieces
-        for (let s = c.s0 + 1.5; s < c.s1 - 1.5; s += ln.piece ?? 4.5) {
+        for (let s = c.s0 + 3.5; s < c.s1 - 2.5; s += ln.piece ?? 4.5) {
           const q = at(s, ln.lat + (R() - 0.5) * 0.6), len = (ln.piece ?? 4.5) * 0.62, hgt = ln.h * (0.8 + R() * 0.4), wid = ln.w / 2, pts = [];
           for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
             pts.push(sx * wid * (0.85 + R() * 0.3), -0.8, sz * len * (0.9 + R() * 0.2));
@@ -259,4 +267,35 @@ export function nearLine(t, x, z, margin) {
   for (const q of t.pts) { const d = (q.x - x) ** 2 + (q.z - z) ** 2; if (!best || d < best.d) best = { d, q }; }
   const p = pathPoint(t, best.q.s), lat = (x - p.x) * -p.tz + (z - p.z) * p.tx;
   return LINE_NAMES.some((n) => Math.abs(t.lines[n](best.q.s) - lat) < margin);
+}
+
+// A step-up band across a wide staircase: one slab per lane of the crux it falls in, side by side
+// across the whole corridor, so the step can't be driven round, each lane with its own face: the
+// easy lane `easy` m lower than the band's rise (the rest of the climb is the ramp behind its
+// face), the hard lane the full rise, the extreme lane `lip` m proud of the tread behind it. The
+// slabs are flat-topped like the narrow stairways', their top following the tread grade g (without the step ramps).
+export function wideStep(t, st, g, kit, R, out, heightAt) {
+  const c = t.cruxes.find((q) => st.s >= q.s0 - 0.5 && st.s <= q.s1 + 0.5), p = pathPoint(t, st.s), w = t.halfWidthAt(st.s);
+  const lanes = (c ? c.lanes.filter((l) => l.line) : [{ line: 'hard', lat: 0 }]).slice().sort((a, b) => a.lat - b.lat);
+  const edges = [-Math.max(w.right, -lanes[0].lat + lanes[0].w / 2) - 1.2]; // (the band spans the corridor, and every lane even where the corridor pinches)
+  for (let k = 1; k < lanes.length; k++) edges.push((lanes[k - 1].lat + lanes[k - 1].w / 2 + lanes[k].lat - lanes[k].w / 2) / 2);
+  edges.push(Math.max(w.left, lanes.at(-1).lat + lanes.at(-1).w / 2) + 1.2);
+  const faces = [];
+  lanes.forEach((ln, k) => {
+    const rise = Math.min(ln.line === 'easy' ? st.rise - (ln.less ?? 0.1) : ln.line === 'extreme' ? Math.min(st.rise + (ln.lip ?? 0.12), 0.68) : st.rise, ln.max ?? 9); // (ln.max: a cap on the lane's face)
+    const a = edges[k], b = edges[k + 1], hwS = (b - a) / 2, mid = (a + b) / 2, pts = [], zf = -(rise + 0.35) * 0.62, d = st.depth;
+    for (const sx of [-1, 1]) {
+      for (const zt of [0, 0.06]) pts.push(sx * hwS * (0.97 + R() * 0.03), rise + R() * 0.02 + g * zt, zt + R() * 0.06);
+      pts.push(sx * hwS, g * zf - 0.35, zf);
+      pts.push(sx * hwS * (0.97 + R() * 0.03), rise + g * (d + 0.2) + 0.02, d + 0.2);
+      pts.push(sx * hwS, Math.min(rise, st.rise) + g * (d + 0.7) - 0.45, d + 0.7);
+    }
+    for (let i = 0; i < 5; i++) { const zz = 0.4 + R() * (d - 0.4); pts.push((R() * 2 - 1) * hwS * 0.8, rise + g * zz + 0.01 + R() * 0.02, zz); }
+    const x = p.x - p.tz * mid, z = p.z + p.tx * mid, f = pathPoint(t, st.s - 0.6), gx = f.x - f.tz * mid, gz = f.z + f.tx * mid;
+    out.push({ x, y: heightAt(gx, gz) + g * 0.6, z, rotY: Math.atan2(p.tx, p.tz), pts, ledge: true, step: { trail: t.name, s: st.s, rise, grade: g, depth: st.depth, lat: ln.lat, line: ln.line } });
+    faces.push({ line: ln.line, lat: ln.lat, rise: +rise.toFixed(3) });
+  });
+  if (c) c.features.push({ type: 'step', s: st.s, faces });
+  // big rocks lock the band's ends so the step can't be driven round the corridor's edge
+  for (const sd of [-1, 1]) { const r = kit.shape(1.1 + R() * 0.4, 0.9), q = pathPoint(t, st.s + st.depth * 0.5), e = sd > 0 ? edges.at(-1) : -edges[0], cc = sd * (e + kit.reach(r, q.tz * sd, -q.tx * sd) * 0.5); kit.put(r, q.x - q.tz * cc, q.z + q.tx * cc, true); }
 }
