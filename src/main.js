@@ -508,7 +508,7 @@ const CONTROLS = [
   ['G', 'rear steer (Goat)'], ['[ / ]', 'tyres: air down / up (tap: next stop, hold: any psi)'], ['T', 'tyres: crawl / road pressure'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ...WINCH_CONTROLS, // [winch] K anchor / hook, U / O in / out, L unhook
-  ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
+  ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['F10', 'settings (graphics, sound)'], ['Esc', 'pause / resume'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ck"><kbd><span>${k}</span></kbd><span>${v}</span></div>`).join('');
 $('menuControls').innerHTML = controlsHtml;

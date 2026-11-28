@@ -123,6 +123,7 @@ Blender models: their specs stay in `src/specs.js` with `enabled: false`. Delete
 | L | unhook and stow the winch line |
 | N | mute |
 | H | help |
+| F10 | settings: graphics, look, Master / Engine / Effects volume, mute, FPS counter |
 | Esc | pause (RESUME returns to the same truck; "Restart at trailhead" repairs; "Spawn points" and "Restart at <last spawn>") |
 
 A gamepad also works: RT/LT for the pedals, RB/LB to shift, X for the clutch, A for the parking brake, R3 for the map.
