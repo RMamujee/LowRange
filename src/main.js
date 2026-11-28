@@ -30,6 +30,8 @@ import { getSettings } from './settings.js'; // [tyre fx]
 import { TyreFx } from './fx/tyre_fx.js'; // [tyre fx]
 import { MudView } from './fx/mud_view.js'; // [tyre fx] the bogs' rutted surface
 import { MudCoat } from './fx/mud_coat.js'; // [tyre fx] mud caked on the truck
+import { TyreAdvisor, startPsi, saveLivePsi, zone as psiZone } from './tyres/pressure.js'; // [tyre pressure] on-board inflation, warnings, saved pressure
+import { TyreView } from './tyres/tyre_view.js'; // [tyre pressure] tyres flatten and bulge at the patch
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -109,6 +111,7 @@ markWorld(scene);
 // surface (ruts) in src/fx/mud_view.js, mud caked on the truck in src/fx/mud_coat.js
 const fx = new TyreFx(scene, { heightAt: visualHeightAt, surfaceAt: mudView.surfaceAt, materialAt, MAT, MAT_INFO, quality: () => getSettings().quality, pixels });
 const mudCoat = new MudCoat();
+const tyreView = new TyreView(); // [tyre pressure]
 // [crash] one crash effect (src/damage/crash.js fx): flakes of paint and grit plus a dust puff at
 // the hit, glass glitter when a pane drops out; a clunk / grind on the audio module's one-shots
 const _paint = new THREE.Color();
@@ -220,7 +223,7 @@ function spawn(i, opts) {
   car = new Vehicle(RAPIER, world, spec, terrain, { x: SPAWN.x, y, z: SPAWN.z }, SPAWN.yaw);
   view = new VehicleView(scene, car);
   car.dt.autoClutch = opts.auto;
-  car.airedDown = opts.air;
+  car.tyre.set(opts.air ? car.tyre.P.crawl : startPsi(spec)); // [tyre pressure] the live pressure from the last drive, else the garage's start pressure
   if (opts.low && spec.ranges.low) { car.dt.range = 'low'; car.dt.fourWD = true; }
   car.dt.gear = 0;
   camState.heading = 0;
@@ -232,14 +235,14 @@ function spawn(i, opts) {
 
 // Swap in a brand-new (fully repaired) truck at a pose, keeping the driver's settings.
 function respawnFresh(x, z, yaw, lift = 0.3) {
-  const old = car.dt, aired = car.airedDown, rsteer = car.rearSteerOn;
+  const old = car.dt, tyre = car.tyre, rsteer = car.rearSteerOn; // [tyre pressure] the pressure carries over
   car.destroy(); view.dispose();
   const y = surfaceAt(x, z) + spec.tire.radius - spec.axleY + lift;
   car = new Vehicle(RAPIER, world, spec, terrain, { x, y, z }, yaw);
   view = new VehicleView(scene, car);
   const d = car.dt;
   d.autoClutch = old.autoClutch; d.range = old.range; d.fourWD = old.fourWD; d.lockF = old.lockF; d.lockR = old.lockR; d.gear = 0;
-  car.airedDown = aired; car.rearSteerOn = rsteer;
+  car.tyre.carry(tyre); car.rearSteerOn = rsteer;
   camState.heading = yaw; camState.yaw = 0;
 }
 
@@ -401,6 +404,22 @@ lastSpawnBtn.addEventListener('click', () => { if (resumeForSpawn()) spawnAt(las
 // The HUD itself lives in src/hud/ (pixel canvases); main.js feeds it a snapshot each frame.
 let toastTimer = 0;
 function toast(msg, secs = 2.2) { hud.toast(msg, secs); toastTimer = secs; }
+// [tyre pressure] where the tyres are heading, and a toast when they get there (zone in words)
+const psiWord = (p) => `${Math.round(p)} psi: ${psiZone(p, car.tyre.P).toLowerCase()}`;
+function tyreToast(target) {
+  const T = car.tyre;
+  if (!T.moving) toast(`Tyres ${psiWord(T.psi)}`, 1.6);
+  else toast(`${T.deflating ? 'Airing down' : 'Airing up'} to ${psiWord(target)}${T.inflating ? ' (compressor)' : ''}`, 1.8);
+}
+const tyreAdvisor = new TyreAdvisor();
+let savedPsi = null;
+function updateTyres(dt) {
+  const T = car.tyre;
+  if (car.tyreArrived) { car.tyreArrived = false; toast(`Tyres ${psiWord(T.psi)}`, 2); }
+  if (!T.moving && T.psi !== savedPsi) { savedPsi = T.psi; saveLivePsi(spec.id, T.psi); } // the live pressure is kept per rig
+  const adv = tyreAdvisor.update(car, input, dt);
+  if (adv) toast(adv.text, adv.kind === 'warn' ? 2.6 : 4);
+}
 const hudState = () => ({ car, spec, input, game, race, parkBrake, matInfo: MAT_INFO });
 function updateHud(dt) {
   if (toastTimer > 0) toastTimer -= dt;
@@ -480,7 +499,7 @@ function updateCamera(dt) {
 const CONTROLS = [
   ['W / S', 'throttle / brake'], ['A / D', 'steer (or Left / Right arrows)'], ['Space', 'clutch (hold)'], ['Shift', 'crawl throttle (35%)'],
   ['Up / Down', 'shift up / down (arrow keys, or PgUp / PgDn)'], ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
-  ['G', 'rear steer (Goat)'], ['T', 'air down / up'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
+  ['G', 'rear steer (Goat)'], ['[ / ]', 'tyres: air down / up (tap: next stop, hold: any psi)'], ['T', 'tyres: crawl / road pressure'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
   ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
@@ -493,6 +512,8 @@ const hud = createHud({
 });
 
 // keyboard key -> action
+// [tyre pressure] [ deflates, ] inflates (BracketLeft / BracketRight): tap for the next stop, hold for any pressure
+const TYRE_KEYS = { BracketLeft: -1, BracketRight: 1 };
 const KEYMAP = {
   KeyR: 'range', KeyQ: 'lockF', KeyE: 'lockR', KeyF: '4wd', KeyG: 'rsteer', KeyT: 'tyres', KeyI: 'ignition',
   KeyC: 'autoclutch', Backspace: 'recover', KeyY: 'restart', KeyV: 'camera', KeyN: 'mute', KeyM: 'map', KeyJ: 'spawns', KeyH: 'help', KeyP: 'park',
@@ -512,7 +533,9 @@ function action(name) {
     case 'lockF': if (!spec.lockers.front) msg = 'No front locker on the ' + spec.name; else { d.lockF = !d.lockF; audio.clunk(); toast(d.lockF ? 'Front locker ON' : 'Front locker off'); } break;
     case 'lockR': if (!spec.lockers.rear) msg = 'No rear locker on the ' + spec.name; else { d.lockR = !d.lockR; audio.clunk(); toast(d.lockR ? 'Rear locker ON' : 'Rear locker off'); } break;
     case 'rsteer': if (!spec.rearSteer) msg = 'Rear steer is only on the Billy Goat'; else { car.rearSteerOn = !car.rearSteerOn; toast(car.rearSteerOn ? 'Rear steer ON (counter-phase)' : 'Rear steer locked'); } break;
-    case 'tyres': if (kmh > 3) msg = 'Stop to change tyre pressure'; else { car.airedDown = !car.airedDown; toast(car.airedDown ? 'Aired down to 10 psi: more grip on rock and sand' : 'Aired up to 32 psi'); } break;
+    case 'tyres': tyreToast(car.tyre.toggle()); break; // [tyre pressure] T: crawl <-> road, at any speed
+    case 'airDown': tyreToast(car.tyre.tap(-1)); break; // [tyre pressure] HUD buttons: next stop
+    case 'airUp': tyreToast(car.tyre.tap(1)); break;
     case 'ignition': if (d.running) msg = 'Engine already running'; else { msg = d.startEngine(); if (!msg) audio.starter(); } break;
     case 'autoclutch': d.autoClutch = !d.autoClutch; toast(d.autoClutch ? 'Auto-clutch ON' : 'Manual clutch: Space is your clutch pedal. Stalls are real now.'); break;
     case 'recover': recover(); break;
@@ -539,12 +562,17 @@ addEventListener('keydown', (e) => {
   if (['Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();
   if (hud.mapKey(e)) { e.preventDefault(); return; } // [spawns] the map's spawn list takes arrows / Enter
   if (!e.repeat && KEYMAP[e.code]) action(KEYMAP[e.code]);
+  if (!e.repeat && TYRE_KEYS[e.code] && car) car.tyre.press(TYRE_KEYS[e.code]); // [tyre pressure] held: keeps going
   keys.add(e.code);
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (TYRE_KEYS[e.code] && car) { const t = car.tyre.release(TYRE_KEYS[e.code]); if (t !== null) tyreToast(t); } // [tyre pressure] tap: next stop; held: stop here
+});
 // never leave a pedal held when the page loses focus or the key-up is swallowed
-addEventListener('blur', () => keys.clear());
-document.addEventListener('visibilitychange', () => keys.clear());
+const letGo = () => { keys.clear(); if (car && car.tyre.hold) car.tyre.release(car.tyre.hold); }; // [tyre pressure] nor a valve open
+addEventListener('blur', letGo);
+document.addEventListener('visibilitychange', letGo);
 addEventListener('contextmenu', (e) => e.preventDefault());
 
 // mouse wheel shifts gears: one notch = one gear (trackpads send many small deltas)
@@ -819,6 +847,7 @@ function frame(now) {
       if (car.upsideDown() && Math.abs(car.speed()) < 0.5) { if (!toastTimer || toastTimer < 0.1) toast('On your lid! Press Backspace to recover', 1.5); }
       // pulling away against the parking brake: remind
       if (parkBrake && input.throttle > 0.3 && car.dt.gear !== 0 && toastTimer <= 0) toast('Parking brake is on: press P to release', 2); // repeats while you drive against it
+      updateTyres(dt); // [tyre pressure] arrival toast, saving, soft-tyre warning, stuck hint
       updateHud(dt);
       while (car.damageEvents.length) { toast(car.damageEvents.shift(), 3); audio.grind(); }
       // [crash] crash effects from src/damage/crash.js: debris and dust at the hit, glass glitter, steam
@@ -836,6 +865,7 @@ function frame(now) {
       fx.wheels(car, dt); // [tyre fx] mud, water, dust and grit off each tyre (src/fx/tyre_fx.js)
     }
     fx.update(dt); mudView.update(); mudCoat.update(car, view, fx); // [tyre fx]
+    tyreView.update(car, view); // [tyre pressure] after the mud coat has given the truck its own materials
     audio.update(audioStateFrom(car)); // [audio] rpm, load, gear, per-wheel surface / slip, scrape, winch
   }
   pixels.render(scene, camera, sun);
@@ -859,4 +889,4 @@ openMenu();
 if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, spawns: SPAWNS, spawnAt, get lastSpawn() { return lastSpawn; }, get crawl() { return crawl?.snapshot() ?? null; }, fx, mudView, gfx: { renderer, pixels, scene, camera, sun } };
+window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, spawns: SPAWNS, spawnAt, get lastSpawn() { return lastSpawn; }, get crawl() { return crawl?.snapshot() ?? null; }, get tyres() { return car?.tyre.state ?? null; }, fx, mudView, gfx: { renderer, pixels, scene, camera, sun } };

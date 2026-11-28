@@ -18,7 +18,7 @@ export const STAGES = [
 ];
 
 const TIPS = [
-  'Air down with T for grip on rock.',
+  'Air down with [ (or T) for grip on rock and sand; ] airs back up, even on the move.',
   'Lock the diffs before the ledge, not on it.',
   '4-Low, first gear, feather the throttle.',
   'Backspace repairs you where you stand.',

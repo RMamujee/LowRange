@@ -4,6 +4,9 @@
 // The road-going rigs are styled after well-known 4x4s and a rally car, without badges.
 // `enabled: false` parks a rig: its data and view code stay, but it is left out of
 // VEHICLES (the menu, garage and saves). Flip the flag to bring it back.
+// tire.psi [tyre pressure]: live pressure range (min / max), the stops (crawl / trail / road),
+// bead (below this a hard corner or side hit at speed can unseat a bead) and defl (loaded-radius
+// drop at crawl pressure and static load, x tyre radius). See src/tyres/pressure.js.
 export const ALL_VEHICLES = [
   {
     id: 'taco',
@@ -21,7 +24,7 @@ export const ALL_VEHICLES = [
         rear: { pan: [0.42, -0.295, 0.95], bumper: [0.85, -0.255, 0.95, 1.11] } } },
     wheelbase: 3.24, track: 1.62,
     axleY: -0.36,
-    tire: { radius: 0.465, width: 0.32, mass: 36 }, // 37"
+    tire: { radius: 0.465, width: 0.32, mass: 36, psi: { min: 8, crawl: 10, trail: 18, road: 32, max: 36, bead: 14, defl: 0.06 } }, // 37" [tyre pressure]
     axleMass: 120,
     independent: [true, false],
     susp: { freq: 1.45, zeta: 0.32, bump: 0.12, droop: 0.16, springSpacing: 1.15, articulation: 0.28, arb: 9000 },
@@ -53,7 +56,7 @@ export const ALL_VEHICLES = [
         rear: { pan: [0.36, -0.315, 0.7], bumper: [0.9, -0.245, 0.8, 1.06] } } },
     wheelbase: 2.73, track: 1.56,
     axleY: -0.4,
-    tire: { radius: 0.455, width: 0.3, mass: 36 }, // 36"
+    tire: { radius: 0.455, width: 0.3, mass: 36, psi: { min: 8, crawl: 10, trail: 18, road: 32, max: 36, bead: 14, defl: 0.06 } }, // 36" [tyre pressure]
     axleMass: 150,
     susp: { freq: 1.4, zeta: 0.30, bump: 0.13, droop: 0.18, springSpacing: 1.15, articulation: 0.33 },
     steer: { max: 0.56, rate: 1.3 },
@@ -74,7 +77,7 @@ export const ALL_VEHICLES = [
     chassis: { mass: 1180, size: [1.7, 0.4, 4.4], comY: -0.12, floor: -0.34 },
     wheelbase: 2.62, track: 1.52,
     axleY: -0.26,
-    tire: { radius: 0.33, width: 0.21, mass: 20 },
+    tire: { radius: 0.33, width: 0.21, mass: 20, psi: { min: 10, crawl: 10, trail: 20, road: 32, max: 36, bead: 16, defl: 0.045 } }, // low-profile gravel tyres: no lower than 10 psi, the bead lets go sooner [tyre pressure]
     axleMass: 70,
     independent: [true, true],
     awd: true,

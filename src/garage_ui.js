@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { Vehicle } from './vehicle.js';
 import { VehicleView } from './vehicle_view.js';
 import { GROUP_WORLD } from './terrain.js';
-import { applyBuild, buildOptions, defaultBuild, loadBuild, saveBuild, stats } from './garage.js';
+import { applyBuild, buildOptions, defaultBuild, loadBuild, saveBuild, stats, psiNote } from './garage.js';
+import { psiSpec, startPsi } from './tyres/pressure.js'; // [tyre pressure]
 import { PixelPipeline } from './gfx/pipeline.js';
 
 const $ = (id) => document.getElementById(id);
@@ -114,6 +115,7 @@ export class Garage {
     const s = this.spec;
     this.car = new Vehicle(this.R, this.world, s, { ground: this.ground, rockHandles: new Set() }, { x: 0, y: s.tire.radius - s.axleY + 0.03, z: 0 }, 0);
     this.car.grace = 1e9; // never takes damage on the turntable
+    this.car.tyre.set(startPsi(s)); // [tyre pressure] sits on the pressure the next drive starts at
     for (let k = 0; k < 240; k++) this.car.step(IDLE, H); // settle onto its springs before the first frame
     this.view = new VehicleView(this.scene, this.car);
     this.view.update(null);
@@ -156,7 +158,15 @@ export class Garage {
       return `<div class="gstat"><span class="sl">${label}</span><b>${txt(s)}</b><em class="${cls}">${delta}</em>
         <div class="gbar"><i style="width:${(frac * 100).toFixed(1)}%" class="${cls}"></i><u style="left:${(100 / 1.8).toFixed(1)}%"></u></div>
         <small>${sub(s)}</small></div>`;
-    }).join('') + `<div class="gstat gfoot"><span class="sl">Lockers</span><b>${s.lockers}</b><small>${this.spec.lsd ? 'LSD ' + Object.keys(this.spec.lsd).join(' + ') : ''}</small></div>`;
+    }).join('') + `<div class="gstat gfoot"><span class="sl">Lockers</span><b>${s.lockers}</b><small>${this.spec.lsd ? 'LSD ' + Object.keys(this.spec.lsd).join(' + ') : ''}</small></div>`
+      + this.tyreStat(); // [tyre pressure]
+  }
+
+  // [tyre pressure] the pressure the next drive starts at (the live one from the last drive, else the
+  // Start pressure chip) and what it does
+  tyreStat() {
+    const P = psiSpec(this.spec), live = Math.round(startPsi(this.spec));
+    return `<div class="gstat gfoot"><span class="sl">Tyres</span><b>${live} psi</b><small>${live !== this.build.psi ? `live, from your last drive (start ${this.build.psi}). ` : ''}${psiNote(live, P)}</small></div>`;
   }
 
   frame(now) {

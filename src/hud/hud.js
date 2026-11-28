@@ -14,6 +14,7 @@ import { MapBases, BigMap, Waypoints, drawMinimap } from './mapview.js';
 import { Beacons } from './waypoint_pillars.js';
 import { TEMP, engineStatus, engineLamps, EngineWarnings } from './engine_state.js';
 import { BOARDS, BIG_MAX, hudLayout, fitToast, fitBig, fitScale } from './layout.js';
+import { drawTyreGauge, tyreSig } from './tyre_gauge.js'; // [tyre pressure]
 
 const $ = (id) => document.getElementById(id);
 
@@ -51,6 +52,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
   const cluster = pixCanvas('hud-cluster', root);
   const chassis = pixCanvas('hud-chassis', root);
   const engine = pixCanvas('hud-engine', root);
+  const tyreC = pixCanvas('hud-tyre', root); tyreC.cv.style.cursor = 'pointer'; // [tyre pressure] beside the engine board
   const mini = pixCanvas('hud-mini', root);
   const toastC = pixCanvas('hud-toast', root);
   const bigC = pixCanvas('hud-big', root);
@@ -91,6 +93,9 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     chassis.cv.style.bottom = L.chassis === 'stacked' ? `${L.chassisBottom}px` : '';
     chassis.cv.style.display = L.chassis === 'hidden' ? 'none' : '';
     engine.cv.style.display = L.engine ? '' : 'none';
+    sizeCanvas(tyreC, ...BOARDS.tyre, scale); tyreSigLast = ''; // [tyre pressure]
+    tyreC.cv.style.display = L.tyre ? '' : 'none';
+    if (L.tyre) { tyreC.cv.style.left = `${L.rects.tyre.x}px`; tyreC.cv.style.top = `${L.rects.tyre.y}px`; }
     mini.cv.style.display = L.mini ? '' : 'none';
     sizeCanvas(mapC, big.W, big.H, mapScale);
     if (bigArgs) renderBig();
@@ -139,7 +144,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     let x = 5;
     const lamp = (label, state, act) => { const w = drawLamp(g, x, LY, label, state); cluster.hits.push({ x, y: LY, w, h: LAMP_H, act }); x += w + 2; };
     lamp('4WD', d.fourWD ? 'on' : null, '4wd');
-    lamp('Aired', car.airedDown ? 'on' : null, 'tyres');
+    { const T = car.tyre; lamp(`${Math.round(T.psi)} PSI`, T.moving ? (Math.floor(clock * 4) % 2 ? 'on' : null) : T.psi < (T.P.trail + T.P.road) / 2 ? 'on' : null, 'tyres'); } // [tyre pressure] lit below road pressure, blinks while changing; click: crawl / road
     if (spec.rearSteer) lamp('R-steer', car.rearSteerOn ? 'on' : null, 'rsteer');
     lamp(d.autoClutch ? 'Auto-cl' : 'Manual', d.autoClutch ? 'good' : null, 'autoclutch');
     const stalled = !d.running;
@@ -254,6 +259,16 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     const compact = LAMP_KEYS.reduce((a, k) => a + lampWidth(lab(k, false)) + 2, 3) > W - 4;
     let x = 5;
     for (const k of LAMP_KEYS) x += drawLamp(g, x, 31, lab(k, compact), w.lit[k] ? L[k].state : null) + 2;
+  }
+
+  // ------------------------------------------------------------ [tyre pressure] tyre board
+  let tyreSigLast = '';
+  function drawTyre(S) {
+    if (!L.tyre) return;
+    const sig = tyreSig(S.car, clock);
+    if (sig === tyreSigLast) return;
+    tyreSigLast = sig;
+    tyreC.hits = drawTyreGauge(tyreC.g, tyreC.w, tyreC.h, S.car, clock);
   }
 
   // ------------------------------------------------------------ guidance
@@ -469,6 +484,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     else action(h.act);
   });
   mini.cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); action('map'); });
+  tyreC.cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); const h = hitTest(tyreC, e); if (h) action(h.act); }); // [tyre pressure] AIR- / AIR+
   helpC.cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); setHelpOpen(false); });
 
   // big map: click = waypoint, right-click = remove, drag = pan, wheel = zoom
@@ -601,6 +617,7 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     drawCluster(S, step);
     drawChassis(S);
     drawEngine(S);
+    drawTyre(S); // [tyre pressure]
     drawMini(S);
     if (mapOpen) big.draw(mapC.g, mapSnapshot(S));
   }
@@ -618,6 +635,6 @@ export function createHud({ action, camera, isRace, mapId, mapName, trees, scene
     get mapOpen() { return mapOpen; },
     waypoints,
     // for tests: stick position vs. the slot it should travel to, overlays, last toast, guidance angle
-    debug: () => ({ layout: { scale, chassis: L.chassis, engine: L.engine, mini: L.mini, mapScale }, knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
+    debug: () => ({ layout: { scale, chassis: L.chassis, engine: L.engine, mini: L.mini, tyre: !!L.tyre, mapScale }, knob: [shifter.kx, shifter.ky], slot: shifter.slotOf(shifter.gear), gear: shifter.gear, moving: shifter.path.length > 0, mapOpen, helpOpen, lastToast, guideAng, wps: waypoints.list.slice(), map: big, spawn: { tab: big.tab, sel: big.sel, prompt: big.prompt, hover: big.hover, scroll: big.scroll } }),
   };
 }

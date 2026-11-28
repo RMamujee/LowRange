@@ -21,6 +21,10 @@
 import { MAT } from './maps/common.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// [tyre pressure] every Full / Aired pair is mix(full, aired, f) with the tyre's air fraction f (src/tyres/pressure.js):
+// exactly the old aired-up numbers at road pressure (f = 0), the old aired-down ones at crawl pressure (f = 1)
+const airOf = (car) => car.tyre ? car.tyre.f : car.airedDown ? 1 : 0;
+const pick = (full, aired, f) => Math.max(0, full * (1 - f) + aired * f);
 export const DEEP = {
   sinkFull: 0.1, sinkAired: 0.045,   // static sinkage at full depth and normal load (m)
   digFull: 0.13, digAired: 0.05,     // extra sinkage a spinning tyre digs (m)
@@ -47,18 +51,18 @@ export class DeepSand {
     if (!Number.isFinite(this.sink[i])) this.sink[i] = 0;
     if (!(D > 0) || !Number.isFinite(lv.x + lv.z)) { this.D[i] = 0; this.sink[i] = Math.max(0, this.sink[i] - 0.1 * h); return 1; } // (also a NaN position or velocity: no sand)
     this.D[i] = D;
-    const car = this.car, aired = car.airedDown, K = DEEP;
+    const car = this.car, f = airOf(car), K = DEEP;
     const Wst = (car.mass * 9.81) / 4, N = ws.load > 0 ? ws.load : Wst;
     // rolling direction: the truck's heading, flattened
     const fl = Math.hypot(fwd.x, fwd.z) || 1, fx = fwd.x / fl, fz = fwd.z / fl;
     // digging comes from wheelspin (the tread turning faster than the ground passes under it), not
     // from a tyre sliding sideways: a sideways slide plows across the surface instead
     const vRoll = lv.x * fx + lv.z * fz, v = Math.abs(vRoll), spinSlip = Math.abs((ws.spin || 0) * car.spec.tire.radius - vRoll), slip = Number.isFinite(spinSlip) ? spinSlip : 0;
-    const target = D * (aired ? K.sinkAired : K.sinkFull) * Math.sqrt(clamp(N / Wst, 0, 2)) / (1 + v / K.planeV)
-      + D * (aired ? K.digAired : K.digFull) * clamp((slip - K.digSlip[0]) / (K.digSlip[1] - K.digSlip[0]), 0, 1);
+    const target = D * pick(K.sinkFull, K.sinkAired, f) * Math.sqrt(clamp(N / Wst, 0, 2)) / (1 + v / K.planeV)
+      + D * pick(K.digFull, K.digAired, f) * clamp((slip - K.digSlip[0]) / (K.digSlip[1] - K.digSlip[0]), 0, 1);
     const rate = target > this.sink[i] ? Math.min(K.digRate[2], K.digRate[0] + K.digRate[1] * slip) : 0.03 + 0.05 * v;
     this.sink[i] += clamp(target - this.sink[i], -rate * h, rate * h);
-    const c = D * (aired ? K.resAired : K.resFull) + this.sink[i] * K.resSink;
+    const c = D * pick(K.resFull, K.resAired, f) + this.sink[i] * K.resSink;
     const F = c * N * Math.tanh(vRoll / 0.4) * h;
     car.chassis.applyImpulseAtPoint({ x: -fx * F, y: 0, z: -fz * F }, p, true);
     return 1 - K.drag * D;
@@ -67,11 +71,11 @@ export class DeepSand {
   grip(i, mat) {
     const D = this.D[i];
     if (mat !== MAT.SAND || !(D > 0)) return null;
-    const aired = this.car.airedDown, K = DEEP;
+    const f = airOf(this.car), K = DEEP;
     // sinkage costs traction (a dug-in tyre spins in its hole) but not sideways hold: a sunk tyre
     // has sand banked against its side, so the sideways cap leaves the sinkage loss out
     const sinkF = clamp(1 - this.sink[i] * K.muSink, 0.5, 1);
-    const mu = (1 - D * (aired ? K.muAired : K.muFull)) * sinkF;
-    return { mu, lat: (1 - D * (aired ? K.latAired : K.latFull)) / sinkF };
+    const mu = (1 - D * pick(K.muFull, K.muAired, f)) * sinkF;
+    return { mu, lat: (1 - D * pick(K.latFull, K.latAired, f)) / sinkF };
   }
 }

@@ -119,13 +119,16 @@ export class MudField {
   // Fills `out` with z (sinkage into the bearing surface), F (bearing force, N), A (footprint
   // area, m^2), plough (compaction resistance, N), visc (viscous drag coefficient, N per m/s),
   // m (mud share), k (effective modulus); F = 0 when the tyre is above the mud.
+  // aired: the tyre pressure's air fraction f (src/tyres/pressure.js: 0 at road pressure, 1 at crawl
+  // pressure, more below), or the old true / false. The footprint is mix(road, crawl, f).
   tyre(x, z, yb, R, b, aired, out) {
     const s = this.sample(x, z, out);
     out.z = 0; out.F = 0; out.A = 0; out.plough = 0; out.visc = 0; out.k = 0;
     if (s.m < 0.01) return out;
     const Z = Math.min(0.7, this.grid.visualHeightAt(x, z) - s.e + s.berm - yb);
     if (Z <= 0) return out;
-    const bw = b * (aired ? MUD.WIDE_AIRED : 1), L = MUD.LEN * Math.sqrt(2 * R * Z) + (aired ? MUD.FLAT_AIRED : MUD.FLAT);
+    const { bw, flat } = footprint(b, aired);
+    const L = MUD.LEN * Math.sqrt(2 * R * Z) + flat;
     const k = (MUD.K * s.m) / (1 + s.w);
     out.z = Z; out.A = bw * L; out.k = k;
     out.F = k * Z * out.A;
@@ -194,6 +197,14 @@ export class MudField {
   }
 }
 
+// [tyre pressure] footprint width and flat patch length for a tyre of width b: the road-pressure
+// numbers at f = 0, exactly the old aired-down ones at f = 1 (a * (1 - f) + b * f), longer and
+// wider still below crawl pressure. f may also be the old boolean.
+export function footprint(b, aired) {
+  const f = aired === true ? 1 : aired === false || aired === undefined ? 0 : aired;
+  return { bw: b * Math.max(0.9, 1 * (1 - f) + MUD.WIDE_AIRED * f), flat: Math.max(0.03, MUD.FLAT * (1 - f) + MUD.FLAT_AIRED * f) };
+}
+
 // Vertical damping coefficient of the mud under a tyre (N s/m): DAMP x footprint, capped so the
 // explicit impulse on a wheel body of mass m over a step h stays well inside stability
 // (c h / m <= DAMP_MAX; the limit is 2) even deep in the mud, aired down, on the lightest wheel.
@@ -202,8 +213,9 @@ export function mudDamping(A, m, h) {
 }
 
 // Static sinkage of a tyre carrying `load` N in fresh (w = 0) or churned mud: where k z A(z) = load.
+// aired: true / false, or the tyre pressure's air fraction f (see MudField.tyre).
 export function staticSinkage(load, R, b, aired = false, w = 0) {
-  const bw = b * (aired ? MUD.WIDE_AIRED : 1), flat = aired ? MUD.FLAT_AIRED : MUD.FLAT, k = MUD.K / (1 + w);
+  const { bw, flat } = footprint(b, aired), k = MUD.K / (1 + w);
   let lo = 0, hi = 0.7;
   for (let i = 0; i < 50; i++) { const z = (lo + hi) / 2; if (k * z * bw * (MUD.LEN * Math.sqrt(2 * R * z) + flat) > load) hi = z; else lo = z; }
   return (lo + hi) / 2;

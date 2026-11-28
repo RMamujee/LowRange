@@ -2,6 +2,7 @@
 // spec from specs.js; applyBuild(base, build) returns the spec the physics and view consume.
 // No DOM or three.js here, so node tests can use it directly.
 import { Drivetrain } from './drivetrain.js';
+import { psiSpec, effects, saveLivePsi } from './tyres/pressure.js'; // [tyre pressure]
 
 const IN = 0.0254;
 
@@ -42,7 +43,7 @@ const inches = (r) => Math.round((r * 2) / IN);
 
 export function defaultBuild(base) {
   return {
-    tyreSize: 0, tread: 'at',
+    tyreSize: 0, tread: 'at', psi: psiSpec(base).road, // [tyre pressure] starting pressure
     lift: 0, springs: 'stock', damping: 'stock', travel: 'stock',
     engine: 'stock', turbo: false,
     final: base.final, low: base.ranges.low || 0,
@@ -50,6 +51,19 @@ export function defaultBuild(base) {
     skid: false, sliders: false, bumpers: false,
     paint: null, rim: null,
   };
+}
+
+// [tyre pressure] starting pressure choices: the crawl / trail / road stops and the halfway points,
+// each with what it does (the same numbers the physics uses, src/tyres/pressure.js effects()).
+export function psiChoices(base) {
+  const P = psiSpec(base), half = (a, b) => Math.round((a + b) / 2);
+  const vals = [...new Set([P.crawl, half(P.crawl, P.trail), P.trail, half(P.trail, P.road), P.road])].sort((a, b) => a - b);
+  return vals.map((v) => ({ value: v, label: `${v} psi${v === P.road ? ' (stock)' : ''}`, note: psiNote(v, P) }));
+}
+export function psiNote(v, P) {
+  const e = effects(v, P), pc = (x) => `${x >= 1 ? '+' : '-'}${Math.abs(Math.round((x - 1) * 100))}%`;
+  if (e.f <= 0.001) return `${e.zone[0] + e.zone.slice(1).toLowerCase()}: road pressure, the baseline. Change it on the move with [ and ]`;
+  return `${e.zone[0] + e.zone.slice(1).toLowerCase()}: rock grip ${pc(e.rockGrip)}, sinks ${Math.round((1 - 1 / e.float) * 100)}% less in deep sand, steering at speed ${pc(e.steer)}, rolling drag ${pc(e.drag)} (${pc(e.dragFast)} at 70 km/h). Good for about ${Math.round(e.safeKmh / 5) * 5} km/h`;
 }
 
 // Upgrade categories for the UI (and for tests to enumerate every choice).
@@ -64,6 +78,7 @@ export function buildOptions(base) {
     { id: 'tyres', label: 'Tyres', items: [
       { key: 'tyreSize', label: 'Size', choices: Array.from({ length: maxTyre(base) + 1 }, (_, k) => ({ value: k, label: `${inches(base.tire.radius + k * IN)}"${k ? '' : ' (stock)'}`, note: k ? 'Taller tyres: more clearance, taller effective gearing, more unsprung weight' : 'Stock size' })) },
       { key: 'tread', label: 'Tread', choices: Object.entries(TREADS).map(([v, t]) => ({ value: v, label: t.name + st(v, 'at'), note: t.note })) },
+      { key: 'psi', label: 'Start pressure', choices: psiChoices(base) }, // [tyre pressure]
     ] },
     { id: 'susp', label: 'Suspension', items: [
       { key: 'lift', label: 'Lift', choices: LIFTS.map((l, k) => ({ value: k, label: k ? `+${Math.round(l / IN)}"` : 'Stock', note: k ? 'Raises the body: more belly clearance, higher centre of gravity' : 'Stock ride height' })) },
@@ -122,6 +137,7 @@ export function applyBuild(base, build) {
   t.width = w0 * (1 + 0.05 * b.tyreSize);
   t.mass = Math.round(t.mass * (t.radius / r0) ** 2 * (t.width / w0));
   t.tread = b.tread;
+  t.psiStart = b.psi; // [tyre pressure] where a drive starts (until the live pressure is saved)
   if (Object.keys(TREADS[b.tread].grip).length) t.grip = TREADS[b.tread].grip;
 
   // suspension
@@ -216,6 +232,7 @@ export function saveBuild(base, build) {
   const ls = store();
   if (!ls) return;
   const all = readAll();
+  if (sanitizeBuild(base, all[base.id]).psi !== sanitizeBuild(base, build).psi) saveLivePsi(base.id, null); // [tyre pressure] a new start pressure replaces the saved live one
   if (isStock(base, build)) delete all[base.id]; else all[base.id] = sanitizeBuild(base, build);
   try { ls.setItem(KEY, JSON.stringify(all)); } catch { /* storage full / disabled: build lives for this session only */ }
 }
