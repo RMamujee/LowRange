@@ -84,20 +84,45 @@ export class Vehicle {
         { x: 0, y: 0, z: 0, w: 1 })
       .setLinearDamping(0.02).setAngularDamping(0.05).setCanSleep(false));
     const boxes = []; // remembered for the crash model (crushed ends / roof shrink these)
-    const box = (hx, hy, hz, ox, oy, oz, fr = 0.5) => {
+    const box = (hx, hy, hz, ox, oy, oz, fr = 0.5, name = '') => {
       const col = world.createCollider(
         R.ColliderDesc.cuboid(hx, hy, hz).setTranslation(ox, oy, oz).setDensity(0).setFriction(fr)
           .setCollisionGroups(GROUP_VEHICLE), cb);
-      boxes.push({ col, hx, hy, hz, ox, oy, oz, cur: { hy, hz } });
+      boxes.push({ col, hx, hy, hz, ox, oy, oz, cur: { hy, hz }, name });
       return col;
     };
-    // frame rails / skid plate
-    box(cw * 0.42, ch / 2, cl / 2, 0, 0, 0);
+    const ends = spec.chassis.ends;
+    if (!ends) box(cw * 0.42, ch / 2, cl / 2, 0, 0, 0, 0.5, 'frame'); // frame rails / skid plate, bumper to bumper
+    else {
+      // Ends shaped after the model's underside (spec.chassis.ends, chassis-local). The full-width
+      // frame / skid box stops `frame` m past each axle, behind the tyres' leading edge; ahead of
+      // it: a pan (rails, crossmember, skid plate) and the bumper, its centre section at the
+      // model's bumper height and, where given, its outer wings set higher. A box the full width
+      // of the truck out to the bumper used to sit lower and further out than the bumper you see
+      // and stuck out ahead of the tyres at the corners, so on a ledge taken at an angle the
+      // corner of the box met the rock before the tyre did.
+      // Every piece reaches up to the frame box's top; distances run outward from the axle.
+      const zf = -spec.wheelbase / 2, zr = spec.wheelbase / 2, top = ch / 2;
+      box(cw * 0.42, ch / 2, (zr - zf) / 2 + ends.frame, 0, 0, (zf + zr) / 2, 0.5, 'frame');
+      const slab = (x0, x1, yb, d0, d1, sgn, name) => {
+        const za = (sgn < 0 ? zf : zr) + sgn * d0, zb = (sgn < 0 ? zf : zr) + sgn * d1;
+        const hy = (top - yb) / 2, oy = (top + yb) / 2, hz = Math.abs(zb - za) / 2, oz = (za + zb) / 2;
+        if (x0 <= 0) box(x1, hy, hz, 0, oy, oz, 0.5, name);
+        else for (const sx of [-1, 1]) box((x1 - x0) / 2, hy, hz, sx * (x0 + x1) / 2, oy, oz, 0.5, name + (sx < 0 ? 'L' : 'R'));
+      };
+      for (const [sgn, e, end] of [[-1, ends.front, 'front'], [1, ends.rear, 'rear']]) {
+        if (!e) continue;
+        if (e.pan) { const [hx, y, d1] = e.pan; slab(0, hx, y, ends.frame, d1, sgn, end + 'Pan'); }
+        const [bx, by, b0, b1] = e.bumper;
+        slab(0, bx, by, b0, b1, sgn, end + 'Bumper');
+        if (e.wings) { const [wx, wy, w0, w1] = e.wings; slab(bx, wx, wy, w0, w1, sgn, end + 'Wing'); }
+      }
+    }
     // body shell: cab / cage, so rollovers land on the roof
     if (spec.body === 'buggy') box(cw * 0.5, 0.55, 0.95, 0, ch / 2 + 0.55, 0.1, 0.4);
     if (spec.body === 'pickup') { box(cw * 0.5, 0.5, 0.95, 0, ch / 2 + 0.5, -0.35, 0.4); box(cw * 0.5, 0.22, cl * 0.2, 0, ch / 2 + 0.22, cl * 0.3, 0.4); }
-    if (spec.body === 'taco') { box(cw * 0.5, 0.48, 0.95, 0, ch / 2 + 0.48, -0.25, 0.4); box(cw * 0.5, 0.3, cl * 0.17, 0, ch / 2 + 0.2, -cl * 0.33, 0.4); box(cw * 0.5, 0.25, cl * 0.17, 0, ch / 2 + 0.25, cl * 0.3, 0.4); }
-    if (spec.body === 'lc70') { box(cw * 0.5, 0.62, 1.55, 0, ch / 2 + 0.62, 0.55, 0.4); box(cw * 0.48, 0.3, 0.6, 0, ch / 2 + 0.3, -cl * 0.36, 0.4); }
+    if (spec.body === 'taco') { box(cw * 0.5, 0.48, 0.95, 0, ch / 2 + 0.48, -0.25, 0.4, 'cab'); box(cw * 0.5, 0.3, cl * 0.17, 0, ch / 2 + 0.2, -cl * 0.33, 0.4, 'hood'); box(cw * 0.5, 0.25, cl * 0.17, 0, ch / 2 + 0.25, cl * 0.3, 0.4, 'bed'); }
+    if (spec.body === 'lc70') { box(cw * 0.5, 0.62, 1.55, 0, ch / 2 + 0.62, 0.55, 0.4, 'cab'); box(cw * 0.48, 0.3, 0.6, 0, ch / 2 + 0.3, -cl * 0.36, 0.4, 'hood'); }
     if (spec.body === 'wrx') {
       box(cw * 0.5, 0.3, cl * 0.48, 0, ch / 2 + 0.2, 0, 0.4); box(cw * 0.44, 0.28, 1.15, 0, ch / 2 + 0.62, 0.15, 0.4);
       // The sedan's underside hangs below the frame box (0.39 m up). In the model

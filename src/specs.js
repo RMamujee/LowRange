@@ -11,7 +11,14 @@ export const ALL_VEHICLES = [
     blurb: 'Lifted mid-size double-cab pickup. Independent front, solid rear with an e-locker, 6-speed manual.',
     body: 'taco',
     color: 0x7d7a4a, // olive, as in the reference art
-    chassis: { mass: 1750, size: [1.85, 0.6, 5.35], comY: -0.08 },
+    // ends: as the Cruiser's (see there), after public/models/vehicles/taco.glb; ground 0.825 m
+    // below the centre. Front: IFS skid plate 0.545 m up to 0.74 m past the axle, bumper 0.61 m,
+    // wings raised to 0.74 m (drawn 0.62-0.64 m, swept back to 0.75 m at the corner). Rear as drawn:
+    // frame rails 0.53 m out to the bumper, bumper 0.57 m reaching 1.11 m.
+    chassis: { mass: 1750, size: [1.85, 0.6, 5.35], comY: -0.08,
+      ends: { frame: 0.35,
+        front: { pan: [0.4, -0.28, 0.74], bumper: [0.4, -0.215, 0.74, 0.96], wings: [0.9, -0.085, 0.62, 0.93] },
+        rear: { pan: [0.42, -0.295, 0.95], bumper: [0.85, -0.255, 0.95, 1.11] } } },
     wheelbase: 3.24, track: 1.62,
     axleY: -0.36,
     tire: { radius: 0.465, width: 0.32, mass: 36 }, // 37"
@@ -33,7 +40,17 @@ export const ALL_VEHICLES = [
     blurb: 'Boxy old-school 4x4 wagon. Solid axles both ends, diff locks front and rear, torquey V8 diesel. Built to outlast you.',
     body: 'lc70',
     color: 0xe9e4d4,
-    chassis: { mass: 2050, size: [1.8, 0.65, 4.9], comY: -0.02 },
+    // ends: collision ends after the model (public/models/vehicles/lc70.glb; src/vehicle.js),
+    // chassis-local y (ground is 0.855 m below the centre at stock ride height), distances out
+    // from each axle. pan: [half width, bottom y, reach]; bumper: [half width, bottom y, from, to];
+    // wings: [outer half width, bottom y, from, to]. The model's front bumper is 0.60 m up and
+    // reaches 1.06 m past the axle; its outer wings are 0.14 m higher here than drawn (0.74 m) so a ledge
+    // taken at 45 degrees meets the tyre first (the drawn bumper corner stands 0.53 m ahead of
+    // the tyre and 0.04 m outboard of it). The rear follows the model as drawn (0.61 m).
+    chassis: { mass: 2050, size: [1.8, 0.65, 4.9], comY: -0.02,
+      ends: { frame: 0.35,
+        front: { pan: [0.45, -0.195, 0.82], bumper: [0.25, -0.255, 0.8, 1.06], wings: [0.9, -0.115, 0.6, 1.03] },
+        rear: { pan: [0.36, -0.315, 0.7], bumper: [0.9, -0.245, 0.8, 1.06] } } },
     wheelbase: 2.73, track: 1.56,
     axleY: -0.4,
     tire: { radius: 0.455, width: 0.3, mass: 36 }, // 36"
