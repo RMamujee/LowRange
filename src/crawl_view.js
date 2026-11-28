@@ -52,13 +52,13 @@ export function buildCrawlView(scene, looseProps) {
     const last = st.n === STAGES.length;
     // the stage number big (a stage is picked out from far down the course), the name beside it
     const label = DIFF[st.diff].label.toUpperCase();
-    const gt = gateArch(st.gateS, st.width, st.diff, last
+    const gt = gateArch(st.gateS, st.gate.w ?? st.width, st.diff, last
       ? { title: 'SUMMIT', sub: 'FINISH · THE GAUNTLET' }
       : { title: st.name, sub: st.n === 1 ? `START · ${label}` : label, diff: st.diff, num: st.n, numScale: 3, maxTitleW: 56 });
     root.add(gt);
     // signpost on the left, before the gate (so its post never hides it), toed in to the driver
     const face = fitFace(last ? { title: 'SUMMIT', sub: 'You made it' } : { title: st.name, sub: `${DIFF[st.diff].label} · ${st.len.toFixed(0)} m`, diff: st.diff, num: st.n, maxTitleW: 56 }, { m: SIGN_M });
-    const p = pathPoint(t, st.s0 - 1), side = -(st.width / 2 + 1.0 + face.w / 2);
+    const p = pathPoint(t, st.s0 - 1), side = -(widthOf(t, st.s0 - 1) / 2 + 1.0 + face.w / 2);
     const sx = p.x - p.tz * side, sz = p.z + p.tx * side;
     root.add(signpost(sx, sz, faceYaw([-p.tx, -p.tz], sx, sz, p.x, p.z, 0.2), face));
     return gt;
@@ -70,10 +70,33 @@ export function buildCrawlView(scene, looseProps) {
   for (let s = 6; s < t.length - 4; s += 11) {
     const st = MAP.stageAt(s);
     if (st.summit || Math.abs(s - st.gateS) < 4) continue;
-    const p = pathPoint(t, s), off = (st.width / 2 + 0.9) * side; side = -side;
+    const p = pathPoint(t, s), off = (widthOf(t, s) / 2 + 0.9) * side; side = -side;
     if (off > 0 && STAGES.some((q) => q.spur !== undefined && s > q.s0 - 22 && s < q.s0)) continue; // spur mouths
     const x = p.x - p.tz * off, z = p.z + p.tx * off;
     (byDiff[st.diff] ||= []).push([x, heightAt(x, z), z]);
+  }
+  // where a stage's lines split: a pair of posts either side of each line's way in (topped with the
+  // stage's colour for the easy line, black for the hard one, red for the extreme one) and a small
+  // sign naming the lines left to right
+  const lanePosts = { easy: [], hard: [], extreme: [] }, LABEL = { easy: 'EASY', hard: 'HARD', extreme: 'EXTREME' };
+  for (const st of STAGES) {
+    if (!st.bands.length) continue;
+    const u = st.zone[0], s = st.s0 + u, p = pathPoint(t, s);
+    for (const b of st.bands) for (const d of [-1.7, 1.7]) {
+      const L = st.lineLat(b.name, u) + d, x = p.x - p.tz * L, z = p.z + p.tx * L;
+      (lanePosts[b.name] ||= []).push([x, heightAt(x, z), z]);
+      if (b.name === 'easy') (byDiff[st.diff] ||= []).push([x, heightAt(x, z), z]);
+    }
+    const face = fitFace({ title: 'LINES', sub: st.bands.map((b) => LABEL[b.name]).join(' · '), diff: st.diff }, { m: 0.04 });
+    const q = pathPoint(t, s - 2), side = -(widthOf(t, s - 2) / 2 + 0.8 + face.w / 2), sx = q.x - q.tz * side, sz = q.z + q.tx * side;
+    root.add(signpost(sx, sz, faceYaw([-q.tx, -q.tz], sx, sz, q.x, q.z, 0.2), face));
+  }
+  for (const [name, col, em] of [['hard', 0x111111, 0], ['extreme', 0xc8281e, 0x400a06]]) {
+    if (!lanePosts[name].length) continue;
+    const pm = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), lanePosts[name].length);
+    const tm = new THREE.InstancedMesh(topG, new THREE.MeshStandardMaterial({ color: col, emissive: em }), lanePosts[name].length);
+    lanePosts[name].forEach(([x, y, z], i) => { m4.makeTranslation(x, y + 0.55, z); pm.setMatrixAt(i, m4); m4.makeTranslation(x, y + 1.2, z); tm.setMatrixAt(i, m4); });
+    root.add(pm, tm);
   }
   const posts = Object.values(byDiff).flat();
   const postMesh = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), posts.length);
@@ -199,6 +222,27 @@ function buildCourseView(scene, C) {
     if (st.walls) continue; // the gully's boulder banks mark it well enough
     const x = p.x - p.tz * off, z = p.z + p.tx * off;
     (byDiff[st.diff] ||= []).push([x, heightAt(x, z), z]);
+  }
+  // where a section's lines split (Camber Ridge, Cobble Gully): posts either side of each line's way in
+  // (the section's colour for the easy line, black for hard, red for extreme) and a LINES sign
+  const lanePosts = { hard: [], extreme: [] };
+  for (const st of C.stages) {
+    if (!st.bands?.length) continue;
+    const u = 12, s = st.s0 + u, p = pathPoint(C, s);
+    for (const b of st.bands) for (const d of [-1.7, 1.7]) {
+      const L = st.lineLat(b.name, u) + d, x = p.x - p.tz * L, z = p.z + p.tx * L;
+      (b.name === 'easy' ? (byDiff[st.diff] ||= []) : lanePosts[b.name]).push([x, heightAt(x, z), z]);
+    }
+    const face = fitFace({ title: 'LINES', sub: st.bands.map((b) => b.name.toUpperCase()).join(' · '), diff: st.diff }, { m: 0.04 });
+    const q = pathPoint(C, s - 2), side = -(widthOf(C, s - 2) / 2 + 0.8 + face.w / 2), sx = q.x - q.tz * side, sz = q.z + q.tx * side;
+    root.add(signpost(sx, sz, faceYaw([-q.tx, -q.tz], sx, sz, q.x, q.z, 0.2), face));
+  }
+  for (const [name, col, em] of [['hard', 0x111111, 0], ['extreme', 0xc8281e, 0x400a06]]) {
+    if (!lanePosts[name].length) continue;
+    const pm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 1.1, 0.12), new THREE.MeshStandardMaterial({ color: 0x6b5a44 }), lanePosts[name].length);
+    const tm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.25, 0.2), new THREE.MeshStandardMaterial({ color: col, emissive: em }), lanePosts[name].length);
+    lanePosts[name].forEach(([x, y, z], i) => { m4.makeTranslation(x, y + 0.55, z); pm.setMatrixAt(i, m4); m4.makeTranslation(x, y + 1.2, z); tm.setMatrixAt(i, m4); });
+    root.add(pm, tm);
   }
   const posts = Object.values(byDiff).flat();
   if (posts.length) {

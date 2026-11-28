@@ -47,29 +47,36 @@ for (const st of STAGES) {
   console.log(`${String(st.n).padStart(2)}  ${st.name.padEnd(20)} ${st.s0.toFixed(0).padStart(5)} ${st.len.toFixed(0).padStart(5)} ${climb.toFixed(1).padStart(6)}  ${(gmax * 100).toFixed(0)}% (${(Math.atan(gmax) * 57.3).toFixed(0)} deg)`);
 }
 
-console.log('step-ups: stage@u  rise(design)  lip over tread: left/centre/right  tread grade  cap');
+// Wide stages carry one slab per lane (r.step.lane / lat): each is measured on its own line; the
+// climbing cap holds for the easy (rated) line, and no line is taller than any rig walks.
+console.log('step-ups: stage@u lane  rise(design)  lip over tread: left/line/right  tread grade  cap');
 for (const r of rocks.filter((r) => r.step)) {
-  const { stage, u, rise, grade } = r.step, st = STAGES[stage - 1];
-  const hs = [-1.0, 0, 1.0].map((lat) => {
+  const { stage, u, rise, grade, lane } = r.step, st = STAGES[stage - 1], lc = lane ? t.lineAt(lane, st.s0 + u) : 0;
+  const hs = [lc - 0.8, lc, lc + 0.8].map((lat) => {
     const s = st.s0 + u;
     const [bx, bz] = at(s - 0.7, lat), [lx, lz] = at(s + 0.25, lat);
     return surf(lx, lz) - surf(bx, bz) - grade * 0.95;
   });
-  const cap = stepCap(grade), top = Math.max(...hs);
-  const ok = Math.min(...hs) <= cap;
-  console.log(`  ${stage}@${u.toFixed(1).padStart(4)}  ${rise.toFixed(2)}  ${hs.map((h) => h.toFixed(2)).join('/')}  ${(grade * 100).toFixed(0).padStart(3)}%  ${cap.toFixed(2)}${ok ? '' : '  OVER'}`);
+  const cap = stepCap(grade), top = Math.max(...hs), rated = !lane || lane === 'easy';
+  const ok = !rated || Math.min(...hs) <= cap;
+  console.log(`  ${stage}@${u.toFixed(1).padStart(4)} ${(lane ?? '-').padEnd(7)} ${rise.toFixed(2)}  ${hs.map((h) => h.toFixed(2)).join('/')}  ${(grade * 100).toFixed(0).padStart(3)}%  ${cap.toFixed(2)}${ok ? '' : '  OVER'}`);
   if (!ok) bad(`stage ${stage} step at u=${u}: lowest lip ${Math.min(...hs).toFixed(2)} m > cap ${cap.toFixed(2)} m at ${(grade * 100).toFixed(0)}%`);
-  if (top > 0.68) bad(`stage ${stage} step at u=${u}: ${top.toFixed(2)} m is taller than any rig walks`);
+  // (an optional extreme line may go past the staircase limit, up to the best single-ledge climb
+  // measured: the Cruiser's 0.75 m chamfered run-up, test/ledgeclimb.mjs)
+  const ceiling = lane === 'extreme' ? 0.75 : 0.68;
+  if (top > ceiling) bad(`stage ${stage} step at u=${u}${lane ? ` (${lane})` : ''}: ${top.toFixed(2)} m is taller than any rig walks`);
 }
 for (const r of rocks.filter((r) => r.gate)) {
-  const { stage, u, top } = r.gate, st = STAGES[stage - 1], s = st.s0 + u;
-  const p = pathPoint(t, s), hd = 1.7, g = (pathPoint(t, s + 1).h - pathPoint(t, s - 1).h) / 2;
-  const hs = [-1.0, 0, 1.0].map((lat) => { const [bx, bz] = at(s - hd - 1.2, lat), [lx, lz] = at(s - hd + 0.6, lat); return surf(lx, lz) - surf(bx, bz) - g * 1.8; });
-  console.log(`  gatekeeper ${stage}@${u}  ${top.toFixed(2)}  ${hs.map((h) => h.toFixed(2)).join('/')}  ${(g * 100).toFixed(0)}%`);
-  if (Math.min(...hs) > stepCap(g)) bad(`gatekeeper ${stage}@${u} too tall`);
+  const { stage, u, top, lane } = r.gate, st = STAGES[stage - 1], s = st.s0 + u, lc = lane ? t.lineAt(lane, s) : 0;
+  const hd = 1.7, g = (pathPoint(t, s + 1).h - pathPoint(t, s - 1).h) / 2;
+  const hs = [lc - 0.8, lc, lc + 0.8].map((lat) => { const [bx, bz] = at(s - hd - 1.2, lat), [lx, lz] = at(s - hd + 0.6, lat); return surf(lx, lz) - surf(bx, bz) - g * 1.8; });
+  console.log(`  ledge ${stage}@${u} ${(lane ?? '-').padEnd(7)} ${top.toFixed(2)}  ${hs.map((h) => h.toFixed(2)).join('/')}  ${(g * 100).toFixed(0)}%`);
+  if ((!lane || lane === 'easy') && Math.min(...hs) > stepCap(g)) bad(`ledge ${stage}@${u} too tall on the easy line`);
+  if (Math.max(...hs) > 0.75) bad(`ledge ${stage}@${u} (${lane}): ${Math.max(...hs).toFixed(2)} m is taller than any rig walks`);
 }
 // spacing: a step's slab ends before the next face (no overlapping lips)
-for (const st of STAGES.filter((s) => s.steps)) st.steps.at.slice(1).forEach((u, k) => { if (u - st.steps.at[k] < st.steps.depth + 0.4) bad(`stage ${st.n}: steps ${st.steps.at[k]} and ${u} overlap`); });
+// (per lane: each lane climbs its own staircase)
+for (const st of STAGES.filter((s) => s.steps)) for (const [lane, L] of Object.entries(st.steps.byLane)) L.at.slice(1).forEach((u, k) => { if (u - L.at[k] < st.steps.depth + 0.4) bad(`stage ${st.n} ${lane}: steps ${L.at[k]} and ${u} overlap`); });
 
 // clear lane: in every metre of every stage there is a gap wide enough for the widest track +
 // tyres (lc70 1.86 m) in which the surface stays within 0.62 m of the tread (crawlable)
@@ -78,7 +85,7 @@ const need = 1.86;
 for (const st of STAGES) {
   let worst = 99, wAt = 0;
   for (let u = 7; u < st.len - 3; u += 1) {
-    const s = st.s0 + u, hw = st.width / 2 + 0.3, p = pathPoint(t, s);
+    const s = st.s0 + u, hw = t.pts[Math.min(t.pts.length - 1, Math.round(s / 0.5))].w / 2 + 0.3, p = pathPoint(t, s);
     let run = 0, bestRun = 0;
     for (let lat = -hw; lat <= hw; lat += 0.1) {
       const [x, z] = at(s, lat);
@@ -87,9 +94,18 @@ for (const st of STAGES) {
     }
     if (bestRun < worst) { worst = bestRun; wAt = u; }
   }
-  const sq = st.squeezes ? ` (squeeze gap ${st.squeezes.gap} m)` : '';
-  console.log(`  ${String(st.n).padStart(2)} ${st.name.padEnd(20)} ${worst.toFixed(1)} m at u=${wAt}${sq}`);
+  // and near the easy (rated) line: the widest clear run within 3 m of it
+  let worstE = 99, eAt = 0;
+  for (let u = 7; u < st.len - 3; u += 1) {
+    const s = st.s0 + u, o = t.lineAt('easy', s);
+    let run = 0, bestRun = 0;
+    for (let lat = o - 3; lat <= o + 3; lat += 0.1) { const [x, z] = at(s, lat); const ok = surf(x, z, true) - heightAt(x, z) < 0.45; run = ok ? run + 0.1 : 0; bestRun = Math.max(bestRun, run); }
+    if (bestRun < worstE) { worstE = bestRun; eAt = u; }
+  }
+  const sq = st.squeezes ? ` (squeeze gaps ${JSON.stringify(st.squeezes.gap).replace(/"/g, '')} m)` : '';
+  console.log(`  ${String(st.n).padStart(2)} ${st.name.padEnd(20)} ${worst.toFixed(1)} m at u=${wAt}; by the easy line ${worstE.toFixed(1)} m at u=${eAt}${sq}`);
   if (worst < need) bad(`stage ${st.n}: clear lane only ${worst.toFixed(1)} m at u=${wAt}`);
+  if (worstE < need) bad(`stage ${st.n}: the easy line's clear lane only ${worstE.toFixed(1)} m at u=${eAt}`);
 }
 
 // bypass track + spurs: grades
