@@ -277,10 +277,15 @@ export function nearLine(t, x, z, margin) {
 // slabs are flat-topped like the narrow stairways', their top following the tread grade g (without the step ramps).
 export function wideStep(t, st, g, kit, R, out, heightAt) {
   const c = t.cruxes.find((q) => st.s >= q.s0 - 0.5 && st.s <= q.s1 + 0.5), p = pathPoint(t, st.s), w = t.halfWidthAt(st.s);
-  const lanes = (c ? c.lanes.filter((l) => l.line) : [{ line: 'hard', lat: 0 }]).slice().sort((a, b) => a.lat - b.lat);
-  const edges = [-Math.max(w.right, -lanes[0].lat + lanes[0].w / 2) - 1.2]; // (the band spans the corridor, and every lane even where the corridor pinches)
+  // (a band outside every crux, e.g. in a gate mouth: one slab across the corridor with the nearest crux's easy face)
+  const near = t.cruxes.reduce((b, q) => (!b || Math.min(Math.abs(q.s0 - st.s), Math.abs(q.s1 - st.s)) < Math.min(Math.abs(b.s0 - st.s), Math.abs(b.s1 - st.s)) ? q : b), null);
+  const easyLane = near?.lanes.find((l) => l.line === 'easy') ?? { line: 'easy', less: 0 };
+  const lanes = (c ? c.lanes.filter((l) => l.line) : [{ ...easyLane, lat: 0, w: 0.1 }]).slice().sort((a, b) => a.lat - b.lat);
+  // (the band spans the corridor, every lane and every line crossing it, even where the corridor pinches)
+  const ls = LINE_NAMES.flatMap((n) => [t.lines[n](st.s), t.lines[n](st.s + st.depth)]), lo = Math.min(...ls) - LANE_W / 2, hi = Math.max(...ls) + LANE_W / 2;
+  const edges = [-Math.max(w.right, -lanes[0].lat + lanes[0].w / 2, -lo) - 1.2];
   for (let k = 1; k < lanes.length; k++) edges.push((lanes[k - 1].lat + lanes[k - 1].w / 2 + lanes[k].lat - lanes[k].w / 2) / 2);
-  edges.push(Math.max(w.left, lanes.at(-1).lat + lanes.at(-1).w / 2) + 1.2);
+  edges.push(Math.max(w.left, lanes.at(-1).lat + lanes.at(-1).w / 2, hi) + 1.2);
   const faces = [];
   lanes.forEach((ln, k) => {
     const rise = Math.min(ln.line === 'easy' ? st.rise - (ln.less ?? 0.1) : ln.line === 'extreme' ? Math.min(st.rise + (ln.lip ?? 0.12), 0.68) : st.rise, ln.max ?? 9); // (ln.max: a cap on the lane's face)

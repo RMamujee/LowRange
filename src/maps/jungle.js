@@ -454,12 +454,12 @@ export const TRAILS = [
   buildPath({ name: 'Ember Stairs', kind: 'trail', diff: 'dblack', width: 5.6, mat: 'rock', pts: STAIR_PTS, start: { pad: SUMMIT_LOT }, end: { pad: RIM }, win: 4, maxGrade: 0.3,
     steps: [24, 31, 38, 52, 59, 66, 80, 86.5, 93].map((s, k) => ({ s, rise: [0.32, 0.36, 0.4, 0.4, 0.42, 0.44, 0.44, 0.45, 0.45][k], depth: 3.0 })),
     cross: { k: 0.3, up: 0.1, down: 0.1, from: 2.4 },
-    crawl: { base: [4.5, 4.5], ends: 8, cruxes: [
+    crawl: { base: [4.5, 4.5], ends: 6, cruxes: [
       { name: 'Lower Flight', s: 31.5, len: 19, lanes: [
         { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: 4.4, w: 4 }, { line: 'extreme', lat: -4.4, w: 4, lip: 0.12 }] },
       { name: 'Middle Flight', s: 59.5, len: 19, lanes: [
         { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: -4.4, w: 4 }, { line: 'extreme', lat: 4.4, w: 4, lip: 0.12 }] },
-      { name: 'Top Flight', s: 85.5, len: 21, lanes: [
+      { name: 'Top Flight', s: 81.5, len: 13, lanes: [
         { line: 'easy', lat: 0, w: 4, less: 0.06, max: 0.36 }, { line: 'hard', lat: 4.4, w: 4 }, { line: 'extreme', lat: -4.4, w: 4, lip: 0.12 }] },
     ] } }),
 ];
