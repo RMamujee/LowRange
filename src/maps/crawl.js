@@ -76,11 +76,11 @@ export const STAGE_DEFS = [
       hard: { every: 3.0, size: [0.55, 1.15], top: 0.6, clear: 1.5, crawl: 0.6, crawlTop: 0.3 },
       extreme: { every: 1.8, overs: [0.42, 0.52], size: [0.9, 1.2] } },
     gatekeepers: { at: [13, 45], top: { easy: 0.3, hard: 0.45, extreme: 0.6 }, depth: 3.4 } }, // full-width rock ledges: the first test of tyre size
-  { name: 'The Climb', diff: 'black', blurb: 'Slab at 20, 28 then 35 degrees, then loose gravel. Rock ribs give grip on the left; ledges on the right.',
+  { name: 'The Climb', diff: 'black', blurb: 'Slab at 20, 28 then 35 degrees, then loose gravel. Smooth slab on the left, rock ribs up the middle, ledges on the right.',
     path: [['s', 82]], widths: [[0, 7], [6, 7], [10, 14], [74, 14], [79, 7]], rough: 0.025, mat: 'rock',
     grades: [[0, 0.03], [8, Math.tan(20 / 57.2958)], [17, Math.tan(28 / 57.2958)], [26, Math.tan(35 / 57.2958)], [34, 0.3], [38, 0.2], [50, 0.04]],
     gravel: [37, 52], lanes: [['easy', -4.2], ['hard', 0], ['extreme', 4.2]],
-    ribs: { lane: 'easy', from: 8, to: 38, every: 1.3, proud: 0.12 },        // traction edges across the easy line
+    ribs: { lane: 'hard', from: 8, to: 38, every: 1.3, proud: 0.12 },        // rows of rock across the hard line: they hang the axles up
     ledges: { lane: 'extreme', at: [19, 28], rise: [0.38, 0.42], depth: 3.2 } },
   { name: 'Ledges II', diff: 'black', blurb: 'Tall ledges, first on the flat, then on a climb: 0.3 m on the left to 0.6 m on the right.',
     path: [['s', 70]], widths: [[0, 7], [6, 7], [11, 15], [63, 15], [68, 7]], rough: 0.04, mat: 'rock',
@@ -725,7 +725,7 @@ export function generateRocks() {
       let side = 1;
       for (let u = APRON + 1; u < st.len - 4; u += (spec.every ?? 3) * (0.7 + R() * 0.6)) {
         const open = st.open(u);
-        if (single ? open > 0.5 : open <= 0.5) continue;
+        if (single ? open > 0.15 : open < 0.9) continue; // (nothing where the lines are still swinging out to their lanes)
         if (st.squeezes && u > st.squeezes.at[0] - 3 && u < st.squeezes.at.at(-1) + 3) continue;
         if (st.gatekeepers && st.gatekeepers.at.some((g) => Math.abs(u - g) < st.gatekeepers.depth / 2 + 1.5)) continue;
         const s = st.s0 + u, q = at(s, 0), k = curv(s), bend = Math.min(1, Math.abs(k) * 16), hw = hwAt(s);
@@ -803,7 +803,7 @@ export function generateRocks() {
         });
       }
     }
-    // the Climb's traction ribs: rows of low rock across the easy line on the steep slab
+    // the Climb's rock ribs: rows of low rock across the hard line on the steep slab
     if (st.ribs) {
       const rb = st.ribs;
       for (let u = rb.from; u < rb.to; u += rb.every * (0.85 + R2() * 0.3)) {
