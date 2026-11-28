@@ -56,8 +56,9 @@ export function winchSpec(spec, mass) {
 
 // What audio (or anything else) can read without touching the physics: updated every physics step by
 // the active truck's winch. running: the motor turns (in or out); load: tension / rated pull (0-1);
-// direction: 1 winching in, -1 paying out, 0 stopped.
-export const WINCH_AUDIO = { running: false, load: 0, direction: 0 };
+// direction: 'in', 'out' or null. The same three fields are on the truck's Winch itself (car.winch.running,
+// .load, .direction), which is where the engine audio (src/audio.js audioStateFrom) reads them.
+export const WINCH_AUDIO = { running: false, load: 0, direction: null };
 
 // ---- small vector helpers (plain objects)
 const v3 = (x, y, z) => ({ x, y, z });
@@ -215,11 +216,14 @@ export class Winch {
     this.publish();
   }
 
+  // audio fields (also on the Winch itself): the motor runs while it is commanded with the engine on,
+  // stalled included (it strains at the cap); load = tension / rated pull on this layer, 0-1
+  get running() { return !!this.anchor && this.powered && this.cmd !== 0; }
+  get direction() { return this.running ? (this.cmd > 0 ? 'in' : 'out') : null; }
   publish() {
-    const run = this.anchor && this.powered && this.cmd !== 0 && this.stallT < WINCH.STALL_T;
-    WINCH_AUDIO.running = !!run; WINCH_AUDIO.load = Math.min(1, this.load); WINCH_AUDIO.direction = run ? this.cmd : 0;
+    WINCH_AUDIO.running = this.running; WINCH_AUDIO.load = Math.min(1, this.load); WINCH_AUDIO.direction = this.direction;
   }
 }
 
 // Stowed / no truck: the motor is silent.
-export function quietAudio() { WINCH_AUDIO.running = false; WINCH_AUDIO.load = 0; WINCH_AUDIO.direction = 0; }
+export function quietAudio() { WINCH_AUDIO.running = false; WINCH_AUDIO.load = 0; WINCH_AUDIO.direction = null; }

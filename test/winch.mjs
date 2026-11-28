@@ -289,10 +289,12 @@ if (slopeCase) {
   const game = { active: { trail: 0, t: 12 } };
   ctl.assist(game, null, null);
   check(game.active.assisted === true, 'a run during which the line pulled is marked assisted');
-  check(WINCH_AUDIO.running && WINCH_AUDIO.direction === 1 && WINCH_AUDIO.load >= 0 && WINCH_AUDIO.load <= 1, `the audio state reads the running motor (running, winching in, load ${WINCH_AUDIO.load.toFixed(2)})`);
+  check(WINCH_AUDIO.running && WINCH_AUDIO.direction === 'in' && WINCH_AUDIO.load >= 0 && WINCH_AUDIO.load <= 1, `the audio state reads the running motor (running, winching in, load ${WINCH_AUDIO.load.toFixed(2)})`);
+  const cw = car.winch; // where src/audio.js reads it: car.winch.running / .load / .direction
+  check(cw.running === true && cw.direction === 'in' && cw.load >= 0 && cw.load <= 1 && typeof cw.state !== 'object', 'car.winch carries running, load (0-1) and direction (in / out) for the audio');
   ctl.action('winchOff');
   car.step({ throttle: 0, brake: 0, steer: 0, handbrake: false }, H);
-  check(!car.winch.hooked && car.winch.row === null && car.winch.T === 0 && !WINCH_AUDIO.running, 'unhook (L / OFF): line stowed, no row, motor quiet');
+  check(!car.winch.hooked && car.winch.row === null && car.winch.T === 0 && !WINCH_AUDIO.running && !car.winch.running && car.winch.direction === null, 'unhook (L / OFF): line stowed, no row, motor quiet');
   // teleport / repair: main.js swaps in a new Vehicle (respawnFresh); the controller sees the new truck
   hookTo(W, car, manualPost(x0, z0 - 15)); car.winch.cmd = 1;
   for (let i = 0; i < 100; i++) car.step({ throttle: 0, brake: 0, steer: 0, handbrake: false }, H);
