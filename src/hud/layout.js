@@ -14,8 +14,11 @@
 import { measure, wrap } from '../ui/pixelfont.js';
 
 export const MARGIN = 10, GAP = 4;
-export const BOARDS = { cluster: [283, 77], engine: [128, 40], chassis: [200, 60], mini: [108, 146] };
+export const BOARDS = { cluster: [283, 77], engine: [136, 46], chassis: [216, 62], mini: [120, 166] };
 const ENGINE_LIFT = 3;
+// The big map board (mapview.js BigMap): title row, viewport VW x VH beside the SB-wide sidebar, legend strip LEG tall.
+export const BIGMAP = { mx: 6, my: 21, VW: 290, VH: 200, SB: 140, LEG: 13 };
+export const BIGMAP_SIZE = [BIGMAP.mx + BIGMAP.VW + 4 + BIGMAP.SB + 6, BIGMAP.my + BIGMAP.VH + 3 + BIGMAP.LEG + 5];
 // the widest / tallest big message (main.js: race lap time at letter scale 5, WRONG WAY at 3)
 export const BIG_MAX = [Math.max(measure('WRONG WAY') * 3, measure('10:23.4') * 5) + 8, 9 * 5 + 8];
 
