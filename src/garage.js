@@ -127,8 +127,11 @@ export function applyBuild(base, build) {
   // suspension
   s.axleY = base.axleY - LIFTS[b.lift];
   const su = s.susp;
+  // [ride] springs scale both axles' ride frequency, damping both bump and rebound (src/ride.js)
   su.freq *= SPRINGS[b.springs];
+  if (su.freqR) su.freqR *= SPRINGS[b.springs];
   su.zeta *= DAMPING[b.damping];
+  if (su.zetaR) su.zetaR *= DAMPING[b.damping];
   if (b.travel === 'long') {
     su.bump += 0.02; su.droop += 0.08; su.articulation += 0.1;
     if (su.arb) su.arb *= 0.6;

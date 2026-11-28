@@ -14,10 +14,10 @@ export const ALL_VEHICLES = [
     chassis: { mass: 1750, size: [1.85, 0.6, 5.35], comY: -0.08 },
     wheelbase: 3.24, track: 1.62,
     axleY: -0.36,
-    tire: { radius: 0.465, width: 0.32, mass: 36 }, // 37"
+    tire: { radius: 0.465, width: 0.32, mass: 36, rate: 270e3 }, // 37"; rate: vertical N/m per tyre at road pressure
     axleMass: 120,
     independent: [true, false],
-    susp: { freq: 1.45, zeta: 0.32, bump: 0.12, droop: 0.16, springSpacing: 1.15, articulation: 0.28, arb: 9000 },
+    susp: { freq: 1.4, freqR: 1.5, zeta: 0.34, zetaR: 0.55, bump: 0.12, droop: 0.16, springSpacing: 1.15, springSpacingR: 1.11, articulation: 0.28, arb: 9000 },
     steer: { max: 0.6, rate: 1.5 },
     engine: { idle: 700, redline: 6000, peakT: 490, peakRpm: 4600, inertia: 0.2, friction: 24, sound: 'v6' },
     gears: [3.8, 2.35, 1.69, 1.31, 1.0, 0.82], reverse: 3.6,
@@ -36,9 +36,9 @@ export const ALL_VEHICLES = [
     chassis: { mass: 2050, size: [1.8, 0.65, 4.9], comY: -0.02 },
     wheelbase: 2.73, track: 1.56,
     axleY: -0.4,
-    tire: { radius: 0.455, width: 0.3, mass: 36 }, // 36"
+    tire: { radius: 0.455, width: 0.3, mass: 36, rate: 280e3 }, // 36"
     axleMass: 150,
-    susp: { freq: 1.4, zeta: 0.30, bump: 0.13, droop: 0.18, springSpacing: 1.15, articulation: 0.33 },
+    susp: { freq: 1.35, freqR: 1.45, zeta: 0.34, zetaR: 0.55, bump: 0.13, droop: 0.18, springSpacing: 1.15, springSpacingR: 1.1, articulation: 0.33 },
     steer: { max: 0.56, rate: 1.3 },
     engine: { idle: 700, redline: 3800, peakT: 880, peakRpm: 2000, inertia: 0.35, friction: 34, sound: 'diesel' },
     gears: [4.31, 2.33, 1.44, 1.0, 0.84], reverse: 4.3,
@@ -57,11 +57,11 @@ export const ALL_VEHICLES = [
     chassis: { mass: 1180, size: [1.7, 0.4, 4.4], comY: -0.12, floor: -0.34 },
     wheelbase: 2.62, track: 1.52,
     axleY: -0.26,
-    tire: { radius: 0.33, width: 0.21, mass: 20 },
+    tire: { radius: 0.33, width: 0.21, mass: 20, rate: 220e3 },
     axleMass: 70,
     independent: [true, true],
     awd: true,
-    susp: { freq: 1.7, zeta: 0.36, bump: 0.11, droop: 0.12, springSpacing: 1.2, articulation: 0.2, arb: 7000 },
+    susp: { freq: 1.65, freqR: 1.75, zeta: 0.4, zetaR: 0.65, bump: 0.11, droop: 0.12, springSpacing: 1.2, articulation: 0.2, arb: 7000 },
     steer: { max: 0.55, rate: 2.6 },
     engine: { idle: 950, redline: 7500, peakT: 570, peakRpm: 4200, inertia: 0.13, friction: 20, sound: 'boxer' },
     gears: [3.0, 2.1, 1.65, 1.35, 1.12, 0.95], reverse: 3.2,

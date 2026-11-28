@@ -12,6 +12,7 @@ import { MAT, MAT_INFO, materialAt, GROUP_VEHICLE, sandDepthAt } from './terrain
 import { CrashModel } from './damage/crash.js';
 import { MUD, mudDamping } from './mud.js'; // [mud]
 import { DeepSand } from './deepsand.js'; // [deep sand] dunes on maps with a sand depth field (the desert)
+import { RIDE, rideAxle, damperC, rideMotor } from './ride.js'; // [ride] spring / bump stop / strap / damper curves
 
 const G = 9.81;
 const WHEEL_G = 13; // windowed wheel load (in static corner loads) above which suspension bends
@@ -118,14 +119,14 @@ export class Vehicle {
     this.chassis = cb;
     this.chassisI = v(M / 12 * ((ch * 2.4) ** 2 + cl ** 2) * 0.8 * 1.15, M / 12 * (cw ** 2 + cl ** 2) * 0.8 * 1.15, M / 12 * ((ch * 2.4) ** 2 + cw ** 2) * 0.8 * 1.15);
 
-    const sprung = M / 2;
     const s = spec.susp;
-    const omega = 2 * Math.PI * s.freq;
-    const k = sprung * omega * omega;
-    const c = 2 * s.zeta * Math.sqrt(k * sprung);
-    const sag = (sprung * G) / k;
-    const sp2 = (s.springSpacing / 2) ** 2;
-    this.suspK = k; this.sag = sag; this.suspKC = { k, c, sp2 };
+    // [ride] spring spacing per axle (springSpacingR: a rear leaf pack often sits further inboard)
+    const spOf = (a) => (a === 1 && s.springSpacingR) || s.springSpacing;
+    // [ride] per-joint suspension constants for each axle (src/ride.js); rideStep sets the motors
+    const ind0 = spec.independent || [false, false];
+    this.rideP = [0, 1].map((a) => rideAxle(spec, a, ind0[a] ? 2 : 1));
+    this.sp2 = [0, 1].map((a) => (spOf(a) / 2) ** 2);
+    this.rideOff = null; this.rideCache = [];
 
     this.axles = [];
     this.knuckles = [];
@@ -183,7 +184,7 @@ export class Vehicle {
           pj.limitsEnabled = true; pj.limits = [-s.droop, s.bump];
           const pjoint = world.createImpulseJoint(pj, cb, carrier, true);
           pjoint.configureMotorModel(R.MotorModel.ForceBased);
-          pjoint.configureMotorPosition(-sag, k / 2, c / 2);
+          pjoint.configureMotorPosition(-this.rideP[a].sag, this.rideP[a].k, this.rideP[a].cB); // [ride]
           // lower control arm / CV boot that can drag on rocks
           world.createCollider(R.ColliderDesc.ball(t.radius * 0.16).setTranslation(-Math.sign(x) * 0.35, -0.08, 0)
             .setDensity(0).setFriction(0.5).setCollisionGroups(GROUP_VEHICLE), carrier);
@@ -203,7 +204,7 @@ export class Vehicle {
       pj.limitsEnabled = true; pj.limits = [-s.droop, s.bump];
       const pjoint = world.createImpulseJoint(pj, cb, slider, true);
       pjoint.configureMotorModel(R.MotorModel.ForceBased);
-      pjoint.configureMotorPosition(-sag, k, c);
+      pjoint.configureMotorPosition(-this.rideP[a].sag, this.rideP[a].k, this.rideP[a].cB); // [ride]
       const axle = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(p.x, p.y, p.z).setRotation(rot)
         .setAdditionalMassProperties(am, v(0, 0, 0), v(am * 0.15, am * spec.track ** 2 / 12, am * spec.track ** 2 / 12), ident)
         .setCanSleep(false));
@@ -211,7 +212,7 @@ export class Vehicle {
       rj.limitsEnabled = true; rj.limits = [-s.articulation, s.articulation];
       const rjoint = world.createImpulseJoint(rj, slider, axle, true);
       rjoint.configureMotorModel(R.MotorModel.ForceBased);
-      rjoint.configureMotorPosition(0, k * sp2, c * sp2 * 1.4);
+      rjoint.configureMotorPosition(0, this.rideP[a].k * this.sp2[a], this.rideP[a].cB * this.sp2[a] * (s.rollDamp ?? RIDE.rollDamp)); // [ride]
       // diff pumpkin + axle tube colliders (these hang up on rocks, as they should)
       const pumpR = t.radius * 0.32;
       world.createCollider(R.ColliderDesc.ball(pumpR).setTranslation(0.12, -0.02, 0).setDensity(0).setFriction(0.5)
@@ -250,6 +251,12 @@ export class Vehicle {
     this.events = this.events || new R.EventQueue(true);
     this.allBodies = [cb, ...this.axles.flatMap((a) => (a.independent ? a.carriers : [a.slider, a.body])), ...this.knuckles, ...this.wheels];
     this.damageBodies = [cb, ...this.axles.map((a) => a.body).filter(Boolean)];
+    // [ride] rubber and steel landing on rock, ground or a prop don't bounce: no restitution, and
+    // the Min rule so a bouncy world collider (props are 0.2) can't add any either
+    for (const b of this.allBodies) for (let k2 = 0; k2 < b.numColliders(); k2++) {
+      const col = b.collider(k2);
+      col.setRestitution(0); col.setRestitutionCombineRule(R.CoefficientCombineRule.Min);
+    }
     this.wheelF = [0, 0, 0, 0]; // low-passed wheel contact force (N), for wheel damage
     this.wheelV = [0, 0, 0, 0]; // closing speed of each wheel's latest contacts (m/s), held ~60 ms
     this.wheelPre = [null, null, null, null]; // pre-step wheel velocities
@@ -268,18 +275,56 @@ export class Vehicle {
   // Badly bent springs / arms (health under 0.8): that corner sits lower (spring target raised),
   // a solid axle leans. Light damage changes nothing (the handling stays exactly as it was).
   applySag() {
-    const { k, c, sp2 } = this.suspKC, h = this.health.susp;
+    const h = this.health.susp;
     const bent = (i) => Math.max(0, 0.8 - h[i]) / 0.8;
     const sig = this.axles.map((ax, a) => bent(a * 2).toFixed(3) + bent(a * 2 + 1).toFixed(3)).join();
-    if (sig === this.sagSig) return; // nothing changed: no joint calls
+    if (sig === this.sagSig) return; // nothing changed
     this.sagSig = sig;
-    this.axles.forEach((ax, a) => {
+    // [ride] spring seat offsets (independent: per corner; solid: heave, roll), used by rideStep
+    this.rideOff = this.axles.map((ax, a) => {
       const bl = bent(a * 2), br = bent(a * 2 + 1);
+      return ax.independent ? [0.12 * bl, 0.12 * br] : [0.06 * (bl + br), 0.1 * (bl - br)];
+    });
+    this.rideStep();
+  }
+
+  // [ride] The suspension joints' motors for this step: spring, progressive lossy bump stop,
+  // droop strap and the two-slope bump / rebound damper (src/ride.js), linearised about each
+  // joint's present position and speed. Rapier solves the motor implicitly, so firm damping and
+  // a stiff bump stop stay stable. A solid axle has one damper per side: its heave and roll
+  // damping come from both dampers' coefficients at their own shaft speeds.
+  rideStep() {
+    const cb = this.chassis, cq = cb.rotation(), inv = qconj(cq), cp = cb.translation();
+    const up = qrot(cq, v(0, 1, 0)), zAx = qrot(cq, v(0, 0, 1));
+    const s = this.spec.susp, rollD = s.rollDamp ?? RIDE.rollDamp;
+    const cache = this.rideCache;
+    let n = 0;
+    const set = (joint, t, K, C) => { // skip the joint call when nothing moved
+      const c = cache[n] || (cache[n] = {}); n++;
+      if (c.j === joint && Math.abs(t - c.t) < 2e-5 && Math.abs(K - c.K) <= 0.002 * K && Math.abs(C - c.C) <= 0.01 * C) return;
+      joint.configureMotorPosition(t, K, C);
+      c.j = joint; c.t = t; c.K = K; c.C = C;
+    };
+    const rel = (body) => {
+      const p = body.translation(), lp = qrot(inv, sub(p, cp));
+      return [lp.y - this.spec.axleY, dot(sub(body.linvel(), cb.velocityAtPoint(p)), up)];
+    };
+    this.axles.forEach((ax, a) => {
+      const P = this.rideP[a], off = (this.rideOff && this.rideOff[a]) || [0, 0];
       if (ax.independent) {
-        ax.pjoints.forEach((pj, s) => pj.configureMotorPosition(-this.sag + 0.12 * (s ? br : bl), k / 2, c / 2));
+        ax.carriers.forEach((body, si) => {
+          const [x, vx] = rel(body);
+          const m = rideMotor(P, x, vx, damperC(P, vx), off[si]);
+          set(ax.pjoints[si], m.target, m.K, m.C);
+        });
       } else {
-        ax.pjoint.configureMotorPosition(-this.sag + 0.06 * (bl + br), k, c);
-        ax.rjoint.configureMotorPosition(0.1 * (bl - br), k * sp2, c * sp2 * 1.4);
+        const [x, vx] = rel(ax.slider);
+        const w = dot(sub(ax.body.angvel(), cb.angvel()), zAx); // axle roll rate on the chassis
+        const half = Math.sqrt(this.sp2[a]), sp2 = this.sp2[a];
+        const cl = damperC(P, vx - w * half, P.cB / 2, P.cR / 2), cr = damperC(P, vx + w * half, P.cB / 2, P.cR / 2);
+        const m = rideMotor(P, x, vx, cl + cr, off[0]);
+        set(ax.pjoint, m.target, m.K, m.C);
+        set(ax.rjoint, off[1], P.k * sp2, (cl + cr) * sp2 * rollD);
       }
     });
   }
@@ -344,6 +389,7 @@ export class Vehicle {
   // Called before each world.step.
   prePhysics(input, h) {
     const { spec, R, world } = this;
+    this.rideStep(); // [ride] suspension motors for this step
     // steering (rate limited, slower at speed)
     const kmh = Math.abs(this.speed()) * 3.6;
     const maxSteer = spec.steer.max * (1 - Math.min(0.55, kmh / 90));
