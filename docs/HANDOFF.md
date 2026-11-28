@@ -30,6 +30,36 @@ Open items to start from: the "Needs playtesting" checklists below (start with t
 | Crash damage | `src/damage/`: impact energy per contact event (impulse x closing speed, per kg), a free-form deformation cage the glTF bodies follow (zone travel caps, no-inversion, buckling), glass / lamps / tear-off parts, location-based mechanical damage (radiator + overheating, engine, corner suspension, fender drag, driveshaft, oil pan, diffs, roof). Wheel damage is windowed AND gated on closing speed (wheel or the body above it): slow crawling can't bend or snap anything. `node test/crash.mjs`, `node test/slowcrawl.mjs`, `test/crashshots.mjs`, `test/lib/damage_watch.mjs`. The HUD's engine board (above the cluster) reads `car.crash.mech` + `car.dt.dead` / `powerScale` through the pure `engineStatus` in `src/hud/engine_state.js`: temperature strip with NORMAL / HOT (> 0.75, steam) / OVERHEATING (> 1.0, engine wear) zones, POWER % once heat (> 0.85) or engine damage costs power, OIL / COOL lamps (amber leaking with level, red under 25%, NO OIL / NO COOL), NO DRIVE F / R, and ENGINE SEIZED with its cause. Warnings blink for 2.4 s when they come on or get worse; a repair clears it all. `node test/enginehud.mjs`. |
 | Art | Interim procedural vehicles styled after the reference (`src/vehicle_view.js`). Set dressing: trees, bushes, flowers, fences, log edging and stumps (`src/art/`). The glTF loader picks up `public/models/**.glb` automatically (`docs/MODELING_SPEC.md`, `docs/ASSETS.md`). |
 
+## Blender world files (updated 2026-11-27)
+
+`art/blender/` has one world file per map, regenerated from the current game: `world_park.blend` (10.2 MB),
+`world_race.blend` (9.3 MB), `world_crawl.blend` (11.2 MB, The Gauntlet with its three side courses),
+`world_jungle.blend` (21.4 MB) and `world_desert.blend` (18.5 MB). Same collections in each: Terrain, Water,
+Paths, Rocks, Trees, Props, Structures, Markers (incl. every spawn point as a named arrow empty), Vehicles,
+Lights & Cameras, Library. Previews: `docs/previews/world_<map>_*.png`. Commands, contents and the known
+differences are in `art/blender/README.md`. In short:
+
+```
+npm ci --omit=dev --ignore-scripts                 # once per checkout
+node tools/export/export_world.mjs <map>           # park | race | crawl | jungle | desert | all
+"C:\Program Files\Blender Foundation\Blender 5.3\blender.exe" --background --factory-startup --python tools/blender/world/build_world.py -- <map>
+```
+
+- `tools/export/export_world.mjs` runs the game's own view builders headless (world, race, crawl, jungle and
+  desert views, spawns), with a small software canvas so the sign faces are the game's pixels. It found two
+  stale bugs from before: the old exporter crashed on the current sign code, and its ground tiles were read
+  at the wrong offset since pixeltex.js gained detail levels (every surface but grass showed the wrong tile).
+- `tools/blender/world/compare_world.py` reports how far an open world file is from a fresh export
+  (read-only). Before this update `world_park.blend` was behind on terrain (75% of vertices moved over
+  2 cm, 15% over 10 cm, up to 5 m at the old trail ends), rocks (426 then, 788 now: relief rocks), log
+  edging (70 logs then, 27 now) and the sign faces (Blender text then, the game's pixel font now), and both
+  old files still had the golden-haze sky. `world_race.blend` had only small terrain changes (max 10 cm).
+- The build and preview scripts for the props and vehicles still reproduce `public/models/*.glb` and their
+  `docs/previews/<id>_*.png` (checked by running them into a scratch copy, never into `public/`).
+- Run Blender for these scripts only as a separate background process with `--factory-startup` (without
+  it the user's add-ons, the MCP add-on included, load into that process). Never drive the open GUI
+  session from a build script.
+
 ## Next: Blender pipeline (start here)
 
 Goal (user): vehicles and terrain/rocks that look like the reference concept image
