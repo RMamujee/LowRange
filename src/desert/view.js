@@ -93,6 +93,25 @@ export function buildDesertView({ scene, camera, trees, sun }) {
   }
   stoneV.forEach((tpl, v) => root.add(instance(tpl, stones[v], { name: 'stones' })));
 
+  // ---- line posts on the wide crawls (src/maps/widecrawl.js): a pair either side of each lane where
+  // a crux begins, topped white (easy line), amber (hard) or red (extreme); visual only ----
+  {
+    const TOP = { easy: 0xf2f2ee, hard: 0xf0a020, extreme: 0xd8342a }, postG = new THREE.BoxGeometry(0.12, 1.1, 0.12), m4 = new THREE.Matrix4();
+    const per = { easy: [], hard: [], extreme: [] };
+    for (const t of TRAILS) for (const c of t.cruxes ?? []) for (const ln of c.lanes) {
+      if (!per[ln.line]) continue;
+      const p = pathPoint(t, Math.max(2, c.s0 - 1.5));
+      for (const sd of [-1, 1]) { const lat = ln.lat + sd * (ln.w / 2 + 0.3), x = p.x - p.tz * lat, z = p.z + p.tx * lat; per[ln.line].push([x, H(x, z), z]); }
+    }
+    for (const [line, pts] of Object.entries(per)) {
+      if (!pts.length) continue;
+      const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x7a6248, flatShading: true }), pts.length);
+      const tops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.25, 0.2), new THREE.MeshStandardMaterial({ color: TOP[line], emissive: TOP[line], emissiveIntensity: 0.15 }), pts.length);
+      pts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y + 0.35, z); posts.setMatrixAt(i, m4); m4.makeTranslation(x, y + 1.0, z); tops.setMatrixAt(i, m4); });
+      root.add(posts, tops);
+    }
+  }
+
   // ---- the camp and old fuel stop (Sunfall Station) and other man-made touches ----
   root.add(P.camp(TRAILHEAD, { heightAt: H, clear }));
   root.add(P.roadSigns({ heightAt: H, clear }));

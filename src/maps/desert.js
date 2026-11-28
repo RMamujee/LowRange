@@ -13,6 +13,7 @@
 // everything else) drives exactly as before.
 import { MAT, MAT_INFO, fbm, ridged, clamp, smooth, lerp, rng, catmull, arcLength, pathPoint, makeGrid, rockKit, lumps, potholes } from './common.js';
 import { RAMP, BACKDROP, SKY_BANDS } from '../gfx/palette.js';
+import { setupWide, shapeAt, wideRocks, wideRelief, wideStep } from './widecrawl.js';
 
 export const ID = 'desert';
 export const NAME = 'Sunfall Basin';
@@ -153,15 +154,25 @@ function mesa(x, z, M) {
 // canyons: cut a floor (rising linearly from f0 to f1 above the basin) with steep walls into
 // whatever stands there. halfW: floor half-width; wall: wall slope (rise / run)
 const CANYON_DEFS = [
-  // Knucklebone Canyon: a narrow slot through Anvil Mesa (the black crawl)
-  { name: 'Knucklebone Canyon', pts: [[324, 208], [330, 190], [324, 150], [340, 110], [328, 70], [338, 30], [330, -2]], halfW: 5.5, wall: 3.2, f0: 0, f1: 0 },
+  // Knucklebone Canyon: a braided slot through Anvil Mesa (the black crawl): pinches 12-13 m wide
+  // between braids up to 23 m wide, where rock fins split the floor into channels (widths: half-width
+  // of the floor by arc length along the canyon)
+  { name: 'Knucklebone Canyon', pts: [[324, 206], [334, 186], [320, 156], [342, 124], [322, 92], [345, 58], [325, 26], [334, -4]], wall: 3.2, f0: 0, f1: 0,
+    widths: [[0, 6.5], [12, 6.5], [22, 11.5], [70, 11.5], [80, 6.5], [88, 6.5], [98, 11.5], [146, 11.5], [156, 6.5], [164, 6.5], [174, 11.5], [222, 11.5], [232, 6.5]] }, // (each braid opens about 10 m before its crux, so the slot lines can line up)
   // the Redwall ravine: a gully climbing into the mesa from the west, floor rising to the top (the staircase)
-  { name: 'Redwall Ravine', pts: [[150, 429], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388]], halfW: 6.5, wall: 2.6, f0: 0.3, f1: 33.5 },
+  { name: 'Redwall Ravine', pts: [[150, 429], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388]], halfW: 9.5, wall: 2.6, f0: 0.3, f1: 33.5 }, // (19 m floor: three lanes of steps)
 ];
 const CANYONS = CANYON_DEFS.map((c) => {
   const pts = catmull(c.pts, 2); const L = arcLength(pts);
-  return { ...c, pts, length: L };
+  return { ...c, pts, length: L, halfW: c.halfW ?? Math.max(...c.widths.map((q) => q[1])) };
 });
+// a canyon's floor half-width at arc length s (constant, or the widths table, eased between rows)
+function canyonHalfW(C, s) {
+  if (!C.widths) return C.halfW;
+  const W = C.widths; let k = 0;
+  while (k < W.length - 2 && W[k + 1][0] <= s) k++;
+  return lerp(W[k][1], W[k + 1][1], smooth(W[k][0], W[k + 1][0], s));
+}
 // Distance fields to polylines (washes, canyons), stamped once onto the grid vertices and read
 // back bilinearly: baseHeight runs for every vertex and every path point, so it must not loop
 // over hundreds of segments each time.
@@ -250,11 +261,11 @@ function baseHeight(x, z) {
   {
     const n = canyonField(x, z), C = CANYONS[n.id];
     if (C && n.d < C.halfW + 40) {
-      const floor = basin(x, z) + lerp(C.f0, C.f1, clamp(n.s / C.length, 0, 1));
-      const lim = floor + Math.max(0, n.d - C.halfW) * C.wall;
+      const floor = basin(x, z) + lerp(C.f0, C.f1, clamp(n.s / C.length, 0, 1)), hwC = canyonHalfW(C, n.s);
+      const lim = floor + Math.max(0, n.d - hwC) * C.wall;
       // the cut fades out past the ends (the ravine head opens onto the mesa top)
       const endFade = smooth(-6, 4, n.s) * smooth(C.length + 8, C.length - 2, n.s);
-      if (lim < h) { h = lerp(h, lim, endFade); if (n.d < C.halfW + 1) BH.canyon = endFade; }
+      if (lim < h) { h = lerp(h, lim, endFade); if (n.d < hwC + 1) BH.canyon = endFade; }
     }
   }
   h += rim(x, z);
@@ -280,14 +291,113 @@ const ROAD_DEFS = [
 const TRAIL_DEFS = [
   { name: 'Saffron Sea Crossing', diff: 'blue', kind: 'dunes', width: 10,
     waypoints: [[95, -112], [148, -185], [268, -277], [399, -318], [468, -170]] },
-  { name: 'Coyote Wash', diff: 'green', width: 5.6, maxGrade: 0.2,
-    pts: [[-140, 150], [-175, 200], [-200, 260], [-218, 330], [-236, 400], [-245, 468]] },
+  // Coyote Wash: meandering across the fans east of Needle Butte to the Basin Loop; the easy line (centre) for every rig: 0.12-0.16 m ledges and
+  // crawl rocks under 0.2 m (the Rally Sedan's floor is 0.25 m); hard 0.26-0.3 m; extreme 0.38-0.42.
+  { name: 'Coyote Wash', diff: 'green', width: 5.6, maxGrade: 0.17,
+    pts: [[-140, 150], [-98, 190], [-160, 226], [-100, 262], [-96, 310], [-150, 352], [-96, 392], [-150, 430], [-118, 470]], // (east of Needle Butte, to the Basin Loop)
+    cross: { k: 0.8, up: 0.1, down: 0.1, from: 2.4 },
+    crawl: { base: [5.5, 5.5], cruxes: [
+      { name: 'Wash Steps', at: 0.12, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.12, 0.16], skew: 0.3, alt: true },
+        { line: 'hard', lat: 5, f: 'ledge', n: 2, top: [0.26, 0.3], skew: -0.25, alt: true },
+        { line: 'extreme', lat: -5, f: 'ledge', n: 2, top: [0.38, 0.42], skew: 0.2, alt: true }] },
+      { name: 'Cobbles', at: 0.28, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.16, every: 3 },
+        { line: 'hard', lat: -5.2, f: 'boulders', size: [0.5, 0.8], gap: 2.8, top: 0.32 }] },
+      { name: 'Cut Bank', at: 0.44, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.14, every: 4 },
+        { line: 'hard', lat: 5, f: 'camber', tilt: 0.18, from: 2.6, crawl: { top: 0.22, every: 3.5 } },
+        { line: 'extreme', lat: -5, f: 'holes', depth: 0.32 }] },
+      { name: 'Dry Falls', at: 0.6, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'slab', h: 0.6, up: 0.18, down: 0.2, side: 0.4 },
+        { line: 'hard', lat: -5, f: 'ledge', n: 3, top: [0.26, 0.3], skew: 0.3, alt: true },
+        { line: 'extreme', lat: 5, f: 'slab', h: 1.2, up: 0.42, down: 0.45, side: 0.8 }] },
+      { name: 'Rock Garden', at: 0.78, len: 18, lanes: [
+        { line: 'easy', lat: 0, w: 7, f: 'boulders', size: [0.8, 1.3], gap: 2.4, top: 0.6, keep: 1.8, crawl: { top: 0.16, every: 3.2 } },
+        { line: 'hard', lat: 6.2, f: 'boulders', size: [0.6, 0.9], gap: 2.6, top: 0.38 }] },
+      { name: 'Washout', at: 0.9, len: 12, lanes: [
+        { line: 'easy', lat: 0, f: 'holes', depth: 0.14, every: 4 },
+        { line: 'hard', lat: -5, f: 'ledge', n: 2, top: [0.26, 0.3], skew: -0.3, alt: true }] },
+    ] } },
+  // Whaleback Slickrock: over the dome and back, the tread following the slab (follow 0.7). Easy line
+  // ledges 0.26-0.30 m and the dome's own slabs; hard 0.36-0.40 m, steeper slab faces, an off-camber
+  // traverse; extreme 0.45-0.50 m ledges and the steepest faces.
   { name: 'Whaleback Slickrock', diff: 'blue', width: 6, maxGrade: 0.42, follow: 0.7,
-    pts: [[-420, 300], [-380, 330], [-330, 352], [-290, 345], [-250, 318], [-215, 300], [-185, 312], [-170, 345], [-176, 410], [-185, 478]] },
-  { name: 'Knucklebone Canyon', diff: 'black', width: 5.2, maxGrade: 0.3,
-    pts: [[318, 222], [330, 190], [324, 150], [340, 110], [328, 70], [338, 30], [330, -10], [316, -52]] },
+    pts: [[-420, 300], [-380, 330], [-338, 358], [-300, 376], [-262, 362], [-250, 330], [-276, 305], [-240, 288], [-210, 300], [-185, 312], [-170, 345], [-176, 410], [-185, 478]],
+    cross: { k: 1, up: 0.22, down: 0.22, from: 2.4 },
+    crawl: { base: [6, 6], cruxes: [
+      { name: 'Slab Toe', at: 0.1, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.26, 0.3], skew: 0.3, alt: true },
+        { line: 'hard', lat: 5, f: 'slab', h: 1.0, up: 0.4, down: 0.45, side: 0.7 },
+        { line: 'extreme', lat: -5, f: 'ledge', n: 2, top: [0.45, 0.5], skew: -0.25, alt: true }] },
+      { name: 'Potholes', at: 0.24, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'holes', depth: 0.2, every: 4 },
+        { line: 'hard', lat: -5.2, f: 'holes', depth: 0.42, crawl: { top: 0.3, every: 3.2 } },
+        { line: 'extreme', lat: 5.2, f: 'boulders', size: [0.8, 1.1], gap: 2.2, top: 0.5 }] },
+      { name: 'Camber Traverse', at: 0.38, len: 20, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.26, every: 3 },
+        { line: 'hard', lat: 5.2, f: 'camber', tilt: 0.24, from: 2.6 },
+        { line: 'extreme', lat: -5.2, f: 'camber', tilt: 0.32, from: 2.6 }] },
+      { name: 'Dome Ledges', at: 0.52, len: 16, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.26, 0.3], skew: -0.3, alt: true },
+        { line: 'hard', lat: -5, f: 'ledge', n: 2, top: [0.36, 0.4], skew: 0.3, alt: true },
+        { line: 'extreme', lat: 5, f: 'ledge', n: 2, top: [0.45, 0.5], skew: 0.2, alt: true }] },
+      { name: 'Whale Spine', at: 0.66, len: 18, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.26, every: 3 },
+        { line: 'hard', lat: 5, f: 'slab', h: 1.3, up: 0.45, down: 0.5, side: 0.8 },
+        { line: 'extreme', lat: -5.4, f: 'notch', top: 0.45, gap: 1.0, every: 6 }] },
+      { name: 'Slickrock Garden', at: 0.82, len: 18, lanes: [
+        { line: 'easy', lat: 0, w: 7, f: 'boulders', size: [0.7, 1.1], gap: 2.4, top: 0.55, keep: 1.75, crawl: { top: 0.26, every: 2.8 } },
+        { line: 'hard', lat: -6, f: 'boulders', size: [0.6, 0.9], gap: 2.4, top: 0.4 }] },
+    ] } },
+  // Knucklebone Canyon: down the braided slot. In each braid a rock fin splits the floor: the main
+  // channel (easy line, ledges 0.28-0.32 m), a slot along the far wall (hard: chockstones,
+  // V-notches, 0.38-0.42 m ledges) and an open bench on the other side (extreme: 0.48-0.52 m
+  // ledges, a slab, big boulders); between the braids the canyon pinches to 13 m.
+  { name: 'Knucklebone Canyon', diff: 'black', width: 5.2, maxGrade: 0.3, wideShoulder: 2,
+    pts: [[318, 222], [324, 206], [334, 186], [320, 156], [342, 124], [322, 92], [345, 58], [325, 26], [334, -4], [328, -30], [316, -52]],
+    cross: { k: 0.3, up: 0.1, down: 0.1, from: 2.4 },
+    crawl: { base: [5, 5], cruxes: [
+      { name: 'Canyon Mouth', s: 30, len: 12, lanes: [
+        { line: 'easy', lat: 0, f: 'crawl', top: 0.28, every: 2.4 },
+        { line: 'hard', lat: -4.6, w: 3.6, f: 'boulders', size: [0.7, 1.0], gap: 2.3, top: 0.42 }] },
+      { name: 'The Narrows', s: 64, len: 32, lanes: [
+        { f: 'fin', lat: 4.9, w: 2.4, h: 3.2 },
+        { line: 'easy', lat: -0.6, w: 5, f: 'ledge', n: 3, top: [0.28, 0.32], skew: 0.3, alt: true },
+        { line: 'hard', lat: 8.8, w: 3.4, f: 'boulders', size: [0.5, 0.8], gap: 2.7, top: 0.4 },
+        { line: 'extreme', lat: -7.4, w: 4, f: 'ledge', n: 3, top: [0.48, 0.52], skew: -0.25, alt: true }] },
+      { name: 'First Gate', s: 100, len: 10, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', top: 0.3, skew: 0.35 },
+        { line: 'hard', lat: 3.9, w: 3.4, f: 'ledge', top: 0.42, skew: -0.3 }] },
+      { name: 'Chockstone Slot', s: 140, len: 32, lanes: [
+        { f: 'fin', lat: -4.9, w: 2.4, h: 3.4 },
+        { line: 'easy', lat: 0.6, w: 7, f: 'boulders', size: [0.9, 1.4], gap: 2.2, top: 0.7, keep: 1.75, crawl: { top: 0.28, every: 2.6 } },
+        { line: 'hard', lat: -8.8, w: 3.4, f: 'notch', top: 0.42, gap: 1.0, every: 6 },
+        { line: 'extreme', lat: 7.4, w: 4, f: 'slab', h: 1.3, up: 0.45, down: 0.55, side: 0.9 }] },
+      { name: 'Second Gate', s: 176, len: 10, lanes: [
+        { line: 'easy', lat: 0, f: 'notch', top: 0.32, gap: 1.2, every: 5 },
+        { line: 'hard', lat: -3.9, w: 3.4, f: 'ledge', top: 0.42, skew: 0.3 }] },
+      { name: 'The Knuckles', s: 216, len: 32, lanes: [
+        { f: 'fin', lat: 4.9, w: 2.4, h: 3.0 },
+        { line: 'easy', lat: -0.6, w: 5, f: 'holes', depth: 0.32, crawl: { top: 0.28, every: 2.8 } },
+        { line: 'hard', lat: 8.8, w: 3.4, f: 'ledge', n: 3, top: [0.38, 0.42], skew: 0.2, alt: true },
+        { line: 'extreme', lat: -7.4, w: 4, f: 'boulders', size: [1.0, 1.4], gap: 2.2, top: 0.55 }] },
+      { name: 'Spillway', s: 272, len: 14, lanes: [
+        { line: 'easy', lat: 0, f: 'ledge', n: 2, top: [0.28, 0.32], skew: -0.3, alt: true },
+        { line: 'hard', lat: 5, f: 'ledge', n: 2, top: [0.38, 0.42], skew: 0.3, alt: true },
+        { line: 'extreme', lat: -5, f: 'ledge', n: 2, top: [0.48, 0.52], skew: 0.2, alt: true }] },
+    ] } },
+  // Redwall Stairway: every step band is split into three lanes side by side across the ravine
+  // floor (locked at both ends by big rocks): the easy lane 0.1 m under the band's rise and never over
+  // 0.38 m (the rest a ramp behind), the hard lane the full rise to 0.5 m, the extreme lane a 0.12 m
+  // lip proud of the tread behind, to 0.6 m.
   { name: 'Redwall Stairway', diff: 'dblack', width: 5.4, maxGrade: 0.34, steps: { seed: 77, from: 20, to: 14, every: 9.5, rise: [0.45, 0.62], depth: 3.4 },
-    pts: [[114, 428], [140, 431], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388], [292, 380]] },
+    pts: [[114, 428], [140, 431], [170, 425], [198, 414], [225, 400], [250, 392], [272, 388], [292, 380]],
+    cross: { k: 0.2, up: 0.08, down: 0.08, from: 2.4 },
+    crawl: { base: [5, 5], ends: 10, cruxes: [
+      { name: 'The Stairway', at: 0.5, len: 999, lanes: [
+        { line: 'easy', lat: 0, w: 4.2, less: 0.1, max: 0.38 }, { line: 'hard', lat: 4.6, w: 4, max: 0.5 }, { line: 'extreme', lat: -4.6, w: 4, lip: 0.12, max: 0.6 }] },
+    ] } },
 ];
 
 // The dune route is found, not drawn: between hand-picked waypoints (the dune entry, a brink on
@@ -405,7 +515,7 @@ function buildPath(def, kind, prior) {
       return h - Rtot * clamp((s - sA) / (sB - sA), 0, 1) + cum;
     });
   }
-  pts.forEach((p, i) => { p.h = hs[i]; p.g = 0; });
+  pts.forEach((p, i) => { p.h = hs[i]; p.g = 0; p.nat = raw[i]; }); // (nat: the landscape before grading, for a wide crawl's cross-slope)
   for (let i = 1; i < n; i++) pts[i].g = (pts[i].h - pts[i - 1].h) / Math.max(1e-6, pts[i].s - pts[i - 1].s);
   // the tread grade without the step ramps (for the slabs' tops)
   if (steps) for (let i = 1; i < n; i++) { const s = pts[i].s; const onStep = steps.find((q) => s > q.s - 0.5 && s <= q.s + q.depth + 2.5); if (onStep) pts[i].g = pts[i - 1].g; }
@@ -421,6 +531,17 @@ export const ROADS = [];
 for (const d of ROAD_DEFS) ROADS.push(buildPath(d, 'road', ROADS));
 export const TRAILS = [];
 for (const d of TRAIL_DEFS) TRAILS.push(buildPath(d, 'trail', ROADS));
+// wide crawls: corridor widths, lines, cruxes (src/maps/widecrawl.js); the shoulder is where the corridor edge fades into the ground
+const WIDE_SHOULDER = 6;
+for (const t of TRAILS) if (t.crawl) {
+  // where a crawl passes close to a road between its ends the corridor pinches to its mouth (the road keeps its surface)
+  t.crawl.pinch = [];
+  for (const q of t.pts) {
+    if (q.s < 20 || q.s > t.length - 20 || !ROADS.some((r) => r.pts.some((u) => Math.hypot(u.x - q.x, u.z - q.z) < r.width / 2 + 9))) continue;
+    const last = t.crawl.pinch.at(-1);
+    if (last && q.s - last[1] < 10) last[1] = q.s; else t.crawl.pinch.push([q.s, q.s]);
+  }
+  setupWide(t, t.crawl); t.endShoulder = t.shoulder; t.shoulder = t.wideShoulder ?? WIDE_SHOULDER; } // (endShoulder: the narrow trail's, kept at the gate mouths so the road junctions bake as before)
 const PATHS = [...ROADS, ...TRAILS];
 const GRADED = PATHS.filter((p) => p.graded);
 
@@ -449,17 +570,20 @@ const RELIEF = {
   black:  { lumps: 0.12, holes: [8, 0.3, 0.13, 1.1] },
   dblack: { lumps: 0.12, holes: [8, 0.3, 0.13, 1.1] },
 };
+
 function inRanges(s, ranges) { return ranges && ranges.some(([a, b]) => s >= a && s <= b); }
 function rangeEase(s, ranges, e = 15) { let w = 0; for (const [a, b] of ranges || []) w = Math.max(w, smooth(a, a + e, s) * smooth(b, b - e, s)); return w; }
 
 function bake() {
   const B = 24, nb = Math.ceil(SIZE / B);
   const bins = Array.from({ length: nb * nb }, () => []);
+  // (a wide crawl reaches its widest half-width; its shoulder is where its edges fade into the ground)
+  const REACH = PATHS.map((p) => (p.wide ? p.maxHalf : p.width / 2) + p.shoulder);
   GRADED.forEach((p) => {
     const pi = PATHS.indexOf(p);
     for (let i = 1; i < p.pts.length; i++) {
       const a = p.pts[i - 1], b = p.pts[i];
-      const reach = p.width / 2 + p.shoulder + 1;
+      const reach = REACH[pi] + 1;
       const x0 = Math.floor((Math.min(a.x, b.x) - reach + S2) / B), x1 = Math.floor((Math.max(a.x, b.x) + reach + S2) / B);
       const z0 = Math.floor((Math.min(a.z, b.z) - reach + S2) / B), z1 = Math.floor((Math.max(a.z, b.z) + reach + S2) / B);
       for (let bx = Math.max(0, x0); bx <= Math.min(nb - 1, x1); bx++) for (let bz = Math.max(0, z0); bz <= Math.min(nb - 1, z1); bz++) bins[bx * nb + bz].push([pi, i]);
@@ -503,21 +627,28 @@ function bake() {
         const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
         const t = clamp(((x - a.x) * ex + (z - a.z) * ez) / L2, 0, 1);
         const d = Math.hypot(x - (a.x + ex * t), z - (a.z + ez * t));
-        if (d > p.width / 2 + p.shoulder) continue;
+        if (d > REACH[pi]) continue;
         const prev = perPath.get(pi);
         if (!prev || d < prev.d) {
-          const Ls = Math.sqrt(L2);
-          perPath.set(pi, { d, pi, lat: ((x - a.x) * -ez + (z - a.z) * ex) / Ls, s: lerp(a.s, b.s, t), ph: lerp(a.h, b.h, t), score: d - (p.kind === 'road' ? 1.5 : 0) });
+          const Ls = Math.sqrt(L2), lat = ((x - a.x) * -ez + (z - a.z) * ex) / Ls;
+          const hw = p.wide ? (lat > 0 ? lerp(a.wl, b.wl, t) : lerp(a.wr, b.wr, t)) : p.width / 2;
+          // (a wide crawl scores by how far inside its corridor the vertex is, as a narrow one did)
+          perPath.set(pi, { d, pi, lat, s: lerp(a.s, b.s, t), ph: lerp(a.h, b.h, t), hw, nat: p.wide ? lerp(a.nat, b.nat, t) : 0, score: d - (p.kind === 'road' ? 1.5 : p.wide ? hw - p.width / 2 : 0) });
         }
       }
-      let best = null;
-      for (const c of perPath.values()) if (!best || c.score < best.score) best = c;
-      let pathId = -1;
+      for (const [k, c] of perPath) if (c.d > c.hw + PATHS[c.pi].shoulder) perPath.delete(k); // (out of reach on this side)
+      let best = null, onRoadTread = false; // (onRoadTread: on a road's tread, where a wide crawl bakes and scores as the narrow trail did)
+      for (const c of perPath.values()) if (PATHS[c.pi].kind === 'road' && c.d < PATHS[c.pi].width / 2 + 1) onRoadTread = true;
+      for (const c of perPath.values()) { const sc = PATHS[c.pi].wide && onRoadTread ? c.d : c.score; if (!best || sc < best.sc) best = { ...c, sc }; }
+      let pathId = -1, wideTone = 0;
       if (best) {
         let num = 0, den = 0, W = 0;
+        const hNat = h; // the landscape before any path (a wide crawl's corridor follows its cross-slope)
         for (const c of perPath.values()) {
-          const q = PATHS[c.pi], qhw = q.width / 2;
-          const w = 1 - smooth(qhw, qhw + q.shoulder, c.d);
+          const q = PATHS[c.pi], qhw = c.hw;
+          const sh = q.wide ? lerp(q.endShoulder, q.shoulder, q.pinAt(c.s)) : q.shoulder;
+          // (on a road's tread a wide crawl weighs no more than the narrow trail did: the roads bake as before)
+          const w = Math.min(1 - smooth(qhw, qhw + sh, c.d), q.wide && onRoadTread ? 1 - smooth(q.width / 2, q.width / 2 + q.endShoulder, c.d) : 1);
           if (w <= 0) continue;
           let surf = c.ph;
           if (q.kind === 'road') {
@@ -530,14 +661,22 @@ function bake() {
             surf += lumps(x, z, 0.025) + potholes(x, z, 14, 0.25, 0.08, 1.4, 3) * ease;
           } else {
             // (no relief in front of or under a step: the step height must be what it says)
-            const ends = smooth(0, 10, Math.min(c.s, q.length - c.s)) * (q.steps && q.steps.some((st) => c.s > st.s - 2.5 && c.s < st.s + st.depth + 1.2) ? 0 : 1), rl = RELIEF[q.diff];
+            // (a wide crawl: no relief for the first and last 4 m, eased in by 16 m, so the gate benches stay level)
+            const ends = smooth(q.wide ? 4 : 0, q.wide ? 16 : 10, Math.min(c.s, q.length - c.s)) * (q.steps && q.steps.some((st) => c.s > st.s - 2.5 && c.s < st.s + st.depth + 1.2) ? 0 : 1), rl = RELIEF[q.diff];
             surf += lumps(x, z, rl.lumps) * ends + potholes(x, z, rl.holes[0], rl.holes[1], rl.holes[2], rl.holes[3], c.pi * 17) * ends;
+            if (q.wide && !onRoadTread) { // (not on a road's tread: there it bakes as the narrow trail did)
+              // off the easy line the corridor follows the landscape's own cross-slope, within limits,
+              // then the cruxes' ground features (slabs, off-camber shelves, holes, gullies)
+              const fo = q.cross, al = Math.abs(c.lat), u = Math.max(0, al - fo.from);
+              surf += clamp((hNat - c.nat) * fo.k * smooth(fo.from, fo.from + 4, al), -fo.down * u, fo.up * u);
+              surf += shapeAt(q, c.s, c.lat, 1.8).dh;
+            }
           }
           const ww = w * w * (q.kind === 'road' ? 2 : 1);
           num += surf * ww; den += ww; W = Math.max(W, w);
         }
         if (den > 0) h = lerp(h, num / den, W);
-        const p = PATHS[best.pi], hw = p.width / 2;
+        const p = PATHS[best.pi], hw = onRoadTread ? p.width / 2 : best.hw;
         if (best.d < hw + 0.5) {
           pathId = best.pi; depth = 0;
           if (p.kind === 'road') {
@@ -549,11 +688,16 @@ function bake() {
             mat = p.diff === 'green' ? (tn > 0.15 ? MAT.GRAVEL : MAT.DIRT)
               : p.diff === 'blue' ? (p.follow ? (tn > 0.45 ? MAT.GRAVEL : MAT.ROCK) : (tn > 0.2 ? MAT.DIRT : MAT.ROCK))
               : (tn > 0.4 ? MAT.GRAVEL : MAT.ROCK);
+            if (p.wide) {
+              // the cruxes' slabs and shelves are bare rock; the corridor off the easy line a step darker, so the worn line reads lighter
+              if (shapeAt(p, best.s, best.lat, 1.8).rock) mat = MAT.ROCK;
+              wideTone = Math.round(60 * smooth(1.2, 2.6, Math.abs(best.lat)));
+            }
           }
         } else if (W > 0.3 && (mat === MAT.SAND)) { depth *= 1 - W; }
       }
       if (wTH > 0.5) { mat = MAT.GRAVEL; depth = 0; look = MAT.GRAVEL; }
-      GRID.h[idx] = h; GRID.vis[idx] = h; GRID.mat[idx] = mat; GRID.path[idx] = pathId; GRID.look[idx] = look;
+      GRID.h[idx] = h; GRID.vis[idx] = h; GRID.mat[idx] = mat; GRID.path[idx] = pathId; GRID.look[idx] = look; GRID.tone[idx] = wideTone;
       SAND_DEPTH[idx] = Math.round(clamp(mat === MAT.SAND ? depth : 0, 0, 1) * 255);
     }
   }
@@ -614,7 +758,8 @@ export const SIGNS = [
 
 // ---------------------------------------------------------------- rocks
 function onAnyPath(x, z, margin) {
-  for (const p of PATHS) for (let i = 0; i < p.pts.length; i += 2) if (Math.hypot(p.pts[i].x - x, p.pts[i].z - z) < p.width / 2 + margin) return true;
+  // (a wide crawl: its whole corridor, the wider side at that point)
+  for (const p of PATHS) for (let i = 0; i < p.pts.length; i += 2) { const q = p.pts[i]; if (Math.hypot(q.x - x, q.z - z) < (p.wide ? Math.max(q.wl, q.wr) : p.width / 2) + margin) return true; }
   return Math.hypot(x - TRAILHEAD.x, z - TRAILHEAD.z) < TRAILHEAD.r + margin;
 }
 // The crawls' rock, by rating (the terms of the Trail Park's trails): boulders crowd the corridor
@@ -628,6 +773,14 @@ const CRAWL = {
   black:  { every: 2.6, min: 0.7,  max: 1.6, top: 0.7,  ledgeEvery: 13, ledgeH: [0.45, 0.6], lane: 1.4, notch: 0.18, notchTop: 0.5, crawl: 0.6, crawlTop: 0.36, embed: { every: 1.6, size: [0.4, 0.9], proud: [0.1, 0.22] }, rubble: 2.5 },
   dblack: { every: 3.2, min: 0.8,  max: 1.8, top: 0.8,  embed: { every: 2.2, size: [0.4, 0.9], proud: [0.08, 0.18] }, rubble: 2.5 },
 };
+// wide crawls (src/maps/widecrawl.js): filler boulders in the open corridor (never on a line) and
+// rocks along its edges, by difficulty
+const WIDE = {
+  green:  { fill: { every: 8, size: [0.3, 0.7], top: 0.3 }, edge: { every: 5, size: [0.5, 1.3] } },
+  blue:   { fill: { every: 5, size: [0.5, 1.1], top: 0.5 }, edge: { every: 4, size: [0.6, 1.5] } },
+  black:  { fill: { every: 3.4, size: [0.7, 1.5], top: 0.8 }, edge: { every: 3.2, size: [0.7, 1.7] } },
+  dblack: { fill: { every: 3.4, size: [0.8, 1.6], top: 0.85 }, edge: { every: 3.2, size: [0.8, 1.8] } },
+};
 function crawlRocks(rocks, R) {
   const kit = rockKit(R, heightAt), { shape, put, reach, ledge } = kit;
   const out = []; // step slabs
@@ -635,6 +788,21 @@ function crawlRocks(rocks, R) {
   const E = rockKit(rng(9300), heightAt);
   for (const t of TRAILS.filter((q) => q.graded)) {
     const sp = CRAWL[t.diff], hw = t.width / 2;
+    if (t.wide) { // wide crawls (src/maps/widecrawl.js), each on its own random streams
+      const ti = TRAILS.indexOf(t), K = rockKit(rng(9250 + ti), heightAt), Ew = rockKit(rng(9270 + ti), heightAt), Rw = rng(9260 + ti);
+      const onRoad = (x, z) => { const ix = clamp(Math.round((x + S2) / CELL), 0, RES), iz = clamp(Math.round((z + S2) / CELL), 0, RES), id = GRID.path[ix * N1 + iz]; return id >= 0 && id < ROADS.length; };
+      if (t.steps) for (const st of t.steps) { let lo = 0; while (lo < t.pts.length - 1 && t.pts[lo + 1].s < st.s) lo++; wideStep(t, st, t.pts[lo].g, K, Rw, out, heightAt); }
+      wideRocks(t, K, Rw, { stepCap, grade, heightAt, skip: onRoad, spec: WIDE[t.diff] });
+      const ledges = [...out, ...K.rocks].filter((r) => r.ledge);
+      const atStep = (s) => t.steps && t.steps.some((st) => s > st.s - 3 && s < st.s + st.depth + 1.5);
+      wideRelief(t, Ew, Rw, sp.embed, { skip: (x, z, s) => onRoad(x, z) || atStep(s) || ledges.some((r) => !r.step && Math.hypot(r.x - x, r.z - z) < 4.2) });
+      for (let s = 6; s < t.length - 4; s += sp.rubble * (0.6 + Rw() * 0.8)) {
+        const sd = Rw() < 0.5 ? -1 : 1, w = t.halfWidthAt(s), p = pathPoint(t, s), lat = sd * ((sd > 0 ? w.left : w.right) + 0.7 + Rw() * 3.2), x = p.x - p.tz * lat, z = p.z + p.tx * lat;
+        if (!onAnyPath(x, z, 0.5)) Ew.embedded(x, z, 0.4 + Rw() * 0.7, 0.08 + Rw() * 0.17);
+      }
+      for (const r of [...K.rocks, ...Ew.rocks]) kit.rocks.push(r);
+      continue;
+    }
     const nearStep = (s, a = 2.6, b = 1.2) => t.steps && t.steps.some((st) => s > st.s - a && s < st.s + st.depth + b);
     const lane = (s) => (sp.lane ? (hw - sp.lane - 0.1) * Math.sin(s * (Math.PI * 2 / 55) + 1.3) * smooth(6, 20, Math.min(s, t.length - s)) : 0);
     // step-up slabs (the staircase): the face at the foot of each ramp, the top flush with the tread
