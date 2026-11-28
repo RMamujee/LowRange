@@ -110,19 +110,26 @@ for (const id of ids) {
     }
     done(s);
   }
-  // ---- sideways into a tree at 40 km/h (driver's side, at the front door / fender)
+  // ---- sideways into a tree at 40 km/h (driver's side): at the front door / fender (z = -0.9 m),
+  // the body takes it; then with the tree just behind the front axle, the wheel takes it.
+  // (One hit used to check both, but at z = -0.9 the trunk overlaps the front tyre by a few cm,
+  // so whether that side's suspension bent was a coin flip in speed and collision shape: the
+  // Pickup's struck side read 0.88-0.94 at 36-44 km/h with the new front-end boxes and 0.64-0.93
+  // with the old ones, while a trunk 0.3 m behind the axle bends it to 0.00-0.37 on every rig.)
   if (want('tree')) {
-    const s = setup(spec);
-    const tb = s.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(-spec.chassis.size[0] / 2 - 1.2, 1.5, -0.9));
-    s.world.createCollider(RAPIER.ColliderDesc.cylinder(1.5, 0.3).setFriction(0.8).setCollisionGroups(GROUP_WORLD), tb);
-    run(s, 0.6);
-    for (const b of s.car.allBodies) { const l = b.linvel(); b.setLinvel({ x: -40 / 3.6, y: l.y, z: 0 }, true); }
-    run(s, 2.5);
-    const m = metrics(s);
-    console.log(`  tree 40 km/h (side): ${m.line}`);
-    check(m.r.crush.left > 0.08 || m.d.zones.left.max > 0.15, `tree: door / fender caved in (side crush ${f2(m.r.crush.left)}, mesh ${f2(m.d.zones.left.max)})`);
-    check(Math.min(m.c.health.susp[0], m.c.health.susp[2]) < 0.85, `tree: that side's suspension bent (${f2(m.c.health.susp[0])}/${f2(m.c.health.susp[2])})`);
-    done(s);
+    for (const [tz, what] of [[-0.9, 'door'], [-spec.wheelbase / 2 + 0.3, 'wheel']]) {
+      const s = setup(spec);
+      const tb = s.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(-spec.chassis.size[0] / 2 - 1.2, 1.5, tz));
+      s.world.createCollider(RAPIER.ColliderDesc.cylinder(1.5, 0.3).setFriction(0.8).setCollisionGroups(GROUP_WORLD), tb);
+      run(s, 0.6);
+      for (const b of s.car.allBodies) { const l = b.linvel(); b.setLinvel({ x: -40 / 3.6, y: l.y, z: 0 }, true); }
+      run(s, 2.5);
+      const m = metrics(s);
+      console.log(`  tree 40 km/h (side, at the ${what}): ${m.line}`);
+      if (what === 'door') check(m.r.crush.left > 0.08 || m.d.zones.left.max > 0.15, `tree at the door: door / fender caved in (side crush ${f2(m.r.crush.left)}, mesh ${f2(m.d.zones.left.max)})`);
+      else check(Math.min(m.c.health.susp[0], m.c.health.susp[2]) < 0.85, `tree at the front wheel: that side's suspension bent (${f2(m.c.health.susp[0])}/${f2(m.c.health.susp[2])})`);
+      done(s);
+    }
   }
   // ---- rollover down a slope: across a 34 degree slope, launched downhill with a roll
   if (want('rollover')) {

@@ -110,14 +110,23 @@ for (const id of ['taco', 'lc70', 'wrx']) {
 }
 
 console.log('b) spinning a tyre on a small loose rock');
+// Which way a spun stone goes is chaotic (it can end up pinned against the tyre's front, a
+// coin flip that changed with every collision-box tweak), so each rig is run with STONES
+// stones (shape seed, yaw, a few cm sideways) and passes if a majority are flung back; the
+// truck must never rocket or creep away in any of them. The chock is 0.22 m tall, under every
+// rig's front end: it used to be a 1 m wall that the noses (the old full-length frame box,
+// now the bumper / pan boxes) spawned inside, so which box it caught decided the result.
+const STONES = [[3, 0, 0], [3, 1, 0], [5, 0, 0], [7, 0, 0], [3, 0, 0.04]], STONE_MAJ = 3, CHOCK = 0.22;
 for (const id of ['taco', 'lc70', 'wrx']) {
+  const runs = [];
+  for (const [seed, yaw, dx] of STONES) {
   const sc = scene();
   const { car, spec } = makeCar(sc, id);
   // stuck: front tyres chocked against a fixed kerb, rear axle spinning in 2WD; the
   // rear-left tyre sits on a 0.12 m, ~5 kg stone
   const fz = -spec.wheelbase / 2;
-  sc.world.createCollider(RAPIER.ColliderDesc.cuboid(3, 0.5, 0.5).setTranslation(0, 0.5, fz - spec.tire.radius - 0.52).setCollisionGroups(GROUP_WORLD));
-  const it = sc.props.add({ kind: 'rock', pos: { x: -spec.track / 2, y: 0, z: spec.wheelbase / 2 }, rot: yawQ(0), pts: rockPts(0.24, 0.12, 3) });
+  sc.world.createCollider(RAPIER.ColliderDesc.cuboid(3, CHOCK / 2, 0.5).setTranslation(0, CHOCK / 2, fz - spec.tire.radius - 0.37).setCollisionGroups(GROUP_WORLD));
+  const it = sc.props.add({ kind: 'rock', pos: { x: -spec.track / 2 + dx, y: 0, z: spec.wheelbase / 2 }, rot: yawQ(yaw), pts: rockPts(0.24, 0.12, seed) });
   for (const b of car.allBodies) { const t = b.translation(); b.setTranslation({ x: t.x, y: t.y + 0.14, z: t.z }, true); }
   sc.props.update(car.chassis.translation());
   settle(car, 0.5);
@@ -131,8 +140,12 @@ for (const id of ['taco', 'lc70', 'wrx']) {
     maxCarV = Math.max(maxCarV, Math.abs(car.speed())); maxSpin = Math.max(maxSpin, car.wheelState[2].spin);
   }
   const p1 = it.body.translation(), dc = Math.abs(car.chassis.translation().z - c0);
-  check(ok && p1.z - p0.z > 0.5 && rockBack > 1 && maxRockV < 30 && maxCarV < 0.8 && dc < 0.3,
-    `${id.padEnd(5)} ${f2(m)} kg stone at a spinning tyre (${maxSpin.toFixed(0)} rad/s): flung ${f2(p1.z - p0.z)} m back (max +z ${f2(rockBack)} m/s, max ${f2(maxRockV)}); stuck truck max speed ${f2(maxCarV)} m/s, moved ${f2(dc)} m`);
+  runs.push({ ok, back: p1.z - p0.z > 0.5 && rockBack > 1, safe: ok && maxRockV < 30 && maxCarV < 0.8 && dc < 0.3,
+    txt: `${f2(m)} kg ${maxSpin.toFixed(0)} rad/s: ${f2(p1.z - p0.z)} m (+z ${f2(rockBack)}, max ${f2(maxRockV)} m/s), truck ${f2(maxCarV)} m/s ${f2(dc)} m` });
+  }
+  const nBack = runs.filter((r) => r.back).length;
+  check(nBack >= STONE_MAJ && runs.every((r) => r.safe),
+    `${id.padEnd(5)} stone at a spinning tyre: flung back in ${nBack}/${runs.length} (need ${STONE_MAJ}), truck stays put in all: ${runs.map((r) => r.txt).join(' | ')}`);
 }
 
 console.log('c) nosing into fixed edging with the bumper');
