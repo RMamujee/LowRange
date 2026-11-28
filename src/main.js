@@ -32,6 +32,7 @@ import { MudView } from './fx/mud_view.js'; // [tyre fx] the bogs' rutted surfac
 import { MudCoat } from './fx/mud_coat.js'; // [tyre fx] mud caked on the truck
 import { TyreAdvisor, startPsi, saveLivePsi, zone as psiZone } from './tyres/pressure.js'; // [tyre pressure] on-board inflation, warnings, saved pressure
 import { TyreView } from './tyres/tyre_view.js'; // [tyre pressure] tyres flatten and bulge at the patch
+import { setupWinch, WINCH_CONTROLS } from './winch/index.js'; // [winch] winch, anchors, recovery points, view and HUD board (src/winch/)
 
 const H = 1 / 200;           // physics step
 const MAX_STEPS = 12;        // per frame; beyond this the game slows down instead of spiralling
@@ -154,9 +155,12 @@ function updateTrails(p) {
         // finished
         const st = game.trails[i];
         const first = !st.done;
-        st.done = true; st.best = st.best === null ? a.t : Math.min(st.best, a.t);
+        st.done = true;
+        if (a.assisted) st.bestAssisted = st.bestAssisted == null ? a.t : Math.min(st.bestAssisted, a.t); // [winch] assisted runs keep their own best
+        else st.best = st.best === null ? a.t : Math.min(st.best, a.t);
         setGateDone(gates[i * 2]); setGateDone(gates[i * 2 + 1]);
-        toast(`${t.name} complete in ${fmtT(a.t)}${first ? '' : ' (best ' + fmtT(st.best) + ')'}`, 4);
+        if (a.assisted) toast(`${t.name} complete in ${fmtT(a.t)}, winch assisted (assisted best ${fmtT(st.bestAssisted)}${st.best != null ? ', unassisted ' + fmtT(st.best) : ''})`, 4); // [winch]
+        else toast(`${t.name} complete in ${fmtT(a.t)}${first ? '' : ' (best ' + fmtT(st.best) + ')'}`, 4);
         game.active = null; game.finishGate = gate;
         // once per session: a fresh start resets the clock (game.done) but not the trails' done marks
         if (game.trails.every((x) => x.done) && !game.done && !game.conquered) { game.done = game.conquered = true; toast(`All ${['', 'one', 'two', 'three', 'four', 'five', 'six'][TRAILS.length] ?? TRAILS.length} trails conquered! Total ${fmtT(game.time)}`, 6); }
@@ -193,8 +197,9 @@ function updateCrawl(p, dt) {
     } else if (e.type === 'finish') {
       c.view.setDone(N - 1); c.view.setDone(N);
       const st = game.trails[0];
-      if (e.clean && c === crawl) { st.done = true; st.best = st.best === null ? e.time : Math.min(st.best, e.time); }
+      if (e.clean && c === crawl && !e.assisted) { st.done = true; st.best = st.best === null ? e.time : Math.min(st.best, e.time); } // [winch] not an assisted run
       game.active = null;
+      if (e.assisted && e.clean) { setTimeout(() => toast(`${top}! ${name} in ${fmtT(e.time)}, winch assisted${e.bestA ? ' · NEW ASSISTED BEST' : ` (assisted best ${fmtT(e.prevBestA)})`}`, 6), 1500); continue; } // [winch]
       setTimeout(() => toast(e.clean ? `${top}! ${name} in ${fmtT(e.time)}${e.best ? ' · NEW BEST for the ' + spec.name : ` (best ${fmtT(e.prevBest)})`}` : `${top} in ${fmtT(e.time)}. ${U}s were skipped, so it doesn't count as a best`, 6), 1500);
     }
   }
@@ -334,6 +339,7 @@ function raceUpdate(dt) {
     else if (e.type === 'go') { bigMsg('GO!', 1.2, 'go'); raceView.setLights('go'); goLights = 2.5; }
     else if (e.type === 'lapstart') toast('Lap 1: the clock is running', 1.6);
     else if (e.type === 'cp') toast(race.started ? `Checkpoint ${e.cp}/${e.of} · ${fmtLap(e.split)}` : `Checkpoint ${e.cp}/${e.of}. The lap clock starts at the line`, 1.4); // [spawns] rolling start: no split yet
+    else if (e.type === 'lap' && e.assisted) { bigMsg(fmtLap(e.time), 2.5); toast(`Lap ${e.lap}: ${fmtLap(e.time)}, winch assisted${e.bestA ? ' · NEW ASSISTED BEST' : ''}`, 3.5); } // [winch]
     else if (e.type === 'lap') { bigMsg(fmtLap(e.time), 2.5, e.best ? 'best' : ''); toast(`Lap ${e.lap}: ${fmtLap(e.time)}${e.best ? ' · NEW BEST' : ` (best ${fmtLap(race.best)})`}`, 3.5); }
     else if (e.type === 'missed') toast(`Missed checkpoint ${e.cp}! Go back through it`, 3);
   }
@@ -501,6 +507,7 @@ const CONTROLS = [
   ['Up / Down', 'shift up / down (arrow keys, or PgUp / PgDn)'], ['Mouse wheel', 'shift up / down'], ['R', 'high / low range'], ['Q / E', 'front / rear locker'], ['F', '2WD / 4WD'],
   ['G', 'rear steer (Goat)'], ['[ / ]', 'tyres: air down / up (tap: next stop, hold: any psi)'], ['T', 'tyres: crawl / road pressure'], ['P', 'parking brake on / off'], ['B', 'handbrake (hold)'], ['I', 'start engine'],
   ['C', 'auto-clutch on/off'], ['Backspace', isRace ? 'repair, back to last checkpoint' : 'repair + right the truck, on the spot'], ['Y', isRace ? 'restart the race' : isCrawl ? 'restart the stage you are in' : 'restart current trail'], ['V', 'camera'], ['Z / X', 'zoom in / out'],
+  ...WINCH_CONTROLS, // [winch] K anchor / hook, U / O in / out, L unhook
   ['Mouse drag', 'orbit camera'], ['M', 'map + waypoints'], ['J', 'spawn points (map list)'], ['N', 'mute'], ['Gamepad', 'RT/LT pedals, RB/LB shift, X clutch, A park brake, R3 map'], ['H', 'help'], ['Esc', 'pause / resume'],
 ];
 const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ck"><kbd><span>${k}</span></kbd><span>${v}</span></div>`).join('');
@@ -510,6 +517,7 @@ const hud = createHud({
   controls: () => CONTROLS, onResume: () => resumeDrive(), onRestart: () => startDrive({ fresh: true }),
   spawns: SPAWNS, onSpawn: (sp) => spawnAt(sp), lastSpawn: () => lastSpawn, // [spawns]
 });
+const winch = setupWinch({ RAPIER, world, terrain, scene, rocks, trees, props: looseProps.items, heightAt, noOutline, toast: (m, s) => toast(m, s), action: (n) => action(n), hudRoot: $('hud') }); // [winch]
 
 // keyboard key -> action
 // [tyre pressure] [ deflates, ] inflates (BracketLeft / BracketRight): tap for the next stop, hold for any pressure
@@ -522,6 +530,7 @@ const KEYMAP = {
 
 function action(name) {
   if (!car) return;
+  if (winch.action(name)) return; // [winch] HUD board buttons
   const d = car.dt;
   const kmh = Math.abs(car.speed() * 3.6);
   let msg = null;
@@ -829,6 +838,7 @@ function frame(now) {
     if (n === MAX_STEPS) acc = 0;
     looseProps.update(car.chassis.translation()); looseProps.sync(); // [physics props]
     view.update(playing ? input : null);
+    winch.frame(car, view, dt, keys, playing && !paused, !!(game.active?.assisted || courses?.focus?.assisted || race?.assisted)); // [winch] keys, line, board
     updateCamera(dt);
     // [map views] jungle: level of detail, water, and deep-sea recovery to the nearest road; desert: sand tyre marks
     const towed = mapView?.update?.(camera, clock, car, dt);
@@ -841,6 +851,7 @@ function frame(now) {
       if (!game.done) game.time += dt;
       const p = car.chassis.translation();
       if (game.active) game.active.t += dt;
+      winch.assist(game, courses, race); // [winch] a run the line has pulled in is assisted (own records)
       if (isRace) raceUpdate(dt); else if (crawl) updateCrawl(p, dt); else updateTrails(p); // [crawl]
       // stopped, holding the brake, in a forward gear: hint how to reverse
       if (input.brake > 0.9 && Math.abs(car.speed()) < 0.3 && car.dt.gear > 0) { revHint += dt; if (revHint > 1.2) { toast('To reverse: Arrow Down (or wheel down) through N to R, then W', 2.5); revHint = -6; } } else if (revHint > 0) revHint = 0;
@@ -889,4 +900,4 @@ openMenu();
 if (qp.get('go')) { qp.delete('go'); history.replaceState(null, '', '?' + qp.toString()); startDrive(); }
 requestAnimationFrame(frame);
 // expose for debugging in the console
-window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, spawns: SPAWNS, spawnAt, get lastSpawn() { return lastSpawn; }, get crawl() { return crawl?.snapshot() ?? null; }, get tyres() { return car?.tyre.state ?? null; }, fx, mudView, gfx: { renderer, pixels, scene, camera, sun } };
+window.__game = { hud, get parkBrake() { return parkBrake; }, get paused() { return paused; }, get car() { return car; }, get view() { return view; }, get activeTrail() { return game.active; }, get race() { return race; }, map: MAP_ID, world, input, cam: camState, garage, spawns: SPAWNS, spawnAt, get lastSpawn() { return lastSpawn; }, get crawl() { return crawl?.snapshot() ?? null; }, get tyres() { return car?.tyre.state ?? null; }, fx, mudView, winch, gfx: { renderer, pixels, scene, camera, sun } };

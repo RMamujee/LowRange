@@ -36,6 +36,7 @@ export const ALL_VEHICLES = [
     lockers: { front: false, rear: true },
     lsd: { front: 900 }, // brake-based traction control (A-TRAC style) on the open front diff
     rearSteer: false,
+    winch: { pull: 1.5, line: 28, fairlead: [0, -0.06, -2.8] }, // [winch] bumper winch: rated pull x weight (first layer), line m, chassis-local fairlead
   },
   {
     id: 'lc70',
@@ -66,6 +67,7 @@ export const ALL_VEHICLES = [
     brakeT: 3800,
     lockers: { front: true, rear: true },
     rearSteer: false,
+    winch: { pull: 1.5, line: 28, fairlead: [0, -0.06, -2.68] }, // [winch] bumper winch
   },
   {
     id: 'wrx',
@@ -90,6 +92,8 @@ export const ALL_VEHICLES = [
     lockers: { front: false, rear: false },
     lsd: { front: 450, rear: 700 }, // rally-spec limited-slip diffs
     rearSteer: false,
+    // [winch] no room for a bumper winch: a compact winch on the front tow eye (lighter pull, shorter, slower line)
+    winch: { kind: 'compact', pull: 1.0, line: 20, speed: 0.8, fairlead: [0, -0.16, -2.24] },
   },
   {
     id: 'goat',

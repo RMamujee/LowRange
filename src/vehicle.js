@@ -788,8 +788,10 @@ export class Vehicle {
     });
 
     // 4. one exact solve: engine + clutch + gears + diffs + brakes + tyre grip
+    this.winch?.addRow(extra, com, inv, h); // [winch] the winch line joins the solve as one more row (src/winch/winch.js); stowed: nothing
     this.dt.brakePedal = input.brake;
     const driveImp = this.dt.step(h, input.throttle, spins, brakes, extra);
+    this.winch?.applyRow(h); // [winch]
 
     // 5. apply tyre forces (friction circle), wheel spin, and axle reactions
     for (const pt of patches) {

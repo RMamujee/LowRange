@@ -3,6 +3,7 @@
 // No DOM or three.js, so it runs headless in tests. Best laps persist per vehicle.
 
 const KEY = (vid) => `lowrange.bestlap.race.${vid}`;
+const KEY_A = (vid) => `lowrange.bestlap.race.assisted.${vid}`; // [winch] best winch-assisted lap, kept apart
 const memStore = new Map();
 const store = {
   get: (k) => { try { return globalThis.localStorage ? globalThis.localStorage.getItem(k) : memStore.get(k) ?? null; } catch { return null; } },
@@ -16,6 +17,8 @@ export class RaceLaps {
     this.track = track; this.cps = checkpoints; this.vid = vehicleId;
     const b = parseFloat(store.get(KEY(vehicleId)));
     this.best = Number.isFinite(b) && b > 0 ? b : null; // a corrupted "-5" / "0" would be unbeatable
+    const ba = parseFloat(store.get(KEY_A(vehicleId)));
+    this.bestAssisted = Number.isFinite(ba) && ba > 0 ? ba : null; // [winch]
     this.reset();
   }
 
@@ -32,6 +35,7 @@ export class RaceLaps {
     this.sIdx = 0;            // nearest track point (search hint)
     this.wrongT = 0; this.wrong = false;
     this.missedT = 0;
+    this.assisted = false;    // [winch] the winch line pulled during this lap
   }
 
   startCountdown(secs = 3) { this.reset(); this.state = 'countdown'; this.count = secs; }
@@ -116,6 +120,13 @@ export class RaceLaps {
     if (!this.started) { this.started = true; this.lap = 1; this.lapTime = 0; ev.push({ type: 'lapstart', lap: 1 }); return; }
     const t = this.lapTime;
     this.last = t;
+    if (this.assisted) { // [winch] an assisted lap never replaces the unassisted best; it has its own
+      const bestA = this.bestAssisted === null || t < this.bestAssisted;
+      if (bestA) { this.bestAssisted = t; store.set(KEY_A(this.vid), String(t)); }
+      ev.push({ type: 'lap', lap: this.lap, time: t, best: false, assisted: true, bestA });
+      this.assisted = false; this.lap++; this.lapTime = 0;
+      return;
+    }
     const pb = this.best === null || t < this.best;
     if (pb) { this.best = t; store.set(KEY(this.vid), String(t)); }
     ev.push({ type: 'lap', lap: this.lap, time: t, best: pb });
